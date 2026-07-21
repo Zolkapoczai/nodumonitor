@@ -114,8 +114,21 @@ def _append_cta(draft_text: str, config: dict, source: str) -> str:
     return f"{draft_text}\n\nKorai hozzaferes: {link}"
 
 
+def _load_knowledge_base(config: dict) -> str:
+    """Opcionális NODU tudásbázis beolvasása, ami a _build_system_prompt végére kerül."""
+    kb_path = config.get("knowledge_base", {}).get("output_file", "storage/nodu_knowledge_base.md")
+    import os
+    if os.path.exists(kb_path):
+        try:
+            with open(kb_path, "r", encoding="utf-8") as f:
+                return f"\n\n--- NODU TECHNICAL & PRODUCT CONTEXT ---\n{f.read()}\n"
+        except Exception as e:
+            print(f"[responder] Tudásbázis beolvasási hiba: {e}")
+    return ""
+
+
 def _build_system_prompt(config: dict) -> str:
-    """Az alap system prompt + opcionalis wishlist CTA szabaly (configbol)."""
+    """Az alap system prompt + opcionalis wishlist CTA szabaly (configbol) + Tudásbázis."""
     base = _SYSTEM_PROMPT
     wl = config.get("wishlist", {})
     if wl.get("cta_in_drafts") and wl.get("url"):
@@ -126,6 +139,9 @@ def _build_system_prompt(config: dict) -> str:
             "hozzaadodik, ha a Bridge-et emlited. Ha a problema nem illik a termekhez, "
             "egyaltalan ne emlitsd. Soha ne legyen tolakodo."
         )
+    
+    # Tudásbázis hozzáfűzése
+    base += _load_knowledge_base(config)
     return base
 
 
@@ -374,6 +390,8 @@ def generate_content_pipeline(config: dict, db_path: str) -> dict | None:
     )
 
     sys_prompt = _CONTENT_PIPELINE_SYSTEM_PROMPT.format(n_posts=n_posts, language=lang_name)
+    sys_prompt += _load_knowledge_base(config)
+    
     user_msg = (
         f"A kozossegben az elmult {lookback} napban ezeket a VALODI fajdalmakat "
         f"detektalta a rendszer (sulyossaggal, a legsulyosabb elol):\n{pain_lines}\n\n"
@@ -550,6 +568,8 @@ def generate_linkedin_reply(config: dict, post_text: str, author_name: str = "",
         "Do NOT translate to Hungarian unless the post itself is Hungarian."
     )
 
+    sys_prompt = _LINKEDIN_REPLY_SYSTEM_PROMPT + _load_knowledge_base(config)
+
     model = sc.get("gemini_model", "gemini-2.5-flash")
     client = genai.Client(api_key=api_key)
     try:
@@ -557,7 +577,7 @@ def generate_linkedin_reply(config: dict, post_text: str, author_name: str = "",
             model=model,
             contents=user_msg,
             config=types.GenerateContentConfig(
-                system_instruction=_LINKEDIN_REPLY_SYSTEM_PROMPT,
+                system_instruction=sys_prompt,
                 response_mime_type="application/json",
                 response_schema=_LINKEDIN_REPLY_SCHEMA,
                 max_output_tokens=1000,

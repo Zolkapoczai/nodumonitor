@@ -183,3 +183,9 @@ adhoc:
   result_limit: 10
 ui:
   admin_password: ''
+knowledge_base:
+  folders:
+  - c:\NODU\NODU technical
+  - c:\NODU\NODU technical\Release notes
+  - c:\NODU\NODU Bridge Repo
+  output_file: storage/nodu_knowledge_base.md

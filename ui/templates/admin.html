@@ -264,7 +264,8 @@
         {% set processors = [
           ('generate-drafts', 'Válaszjavaslat generálás', 'Minden releváns, feldolgozatlan bejegyzésre 1 javaslat'),
           ('weekly-report', 'Heti riport', 'Slack-összefoglaló: források, top fájdalompontok'),
-          ('linkedin-content', 'Tartalom Pipeline (Blog + LinkedIn)', 'Heti blog- és poszt-javaslatok a top fájdalompontokból')
+          ('linkedin-content', 'Tartalom Pipeline (Blog + LinkedIn)', 'Heti blog- és poszt-javaslatok a top fájdalompontokból'),
+          ('build-knowledge', 'Tudásbázis frissítése', 'A lokális mappákból (technical, repo) újraépíti a kontextust az AI számára')
         ] %}
         {% for key, title, desc in processors %}
         <div class="run-row">
@@ -353,7 +354,7 @@ function setBadge(key, state) {
 setInterval(function() {
   fetch('/api/status').then(r => r.json()).then(data => {
     const jobs = data.jobs || {};
-    ['reddit','search','playwright','stackoverflow','forums','generate-drafts','weekly-report','linkedin-content'].forEach(key => {
+    ['reddit','search','playwright','stackoverflow','forums','generate-drafts','weekly-report','linkedin-content','build-knowledge'].forEach(key => {
       const j = jobs[key]; const el = document.getElementById('badge-' + key);
       if (!j || !el) return;
       el.className = 'badge';

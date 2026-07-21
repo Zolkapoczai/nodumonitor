@@ -212,6 +212,17 @@ def run_action(action):
             return "Nincs elég adat"
         _run_in_bg("linkedin-content", _linkedin)
 
+    elif action == "build-knowledge":
+        from storage.knowledge_builder import build_knowledge_base
+        def _build_kb():
+            kb_path = build_knowledge_base(config)
+            kb_size = 0
+            import os
+            if os.path.exists(kb_path):
+                kb_size = os.path.getsize(kb_path)
+            return f"{kb_size // 1024} KB frissítve"
+        _run_in_bg("build-knowledge", _build_kb)
+
     return redirect(url_for("admin") + "?started=1")
 
 
