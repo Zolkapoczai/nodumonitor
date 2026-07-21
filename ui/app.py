@@ -236,6 +236,19 @@ def api_adhoc_results():
     return jsonify({"query": query, "results": results})
 
 
+@app.route("/api/posts")
+def api_posts():
+    config = load_config()
+    db_path = get_db_path(config)
+    query = (request.args.get("q") or "").strip()
+    platforms_raw = request.args.get("platforms")
+    platforms = [p.strip() for p in platforms_raw.split(",")] if platforms_raw else None
+    
+    from storage.db import search_posts
+    results = search_posts(db_path, query, platforms, limit=100)
+    return jsonify({"query": query, "platforms": platforms, "results": results})
+
+
 # --- LinkedIn valaszgeneralas (dashboard) ---
 
 @app.route("/linkedin/compose", methods=["POST"])

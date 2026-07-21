@@ -12,6 +12,7 @@
       Lehetőségek
       {% if opportunities %}<span class="nav-badge">{{ opportunities|length }}</span>{% endif %}
     </div>
+    <div class="nav-item" onclick="show('raw', this)">Nyers leadek</div>
     <div class="nav-item" onclick="show('adhoc', this)">Ad-hoc keresés</div>
     <div class="nav-item" onclick="show('linkedin', this)">LinkedIn válasz</div>
     <div class="nav-item" onclick="show('drafts', this)" id="nav-drafts">
@@ -115,6 +116,32 @@
           Futtasd a gyűjtést (Admin), majd az osztályozót: <code>python main.py --classify</code>.
         </div>
       {% endif %}
+    </div>
+
+    <!-- ===================== Nyers leadek ===================== -->
+    <div id="s-raw" class="section">
+      <h1 class="page-title">Nyers leadek</h1>
+      <p class="page-desc">Böngéssz az összes begyűjtött poszt között, beleértve azokat is, amiket a rendszer nem minősített fájdalomnak. Az eredmények időrendben jelennek meg.</p>
+
+      <div class="card">
+        <div class="search-box">
+          <input type="text" id="raw-query" placeholder="Keresés címben vagy szövegben... (opcionális)"
+            onkeydown="if(event.key==='Enter'){event.preventDefault();runRawSearch();}">
+          <button class="btn btn-primary" id="raw-btn" onclick="runRawSearch()">Szűrés</button>
+        </div>
+        <div class="channel-row">
+          <label class="channel-chip on"><input type="checkbox" value="reddit" class="raw-chan" checked> Reddit</label>
+          <label class="channel-chip on"><input type="checkbox" value="stackoverflow" class="raw-chan" checked> Stack Overflow</label>
+          <label class="channel-chip on"><input type="checkbox" value="discourse" class="raw-chan" checked> Discourse</label>
+          <label class="channel-chip on"><input type="checkbox" value="github" class="raw-chan" checked> GitHub</label>
+          <label class="channel-chip on"><input type="checkbox" value="graphisoft" class="raw-chan" checked> Graphisoft</label>
+          <label class="channel-chip on"><input type="checkbox" value="autodesk" class="raw-chan" checked> Autodesk</label>
+          <label class="channel-chip on"><input type="checkbox" value="revitforum" class="raw-chan" checked> RevitForum</label>
+        </div>
+        <div class="card-desc" id="raw-status" style="margin-top:12px; margin-bottom:0"></div>
+      </div>
+
+      <div id="raw-results"></div>
     </div>
 
     <!-- ===================== Ad-hoc keresés ===================== -->
@@ -236,6 +263,57 @@ function esc(s) {
   const d = document.createElement('div');
   d.textContent = s == null ? '' : String(s);
   return d.innerHTML;
+}
+
+// --- Nyers leadek kereses ---
+function runRawSearch() {
+  const q = document.getElementById('raw-query').value.trim();
+  const channels = [...document.querySelectorAll('.raw-chan:checked')].map(c => c.value);
+  if (!channels.length) { toast('Válassz legalább egy csatornát.'); return; }
+
+  const btn = document.getElementById('raw-btn');
+  btn.disabled = true; btn.textContent = 'Keresés...';
+  document.getElementById('raw-status').textContent = 'Keresés folyamatban...';
+  document.getElementById('raw-results').innerHTML = '';
+
+  const url = '/api/posts?q=' + encodeURIComponent(q) + '&platforms=' + encodeURIComponent(channels.join(','));
+  
+  fetch(url).then(r => r.json()).then(data => {
+    btn.disabled = false; btn.textContent = 'Szűrés';
+    const results = data.results || [];
+    document.getElementById('raw-status').textContent = results.length + ' találat' + (q ? ' erre: "' + q + '"' : '');
+    renderRawLeads(results);
+  }).catch(() => {
+    btn.disabled = false; btn.textContent = 'Szűrés';
+    toast('Hiba a keresés során.');
+  });
+}
+
+function renderRawLeads(results) {
+  const box = document.getElementById('raw-results');
+  if (!results.length) {
+    box.innerHTML = '<div class="empty">Nincs találat a megadott feltételekkel.</div>';
+    return;
+  }
+  let html = '<div class="card">';
+  results.forEach(r => {
+    html += '<div class="result-row" id="raw-' + r.id + '">' +
+      '<div class="result-main">' +
+        '<div class="result-title">' + esc(r.title || '(cím nélkül)') + '</div>' +
+        '<div class="result-meta"><span class="platform-pill">' + esc(r.platform) + '</span>' +
+          '<span class="score-pill">score: ' + (r.score || 0) + '</span>' + 
+          (r.author ? ' <span>szerző: ' + esc(r.author) + '</span>' : '') + '</div>' +
+        '<div class="result-snippet">' + esc((r.body || '').slice(0, 300)) + '...</div>' +
+        '<a class="result-url" href="' + esc(r.url) + '" target="_blank">' + esc(r.url) + '</a>' +
+      '</div>' +
+      '<div class="result-actions">' +
+        '<button class="btn btn-secondary btn-sm" onclick="genDraft(' + r.id + ')">Választervezet</button>' +
+        '<button class="btn btn-primary btn-sm" onclick="toPipedrive(' + r.id + ', this)">Pipedrive</button>' +
+      '</div>' +
+    '</div>';
+  });
+  html += '</div>';
+  box.innerHTML = html;
 }
 
 // --- Ad-hoc kereses ---

@@ -319,6 +319,43 @@ def get_pain_posts_without_draft(db_path: str, min_severity: int = 3,
     return [dict(r) for r in rows]
 
 
+def search_posts(db_path: str, query: str = "", platforms: list[str] = None, limit: int = 50) -> list[dict]:
+    """
+    Kereses a nyers, osszes begyujtott poszt kozott.
+    query: reszleges egyezes a title vagy body mezoben (ha adott)
+    platforms: szures adott platformokra (ha adott)
+    """
+    conn = get_connection(db_path)
+    where_clauses = ["search_term IS NULL"]
+    params = []
+
+    if query:
+        where_clauses.append("(title LIKE ? OR body LIKE ?)")
+        like_q = f"%{query}%"
+        params.extend([like_q, like_q])
+
+    if platforms:
+        placeholders = ",".join("?" * len(platforms))
+        where_clauses.append(f"platform IN ({placeholders})")
+        params.extend(platforms)
+
+    where_str = " AND ".join(where_clauses)
+    
+    rows = conn.execute(
+        f"""
+        SELECT *
+        FROM posts
+        WHERE {where_str}
+        ORDER BY fetched_at DESC
+        LIMIT ?
+        """,
+        (*params, limit),
+    ).fetchall()
+    
+    conn.close()
+    return [dict(r) for r in rows]
+
+
 def get_adhoc_results(db_path: str, query: str = None, limit: int = 50) -> list[dict]:
     """
     Ad-hoc keresesi talalatok (search_term-mel jelolt posztok).
