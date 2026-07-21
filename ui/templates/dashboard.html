@@ -289,19 +289,25 @@
     <!-- ===================== Ad-hoc keresés ===================== -->
     <div id="s-adhoc" class="section">
       <h1 class="page-title">Ad-hoc keresés</h1>
-      <p class="page-desc">Keress rá egy eseti kifejezésre (például egy friss Autodesk-bejelentésre) a Reddit és a Stack Overflow natív keresőjével.</p>
+      <p class="page-desc">Keress rá bármilyen eseti kifejezésre élőben a forrásplatformok (YouTube, GitHub, Reddit, Stack Overflow) keresőmotorjával.</p>
 
-      <div class="card">
-        <div class="search-box">
-          <input type="text" id="adhoc-query" placeholder="Pl.: Autodesk Forma, Revit 2026 IFC, Archicad migration"
+      <div class="card search-card">
+        <div class="search-input-wrapper">
+          <svg class="search-icon" viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+          <input type="text" id="adhoc-query" placeholder="Kifejezés keresése élőben (pl. Revit 2026 IFC, Archicad export, Speckle)..."
             onkeydown="if(event.key==='Enter'){event.preventDefault();runAdhoc();}">
-          <button class="btn btn-primary" id="adhoc-btn" onclick="runAdhoc()">Keresés</button>
+          <button class="btn btn-primary" id="adhoc-btn" onclick="runAdhoc()">Élő Keresés</button>
         </div>
-        <div class="channel-row">
-          <label class="channel-chip on"><input type="checkbox" value="reddit" checked> Reddit</label>
-          <label class="channel-chip on"><input type="checkbox" value="stackoverflow" checked> Stack Overflow</label>
+
+        <div class="filter-pills-row">
+          <span class="filter-label">Csatornák:</span>
+          <button type="button" class="filter-pill on" id="adhoc-pill-all" onclick="selectAdhocChannel('all')">Összes</button>
+          <button type="button" class="filter-pill" data-adhoc-chan="youtube" onclick="selectAdhocChannel('youtube')">YouTube</button>
+          <button type="button" class="filter-pill" data-adhoc-chan="github" onclick="selectAdhocChannel('github')">GitHub</button>
+          <button type="button" class="filter-pill" data-adhoc-chan="reddit" onclick="selectAdhocChannel('reddit')">Reddit</button>
+          <button type="button" class="filter-pill" data-adhoc-chan="stackoverflow" onclick="selectAdhocChannel('stackoverflow')">Stack Overflow</button>
         </div>
-        <div class="card-desc" id="adhoc-status" style="margin-top:12px; margin-bottom:0"></div>
+        <div class="filter-status-row" id="adhoc-status"></div>
       </div>
 
       <div id="adhoc-results"></div>
@@ -637,16 +643,35 @@ function renderRawLeads(results, activeChan) {
 
 // --- Ad-hoc kereses ---
 let adhocPoll = null;
+let activeAdhocChannel = 'all';
+
+function selectAdhocChannel(chan) {
+  activeAdhocChannel = chan;
+  document.querySelectorAll('#s-adhoc .filter-pill').forEach(btn => btn.classList.remove('on'));
+
+  if (chan === 'all') {
+    const btnAll = document.getElementById('adhoc-pill-all');
+    if (btnAll) btnAll.classList.add('on');
+  } else {
+    const targetBtn = document.querySelector(`#s-adhoc .filter-pill[data-adhoc-chan="${chan}"]`);
+    if (targetBtn) targetBtn.classList.add('on');
+  }
+}
 
 function runAdhoc() {
   const q = document.getElementById('adhoc-query').value.trim();
   if (!q) { toast('Írj be egy keresési kifejezést.'); return; }
-  const channels = [...document.querySelectorAll('.channel-chip input:checked')].map(c => c.value);
-  if (!channels.length) { toast('Válassz legalább egy csatornát.'); return; }
+
+  let channels = [];
+  if (activeAdhocChannel === 'all') {
+    channels = ['youtube', 'github', 'reddit', 'stackoverflow'];
+  } else {
+    channels = [activeAdhocChannel];
+  }
 
   const btn = document.getElementById('adhoc-btn');
   btn.disabled = true; btn.textContent = 'Keresés...';
-  document.getElementById('adhoc-status').textContent = 'Keresés folyamatban a háttérben...';
+  document.getElementById('adhoc-status').textContent = 'Élő ad-hoc keresés folyamatban a választott platformokon...';
   document.getElementById('adhoc-results').innerHTML = '';
 
   fetch('/search/adhoc', {
@@ -678,36 +703,46 @@ function loadAdhocResults(query) {
   fetch('/api/adhoc-results?query=' + encodeURIComponent(query)).then(r => r.json()).then(data => {
     resetAdhocBtn();
     const results = data.results || [];
+    const filterName = activeAdhocChannel === 'all' ? 'Összes csatorna' : activeAdhocChannel.toUpperCase();
     document.getElementById('adhoc-status').textContent =
-      results.length + ' találat erre: "' + query + '"';
+      results.length + ' élő találat (' + filterName + ') erre: "' + query + '"';
     renderAdhoc(results);
   }).catch(() => resetAdhocBtn());
 }
 
 function resetAdhocBtn() {
   const btn = document.getElementById('adhoc-btn');
-  btn.disabled = false; btn.textContent = 'Keresés';
+  btn.disabled = false; btn.textContent = 'Élő Keresés';
 }
 
 function renderAdhoc(results) {
   const box = document.getElementById('adhoc-results');
   if (!results.length) {
-    box.innerHTML = '<div class="empty">Nincs találat. Próbálj más kifejezést vagy csatornát.</div>';
+    box.innerHTML = '<div class="empty">Nincs élő találat. Próbálj más kifejezést vagy csatornát.</div>';
     return;
   }
-  let html = '<div class="card">';
+  let html = '<div class="raw-leads-list">';
   results.forEach(r => {
-    html += '<div class="result-row" id="res-' + r.id + '">' +
-      '<div class="result-main">' +
-        '<div class="result-title">' + esc(r.title || '(cím nélkül)') + '</div>' +
-        '<div class="result-meta"><span class="platform-pill">' + esc(r.platform) + '</span>' +
-          '<span class="score-pill">score: ' + (r.score || 0) + '</span></div>' +
-        '<div class="result-snippet">' + esc((r.body || '').slice(0, 240)) + '</div>' +
-        '<a class="result-url" href="' + esc(r.url) + '" target="_blank">' + esc(r.url) + '</a>' +
+    const cleanLink = formatCleanUrl(r.url);
+    const cleanBody = esc(r.body || '');
+    html += '<div class="lead-item-card" id="res-' + r.id + '">' +
+      '<div class="lead-item-header">' +
+        '<div class="lead-item-title">' + esc(r.title || '(cím nélkül)') + '</div>' +
+        '<div class="lead-item-badges">' +
+          '<span class="platform-pill">' + esc(r.platform) + '</span>' +
+          '<span class="score-pill">score: ' + (r.score || 0) + '</span>' +
+        '</div>' +
       '</div>' +
-      '<div class="result-actions">' +
-        '<button class="btn btn-secondary btn-sm" onclick="genDraft(' + r.id + ')">Választervezet</button>' +
-        '<button class="btn btn-primary btn-sm" onclick="toSalesOS(' + r.id + ', this)">Sales OS</button>' +
+      '<div class="lead-item-body">' + cleanBody + (cleanBody.length >= 240 ? '...' : '') + '</div>' +
+      '<div class="lead-item-footer">' +
+        '<a class="lead-item-link" href="' + esc(r.url) + '" target="_blank" title="' + esc(r.url) + '">' +
+          '<svg class="link-icon" viewBox="0 0 24 24"><path d="M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg>' +
+          '<span>' + esc(cleanLink) + '</span>' +
+        '</a>' +
+        '<div class="lead-item-actions">' +
+          '<button class="btn btn-secondary btn-sm" onclick="genDraft(' + r.id + ')">Választervezet</button>' +
+          '<button class="btn btn-primary btn-sm" onclick="toSalesOS(' + r.id + ', this)">Sales OS</button>' +
+        '</div>' +
       '</div>' +
     '</div>';
   });

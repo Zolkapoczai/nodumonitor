@@ -105,3 +105,68 @@ class YouTubeConnector:
         )
         print(f"[youtube] {saved} új bejegyzés mentve")
         return saved
+
+    def search(self, query: str, search_term: str = None) -> int:
+        """Ad-hoc keresés YouTube videók kommentjeiben a megadott kifejezésre."""
+        if not self.api_key or self.api_key == "YOUR_YOUTUBE_API_KEY":
+            print("[youtube] Ad-hoc keresés: Nincs API kulcs megadva.")
+            return 0
+
+        term = search_term or query
+        saved = 0
+        try:
+            youtube = build("youtube", "v3", developerKey=self.api_key)
+            search_response = youtube.search().list(
+                q=query,
+                part="id,snippet",
+                type="video",
+                order="relevance",
+                maxResults=5
+            ).execute()
+
+            for item in search_response.get("items", []):
+                video_id = (item.get("id") or {}).get("videoId")
+                if not video_id:
+                    continue
+                video_title = (item.get("snippet") or {}).get("title", "")
+
+                try:
+                    comments_response = youtube.commentThreads().list(
+                        part="snippet",
+                        videoId=video_id,
+                        maxResults=10,
+                        order="relevance"
+                    ).execute()
+
+                    for ct in comments_response.get("items", []):
+                        snippet = (ct.get("snippet") or {}).get("topLevelComment", {}).get("snippet", {})
+                        author = snippet.get("authorDisplayName", "")
+                        body = snippet.get("textOriginal", "")
+                        published_at = snippet.get("publishedAt", "")
+                        comment_id = ct.get("id", "")
+
+                        combined = f"{video_title} {body}"
+                        keywords, score = self.kf.match(combined)
+                        post = {
+                            "source": "youtube",
+                            "platform": "youtube",
+                            "external_id": f"yt_adhoc_{comment_id}",
+                            "url": f"https://www.youtube.com/watch?v={video_id}&lc={comment_id}",
+                            "author": author,
+                            "title": f"Comment on: {video_title}",
+                            "body": body[:2000],
+                            "created_at": published_at or _now(),
+                            "fetched_at": _now(),
+                            "keywords": ", ".join(keywords) if keywords else "youtube",
+                            "score": max(score, 1),
+                            "search_term": term,
+                        }
+                        if insert_post(self.db_path, post):
+                            saved += 1
+                except Exception as ce:
+                    pass
+        except Exception as e:
+            print(f"[youtube] Ad-hoc hiba ({query}): {e}")
+
+        print(f"[youtube] Ad-hoc '{query}': {saved} új komment mentve")
+        return saved
