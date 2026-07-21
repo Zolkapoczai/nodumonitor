@@ -148,6 +148,10 @@ def save():
         config.setdefault("linkedin_content", {})
         config["linkedin_content"]["language"] = f.get("content_language", "en").strip()
 
+    if "report_language" in f:
+        config.setdefault("weekly_report", {})
+        config["weekly_report"]["language"] = f.get("report_language", "hu").strip()
+
     save_config(config)
     return redirect(url_for("admin") + "?saved=1")
 
@@ -194,10 +198,12 @@ def run_action(action):
 
     elif action == "weekly-report":
         from alerts.notifier import send_weekly_digest
+        from responder.draft_generator import generate_trend_analysis
         def _weekly():
             days = config.get("weekly_report", {}).get("lookback_days", 7)
             stats = get_weekly_stats(db_path, days)
-            send_weekly_digest(stats, config.get("alerts", {}))
+            trend = generate_trend_analysis(config, db_path)
+            send_weekly_digest(stats, config.get("alerts", {}), trend_analysis=trend)
             return "elküldve"
         _run_in_bg("weekly-report", _weekly)
 

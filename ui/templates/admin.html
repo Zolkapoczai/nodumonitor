@@ -92,15 +92,22 @@
         </div>
 
         <div class="card">
-          <div class="card-title">Tartalommarketing (Content Pipeline)</div>
+          <div class="card-title">AI Szöveggenerálás és Jelentések</div>
           <div class="card-desc">
-            A rendszer a detektált fájdalmak alapján blogcikk-vázlatokat és LinkedIn teaser posztokat tud generálni.
+            Állítsd be a rendszer által automatikusan generált tartalmak (Blogok, Slack riportok) nyelvét.
           </div>
           <div class="field">
-            <label>Generált tartalom nyelve</label>
+            <label>Tartalommarketing (Blog + LinkedIn) nyelve</label>
             <select name="content_language">
               <option value="en" {% if config.linkedin_content.language == 'en' %}selected{% endif %}>Angol (nemzetközi piac)</option>
               <option value="hu" {% if config.linkedin_content.language == 'hu' %}selected{% endif %}>Magyar</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Heti Trendelemzés (Slack riport) nyelve</label>
+            <select name="report_language">
+              <option value="hu" {% if config.weekly_report.language == 'hu' %}selected{% endif %}>Magyar (belső csapatnak)</option>
+              <option value="en" {% if config.weekly_report.language == 'en' %}selected{% endif %}>Angol</option>
             </select>
           </div>
         </div>

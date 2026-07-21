@@ -425,6 +425,71 @@ def generate_content_pipeline(config: dict, db_path: str) -> dict | None:
         return None
 
 
+_TREND_ANALYSIS_SYSTEM_PROMPT = """
+Te a NODU Bridge BIM szoftver vezető elemzője vagy. A cég célja a parametrikus
+adatcsere forradalmasítása Archicad és Revit között.
+
+Feladatod: A megadott nyers, heti fájdalom-jelekből (pain signals) írj egy 
+okos, narratív Trendelemzést a csapat belső Slack csatornájára.
+
+Szabályok:
+- NYELV: {language}
+- Csoportosítsd a fájdalmakat 2-3 logikus 'fájdalom-klaszterbe' (pl. geometria, export, pluginok).
+- Emeld ki, hogy ezek a trendek milyen üzleti vagy termékfejlesztési lehetőséget jelentenek a NODU számára.
+- Írj profi, de emészthető Slack-stílusban. Használj formázást (félkövér szöveg), de a kimeneted tiszta szöveg legyen, ne JSON.
+- A szöveg hossza 3-4 bekezdés legyen. Ne legyen túl hosszú.
+""".strip()
+
+def generate_trend_analysis(config: dict, db_path: str) -> str:
+    """
+    Kikéri a heti legfontosabb fájdalom-jeleket és a Gemini segítségével 
+    írat egy narratív vezetői összefoglalót (trendeket).
+    """
+    sc = config.get("scoring", {})
+    api_key = sc.get("gemini_api_key", "")
+    if not sc.get("gemini_enabled", False) or not api_key or api_key == "YOUR_GEMINI_API_KEY":
+        return "AI Trendelemzés nem elérhető: Gemini API nincs beállítva."
+
+    wr_config = config.get("weekly_report", {})
+    lookback = wr_config.get("lookback_days", 7)
+    language = wr_config.get("language", "hu")
+    lang_name = "English" if language == "en" else "Hungarian"
+    
+    signals = get_recent_pain_signals(db_path, lookback_days=lookback, limit=30)
+    if not signals:
+        return "Ezen a héten nem gyűlt össze elegendő fájdalom-jel egy átfogó trendelemzéshez."
+
+    pain_lines = "\n".join(
+        f"- Súlyosság: {s['severity']}, Probléma: {s['pain_summary']}"
+        for s in signals
+    )
+
+    sys_prompt = _TREND_ANALYSIS_SYSTEM_PROMPT.format(language=lang_name)
+    sys_prompt += _load_knowledge_base(config)
+    
+    user_msg = (
+        f"Íme az elmúlt {lookback} napban detektált {len(signals)} db legfontosabb fájdalom:\n\n"
+        f"{pain_lines}\n\n"
+        f"Kérlek írd meg a narratív vezetői Trendelemzést a csapatnak."
+    )
+
+    model = sc.get("gemini_model", "gemini-2.5-flash")
+    client = genai.Client(api_key=api_key)
+    try:
+        resp = client.models.generate_content(
+            model=model,
+            contents=user_msg,
+            config=types.GenerateContentConfig(
+                system_instruction=sys_prompt,
+                max_output_tokens=1500,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
+            ),
+        )
+        return resp.text.strip() if resp.text else "Nincs generált elemzés."
+    except Exception as e:
+        print(f"[trend-analysis] HIBA: {e}")
+        return f"Hiba az elemzés során: {e}"
+
 _LINKEDIN_REPLY_SYSTEM_PROMPT = """
 Te a nodu.build BIM/IFC tanacsado cegcsoport LinkedIn-kozossegi jelenlete vagy.
 A nodu.build BIM/IFC tanacsadassal foglalkozik, es egyik konkret terméke a

@@ -137,11 +137,10 @@ def send_webhook(posts: list[dict], alert_config: dict) -> None:
         print(f"[alert] Webhook hiba: {e}")
 
 
-def send_weekly_digest(stats: dict, alert_config: dict, subscriber_count: int = None) -> None:
+def send_weekly_digest(stats: dict, alert_config: dict, subscriber_count: int = None, trend_analysis: str = "") -> None:
     """
     Heti Slack-osszefoglalo a scraper statisztikaibol (storage.db.get_weekly_stats).
-    Csak akkor kuld, ha a Slack engedelyezve van (alerts.slack.enabled + webhook_url).
-    A subscriber_count opcionalis (wishlist feliratkozok szama SalesOS/n8n felol).
+    Opcionálisan hozzáfűzi a Gemini AI trendelemzését (trend_analysis).
     """
     sc = alert_config.get("slack", {})
     if not sc.get("enabled") or not sc.get("webhook_url"):
@@ -164,9 +163,14 @@ def send_weekly_digest(stats: dict, alert_config: dict, subscriber_count: int = 
     blocks = [
         {"type": "header", "text": {"type": "plain_text", "text": f"NODU heti osszefoglalo (utolso {days} nap)"}},
         {"type": "section", "text": {"type": "mrkdwn", "text": summary}},
-        {"type": "section", "text": {"type": "mrkdwn", "text": f"*Forrasonkent:*\n{plat_lines}"}},
-        {"type": "section", "text": {"type": "mrkdwn", "text": f"*Top fajdalompontok:*\n{pain_lines}"}},
+        {"type": "section", "text": {"type": "mrkdwn", "text": f"*Forrasonkent:*\n{plat_lines}"}}
     ]
+
+    if trend_analysis:
+        blocks.append({"type": "divider"})
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"🧠 *AI Trendelemzés (Fájdalom-klaszterek)*\n\n{trend_analysis}"}})
+    else:
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"*Top fájdalompontok:*\n{pain_lines}"}})
 
     try:
         _post_slack_blocks(sc["webhook_url"], blocks)

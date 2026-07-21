@@ -176,6 +176,7 @@ weekly_report:
   day_of_week: mon
   hour: 8
   lookback_days: 7
+  language: "hu"
 adhoc:
   default_channels:
   - reddit
