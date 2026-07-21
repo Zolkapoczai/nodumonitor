@@ -86,6 +86,8 @@
         {% set heat = 'hot' if (o.severity or 0) >= 4 else ('warm' if o.severity == 3 else 'cool') %}
         <div class="opp-card" id="opp-{{ o.post_id }}">
           <div class="opp-head">
+            {% if o.nodu_mention %}<span class="badge-referral">✨ ORGANIC REFERRAL</span>{% endif %}
+            {% if o.solved_internally %}<span class="badge-hidden-opp">💡 HIDDEN OPP</span>{% endif %}
             <span class="sev-badge sev-{{ heat }}">súlyosság {{ o.severity }}</span>
             {% if o.buying_intent %}<span class="intent-badge">vásárlási szándék</span>{% endif %}
             <span class="platform-pill">{{ o.platform }}</span>
@@ -342,7 +344,7 @@ function genDraftOpp(postId, btn) {
 }
 
 // --- LinkedIn valaszgeneralas ---
-const LI_FIT_LABELS = {
+const LI_BRAND_LABELS = {
   bridge: { text: 'NODU Bridge', cls: 'sev-hot' },
   nodu:   { text: 'nodu.build', cls: 'sev-warm' },
   none:   { text: 'semleges', cls: 'sev-cool' },
@@ -394,11 +396,24 @@ function composeLinkedin() {
 }
 
 function renderLinkedinResult(d) {
-  const fit = LI_FIT_LABELS[d.fit_type] || LI_FIT_LABELS.none;
+  const brand = LI_BRAND_LABELS[d.brand_mode] || LI_BRAND_LABELS.none;
+  const pct = Math.round((d.confidence || 0) * 100);
   const box = document.getElementById('li-result');
   box.innerHTML =
     '<div class="opp-card">' +
-      '<div class="opp-head"><span class="sev-badge ' + fit.cls + '">' + esc(fit.text) + '</span></div>' +
+      '<div class="opp-head">' +
+        '<span class="sev-badge ' + brand.cls + '">' + esc(brand.text) + '</span>' +
+      '</div>' +
+      '<div class="li-meta-row">' +
+        '<span class="li-chip li-topic">' + esc(d.topic || 'general') + '</span>' +
+        '<span class="li-chip">' + esc(d.post_type || 'general') + '</span>' +
+        '<span class="li-chip li-intent">' + esc(d.engagement_intent || '') + '</span>' +
+        '<span class="li-chip">' + esc(d.reply_style || '') + '</span>' +
+        '<span class="li-confidence">' +
+          '<span class="li-confidence-bar"><span class="li-confidence-fill" style="width:' + pct + '%"></span></span>' +
+          pct + '%' +
+        '</span>' +
+      '</div>' +
       '<div class="sec-label">Javasolt válasz</div>' +
       '<div class="draft-text" id="li-reply-text">' + esc(d.reply_text) + '</div>' +
       '<div class="opp-tech" style="margin-top:10px">Indoklás: ' + esc(d.rationale) + '</div>' +

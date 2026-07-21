@@ -30,7 +30,7 @@ from storage.db import get_unclassified_posts, get_signals_for_review, insert_si
 # A modell + prompt verziojat kodolja — ha a promptot vagy a modellt valtjuk,
 # ezt is bumpeljuk, hogy a regi/uj jelek megkulonboztethetok legyenek
 # visszamenoleges ujraszamolasnal (audit §9, scoring_configs elozmenye).
-CLASSIFIER_VERSION = "gemini-2.5-flash-v1"
+CLASSIFIER_VERSION = "gemini-2.5-flash-v2"
 
 _ISSUE_TYPES = ["parametric_data", "metadata", "geometry", "coordination", "other"]
 
@@ -38,7 +38,7 @@ _SYSTEM_PROMPT = f"""
 Te a NODU Bridge (Archicad <-> Revit parametrikus adatcsere eszkoz) fajdalom-
 detektalo motorja vagy. A NODU Bridge egyetlen ertekajanlata: az elemek
 LOGIKAJAT (nem statikus geometriajat) konvertalja Archicad es Revit kozott,
-natv mapping scriptekkel, nyitott IFC helyett.
+nativ mapping scriptekkel, nyitott IFC helyett.
 
 Feladatod: eldonteni, hogy egy fórum/Reddit/GitHub/StackOverflow bejegyzes
 VALODI FAJDALMAT fejez-e ki Archicad-Revit (vagy tagabban BIM-szoftverek
@@ -80,6 +80,11 @@ MEZOK:
 - role_hypothesis: a szerzo valoszinu szerepe egy rovid angol kifejezesben
   (pl. "BIM Coordinator", "Architect", "Software Developer", "unknown" ha nem
   allapithato meg a szovegbol)
+- solved_internally: true, ha a szerzo leirja, hogy KORABBAN volt adatcsere problemajuk, 
+  de valamilyen belső workaronddal/scripttel (sajat megoldassal) mar "megoldottak",
+  vagy manualisan oldjak meg a feladatot. Ez jelzi, hogy van/volt fajdalom.
+- nodu_mention: true, ha a bejegyzes/komment organikusan MEGEMLITI a "nodu" vagy a
+  "nodu bridge" nevet (pl. mert valaki mas ajanlja ezt a megoldast).
 - confidence: 0.0-1.0, mennyire biztos a sajat osztalyozasodban
 - rationale: 1 mondat angolul, MIERT ezt a dontest hoztad (kulonosen is_pain es
   severity indoklasa)
@@ -111,6 +116,8 @@ _SCHEMA = {
         "buying_intent": {"type": "BOOLEAN"},
         "buying_intent_signals": {"type": "ARRAY", "items": {"type": "STRING"}},
         "role_hypothesis": {"type": "STRING"},
+        "solved_internally": {"type": "BOOLEAN"},
+        "nodu_mention": {"type": "BOOLEAN"},
         "confidence": {"type": "NUMBER"},
         "rationale": {"type": "STRING"},
     },
@@ -118,7 +125,7 @@ _SCHEMA = {
         "is_pain", "pain_summary", "tech_summary", "archicad_probability",
         "revit_probability", "ifc_involved", "issue_types", "severity",
         "buying_intent", "buying_intent_signals", "role_hypothesis",
-        "confidence", "rationale",
+        "solved_internally", "nodu_mention", "confidence", "rationale",
     ],
 }
 
@@ -193,6 +200,8 @@ class PainClassifier:
             "buying_intent": 1 if parsed.get("buying_intent") else 0,
             "buying_intent_signals": ", ".join(parsed.get("buying_intent_signals") or []),
             "role_hypothesis": parsed.get("role_hypothesis", ""),
+            "solved_internally": 1 if parsed.get("solved_internally") else 0,
+            "nodu_mention": 1 if parsed.get("nodu_mention") else 0,
             "confidence": parsed.get("confidence"),
             "rationale": parsed.get("rationale", ""),
             "classifier_version": CLASSIFIER_VERSION,
@@ -282,9 +291,11 @@ def review_signals(db_path: str, min_severity: int = 1, limit: int = 100) -> Non
     for i, s in enumerate(signals, 1):
         flag = "FAJDALOM" if s["is_pain"] else "nem fajdalom"
         intent = " | BUYING INTENT" if s["buying_intent"] else ""
+        ref = " | REFERRAL" if s.get("nodu_mention") else ""
+        hid = " | HIDDEN OPP" if s.get("solved_internally") else ""
         print("=" * 78)
         print(f"[{i}/{len(signals)}] {s['platform']} | {s['source']} | severity={s['severity']} "
-              f"| confidence={s['confidence']} | {flag}{intent}")
+              f"| confidence={s['confidence']} | {flag}{intent}{ref}{hid}")
         print(f"Cim : {s['title']}")
         print(f"URL : {s['url']}")
         print(f"Szerzo (feltetelezett szerep): {s['author'] or '?'} ({s['role_hypothesis']})")

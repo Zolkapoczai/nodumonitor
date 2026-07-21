@@ -384,46 +384,108 @@ _LINKEDIN_REPLY_SYSTEM_PROMPT = """
 Te a nodu.build BIM/IFC tanacsado cegcsoport LinkedIn-kozossegi jelenlete vagy.
 A nodu.build BIM/IFC tanacsadassal foglalkozik, es egyik konkret terméke a
 NODU Bridge: parametrikus adatcsere Archicad es Revit kozott (az elemek
-LOGIKAJAT konvertalja, nem statikus geometriat, natv mapping scriptekkel,
+LOGIKAJAT konvertalja, nem statikus geometriat, nativ mapping scriptekkel,
 nyitott IFC helyett).
 
-Feladatod: egy beillesztett LinkedIn-poszt szovegere valaszt irni. Harom
-eset lehetseges — EZT DONTSD EL ELSOKENT (fit_type mezo):
+Feladatod: egy beillesztett LinkedIn-poszt szovegere valaszt irni.
 
-1. "bridge" — a poszt KONKRETAN Archicad-Revit (vagy tagabban BIM-szoftverek
-   kozotti) adatcsere/interoperabilitas fajdalomrol szol, amit a NODU Bridge
-   tenylegesen megoldana. Ilyenkor a valasz finoman, 1 mondatban megemlitheti
-   a Bridge-et — nem reklamnyelvvel, inkabb "van egy eszkoz amit hasznalunk"
-   hangnemben.
-2. "nodu" — tagabb BIM/IFC/epitesipari koordinacios szakmai tema, ahol a
-   Bridge NEM oldana meg a leirt problemat, de a nodu.build szakertoi hangja
-   relevans hozzaszolast tud adni. Ilyenkor NE emlitsd a Bridge-et — csak
-   szakmai erteket adj, esetleg a nodu.build altalanos BIM/IFC tanacsadoi
-   szerepere utalva, ha termeszetesen illik.
-3. "none" — a poszt se nem interop-tema, se nem BIM-szakmai tartalom (pl.
-   altalanos karrier-poszt, semmi kozos pont). Ilyenkor semleges, udvarias,
-   erteket ado valaszt irj, MARKAEMLITES NELKUL.
+A VALASZ ELOTT vegezd el a kovetkezo elemzest — a JSON-mezoket EBBEN A
+SORRENDBEN toltsd ki:
+
+1. topic — A poszt FOTEAMJA. Szemantikusan sorold be (ne kulcsszavakbol kovetkeztess).
+   Valaszthato ertekek: archicad, revit, interoperability, bim, ifc, ai,
+   automation, digital_construction, design, engineering, project_management,
+   construction, startup, business, leadership, career, event, technology,
+   software, general.
+   Mindig EGYET valassz.
+
+2. post_type — A poszt KOMMUNIKACIOS TIPUSA.
+   Valaszthato ertekek: opinion, question, announcement, case_study,
+   success_story, technical_problem, industry_news, discussion, experience,
+   hiring, event, product, general.
+
+3. engagement_intent — Milyen tipusu valasz MUKODNE LEGJOBBAN erre a posztra.
+   Valaszthato ertekek: educate, agree, challenge, expand, ask_question,
+   share_experience, congratulate, support, connect.
+
+4. reply_style — A valasz HANGNEME.
+   Valaszthato ertekek: insight, expert, conversational, analytical, practical.
+
+5. brand_mode — A nodu.build/Bridge szerepe a valaszban:
+   - "bridge" — a poszt KONKRETAN Archicad-Revit (vagy tagabban BIM-szoftverek
+     kozotti) adatcsere/interoperabilitas fajdalomrol szol, amit a NODU Bridge
+     tenylegesen megoldana. Ilyenkor a valasz finoman, 1 mondatban megemlitheti
+     a Bridge-et — nem reklamnyelvvel, inkabb "van egy eszkoz amit hasznalunk"
+     hangnemben.
+   - "nodu" — tagabb BIM/IFC/epitesipari koordinacios szakmai tema, ahol a
+     Bridge NEM oldana meg a leirt problemat, de a nodu.build szakertoi hangja
+     relevans hozzaszolast tud adni. NE emlitsd a Bridge-et — csak szakmai
+     erteket adj.
+   - "none" — nincs termeszetes kapcsolodas. Semleges, udvarias, erteket ado
+     valasz, MARKAEMLITES NELKUL.
+   Semmilyen eroszakolt marketing NEM megengedett.
+
+6. confidence — Mennyire biztos vagy a donteseidben (0.0–1.0 lebegopontos ertek).
+
+7. reply_text — A KESZ VALASZ a posztra. Az engagement_intent es reply_style
+   MEGHATAROZZA a valasz jellget — kovetkezetesen alkalmazd oket.
+
+8. rationale — 1 mondat angolul: MIERT ezt a topic/post_type/brand_mode
+   kombinaciot valasztottad.
 
 VALASZ-STILUS (LinkedIn kommenthez, NEM forum-valaszhoz igazitva):
 - Rovid: max 60-80 szo (LinkedIn kommentben senki nem olvas el egy falat)
 - Publikus, professzionalis hangnem, elso szemelyben
-- Nincs emoji, nincs marketingzsargon, nincs "!!!" vagy tuloz lelkesedes
-- A valaszt MINDIG a poszt SAJAT nyelvén írd — ha a poszt angolul van, angolul
-  valaszolj; ha magyarul, magyarul. Ne valts nyelvet.
-- Soha ne hazudj, ne tulígerd a Bridge-et vagy a nodu.build-et
-
-Add vissza: fit_type, reply_text (a kesz valasz), es rationale (1 mondat
-angolul, MIERT ezt a fit_type-ot valasztottad).
+- Nincs emoji, nincs marketingzsargon, nincs "!!!" vagy tulzo lelkesedes
+- A reply_text-et MINDIG a poszt SAJAT nyelven ird — ha a poszt angolul van,
+  angolul valaszolj; ha magyarul, magyarul. Ne valts nyelvet.
+- Soha ne hazudj, ne tuligerd a Bridge-et vagy a nodu.build-et
 """.strip()
 
 _LINKEDIN_REPLY_SCHEMA = {
     "type": "OBJECT",
     "properties": {
-        "fit_type": {"type": "STRING", "enum": ["bridge", "nodu", "none"]},
+        "topic": {
+            "type": "STRING",
+            "enum": [
+                "archicad", "revit", "interoperability", "bim", "ifc", "ai",
+                "automation", "digital_construction", "design", "engineering",
+                "project_management", "construction", "startup", "business",
+                "leadership", "career", "event", "technology", "software",
+                "general",
+            ],
+        },
+        "post_type": {
+            "type": "STRING",
+            "enum": [
+                "opinion", "question", "announcement", "case_study",
+                "success_story", "technical_problem", "industry_news",
+                "discussion", "experience", "hiring", "event", "product",
+                "general",
+            ],
+        },
+        "engagement_intent": {
+            "type": "STRING",
+            "enum": [
+                "educate", "agree", "challenge", "expand", "ask_question",
+                "share_experience", "congratulate", "support", "connect",
+            ],
+        },
+        "reply_style": {
+            "type": "STRING",
+            "enum": [
+                "insight", "expert", "conversational", "analytical", "practical",
+            ],
+        },
+        "brand_mode": {"type": "STRING", "enum": ["bridge", "nodu", "none"]},
+        "confidence": {"type": "NUMBER"},
         "reply_text": {"type": "STRING"},
         "rationale": {"type": "STRING"},
     },
-    "required": ["fit_type", "reply_text", "rationale"],
+    "required": [
+        "topic", "post_type", "engagement_intent", "reply_style",
+        "brand_mode", "confidence", "reply_text", "rationale",
+    ],
 }
 
 
@@ -431,10 +493,10 @@ def generate_linkedin_reply(config: dict, post_text: str, author_name: str = "",
                             author_role: str = "") -> dict | None:
     """
     Egy beillesztett LinkedIn-poszthoz ir valaszt, egyetlen strukturalt Gemini-
-    hivassal. Haromfele kimenet lehet (fit_type: bridge/nodu/none) — ld.
-    _LINKEDIN_REPLY_SYSTEM_PROMPT. Visszaadja a strukturalt eredmenyt, vagy
-    None-t hiba/hianyzo kulcs eseten. Nincs DB-perzisztencia — szinkron,
-    egyszeri hasznalatra (docs/03-linkedin-composer-spec.md).
+    hivassal. A modell 5 lepeses dontest hoz (topic, post_type, engagement_intent,
+    reply_style, brand_mode), majd ezek alapjan irja a valaszt. Visszaadja a
+    strukturalt eredmenyt (8 mezo), vagy None-t hiba/hianyzo kulcs eseten.
+    Nincs DB-perzisztencia — szinkron, egyszeri hasznalatra.
     """
     sc = config.get("scoring", {})
     api_key = sc.get("gemini_api_key", "")
@@ -471,7 +533,7 @@ def generate_linkedin_reply(config: dict, post_text: str, author_name: str = "",
                 system_instruction=_LINKEDIN_REPLY_SYSTEM_PROMPT,
                 response_mime_type="application/json",
                 response_schema=_LINKEDIN_REPLY_SCHEMA,
-                max_output_tokens=800,
+                max_output_tokens=1000,
                 thinking_config=types.ThinkingConfig(thinking_budget=0),
             ),
         )

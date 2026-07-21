@@ -71,6 +71,8 @@ def init_db(db_path: str) -> None:
             rationale             TEXT,
             classifier_version    TEXT    NOT NULL,
             classified_at         TEXT    NOT NULL,
+            solved_internally     INTEGER DEFAULT 0,
+            nodu_mention          INTEGER DEFAULT 0,
             UNIQUE(post_id)
         );
     """)
@@ -78,6 +80,13 @@ def init_db(db_path: str) -> None:
     cols = [r[1] for r in conn.execute("PRAGMA table_info(posts)").fetchall()]
     if "search_term" not in cols:
         conn.execute("ALTER TABLE posts ADD COLUMN search_term TEXT")
+        
+    signal_cols = [r[1] for r in conn.execute("PRAGMA table_info(signals)").fetchall()]
+    if "solved_internally" not in signal_cols:
+        conn.execute("ALTER TABLE signals ADD COLUMN solved_internally INTEGER DEFAULT 0")
+    if "nodu_mention" not in signal_cols:
+        conn.execute("ALTER TABLE signals ADD COLUMN nodu_mention INTEGER DEFAULT 0")
+        
     conn.commit()
     conn.close()
 
@@ -157,12 +166,14 @@ def insert_signal(db_path: str, record: dict) -> bool:
                 (post_id, is_pain, pain_summary, tech_summary,
                  archicad_probability, revit_probability, ifc_involved,
                  issue_types, severity, buying_intent, buying_intent_signals,
-                 role_hypothesis, confidence, rationale, classifier_version, classified_at)
+                 role_hypothesis, confidence, rationale, classifier_version, classified_at,
+                 solved_internally, nodu_mention)
             VALUES
                 (:post_id, :is_pain, :pain_summary, :tech_summary,
                  :archicad_probability, :revit_probability, :ifc_involved,
                  :issue_types, :severity, :buying_intent, :buying_intent_signals,
-                 :role_hypothesis, :confidence, :rationale, :classifier_version, :classified_at)
+                 :role_hypothesis, :confidence, :rationale, :classifier_version, :classified_at,
+                 :solved_internally, :nodu_mention)
             """,
             record,
         )
@@ -200,21 +211,21 @@ def get_opportunities(db_path: str, only_pain: bool = True, min_severity: int = 
     A dashboard "Lehetosegek" nezet forrasa: osztalyozott jelek a poszt
     adataival, fajdalom-fokuszban. Rendezes (prezentacios rangsor, NEM
     perzisztalt pontszam — a verziozott scoring-motor a Phase 2):
-    severity elsodleges, buying_intent tiebreaker, confidence masodlagos.
+    nodu_mention elsodleges (referralok), severity masodlagos, buying_intent tiebreaker, confidence.
     Az ad-hoc keresesi zajt kizarjuk (search_term IS NULL).
     """
     conn = get_connection(db_path)
     where = ["p.search_term IS NULL", "s.severity >= ?"]
     params: list = [min_severity]
     if only_pain:
-        where.append("s.is_pain = 1")
+        where.append("(s.is_pain = 1 OR s.nodu_mention = 1)")
     rows = conn.execute(
         f"""
         SELECT s.*, p.title, p.url, p.platform, p.source, p.author,
                p.body, p.keywords, p.score AS keyword_score, p.created_at AS post_created_at
         FROM signals s JOIN posts p ON s.post_id = p.id
         WHERE {' AND '.join(where)}
-        ORDER BY s.is_pain DESC, s.severity DESC, s.buying_intent DESC,
+        ORDER BY s.nodu_mention DESC, s.is_pain DESC, s.severity DESC, s.buying_intent DESC,
                  s.confidence DESC, s.classified_at DESC
         LIMIT ?
         """,
@@ -235,10 +246,10 @@ def get_recent_pain_signals(db_path: str, lookback_days: int = 7, limit: int = 8
     rows = conn.execute(
         """
         SELECT s.pain_summary, s.tech_summary, s.issue_types, s.severity,
-               s.buying_intent, p.platform, p.title
+               s.buying_intent, s.solved_internally, s.nodu_mention, p.platform, p.title
         FROM signals s JOIN posts p ON s.post_id = p.id
         WHERE s.is_pain = 1 AND p.search_term IS NULL AND p.fetched_at >= ?
-        ORDER BY s.severity DESC, s.buying_intent DESC, s.confidence DESC
+        ORDER BY s.nodu_mention DESC, s.severity DESC, s.buying_intent DESC, s.confidence DESC
         LIMIT ?
         """,
         (cutoff, limit),
@@ -264,7 +275,9 @@ def get_post_with_signal(db_path: str, post_id: int) -> dict | None:
                s.issue_types      AS sig_issue_types,
                s.severity         AS sig_severity,
                s.buying_intent    AS sig_buying_intent,
-               s.role_hypothesis  AS sig_role_hypothesis
+               s.role_hypothesis  AS sig_role_hypothesis,
+               s.solved_internally AS sig_solved_internally,
+               s.nodu_mention     AS sig_nodu_mention
         FROM posts p LEFT JOIN signals s ON s.post_id = p.id
         WHERE p.id = ?
         """,
@@ -290,12 +303,14 @@ def get_pain_posts_without_draft(db_path: str, min_severity: int = 3,
                s.issue_types      AS sig_issue_types,
                s.severity         AS sig_severity,
                s.buying_intent    AS sig_buying_intent,
-               s.role_hypothesis  AS sig_role_hypothesis
+               s.role_hypothesis  AS sig_role_hypothesis,
+               s.solved_internally AS sig_solved_internally,
+               s.nodu_mention     AS sig_nodu_mention
         FROM signals s JOIN posts p ON s.post_id = p.id
         LEFT JOIN drafts d ON d.post_id = p.id
-        WHERE s.is_pain = 1 AND s.severity >= ? AND p.search_term IS NULL
+        WHERE (s.is_pain = 1 OR s.nodu_mention = 1) AND s.severity >= ? AND p.search_term IS NULL
               AND d.id IS NULL
-        ORDER BY s.severity DESC, s.buying_intent DESC, s.confidence DESC
+        ORDER BY s.nodu_mention DESC, s.severity DESC, s.buying_intent DESC, s.confidence DESC
         LIMIT ?
         """,
         (min_severity, limit),
