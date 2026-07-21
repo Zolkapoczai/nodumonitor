@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{% block title %}NODU Monitor{% endblock %}</title>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="{{ url_for('static', filename='nodu.css') }}">
 {% block head %}{% endblock %}
 </head>
@@ -13,14 +13,20 @@
 <header class="topbar">
   <div class="logo">
     <div class="logo-mark"></div>
-    <span class="logo-name">NODU Bridge</span>
+    <div class="logo-text-group">
+      <span class="logo-name">nodu<span class="logo-name-sub">.monitor</span></span>
+      <span class="logo-tagline">ARCHICAD &rarr; REVIT NATIVE PARAMETRIC MONITOR</span>
+    </div>
   </div>
   <div class="topbar-sep"></div>
   <nav class="topbar-nav">
     <a class="topbar-link {{ 'active' if active_view == 'dashboard' else '' }}" href="{{ url_for('dashboard') }}">Dashboard</a>
     <a class="topbar-link {{ 'active' if active_view == 'admin' else '' }}" href="{{ url_for('admin') }}">Admin</a>
   </nav>
-  <div class="topbar-right">{% block topbar_sub %}{% endblock %}</div>
+  <div class="topbar-right">
+    <span class="topbar-domain">nodu.build</span>
+    <span class="topbar-email">info@nodu.build</span>
+  </div>
 </header>
 
 {% block body %}{% endblock %}

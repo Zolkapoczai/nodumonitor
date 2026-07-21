@@ -1,15 +1,12 @@
 reddit:
-  client_id: YOUR_REDDIT_CLIENT_ID
+  client_id: TEST_REDDIT
   client_secret: YOUR_REDDIT_CLIENT_SECRET
   user_agent: NODU-Bridge-Monitor/0.1 by NODU
-  subreddits:
-  - Revit
-  - ArchiCAD
-  - BIM
+  subreddits: []
   poll_interval_minutes: 60
   post_limit: 25
 youtube:
-  api_key: YOUR_YOUTUBE_API_KEY
+  api_key: TEST_APP_KEY
   search_queries:
   - Revit Archicad IFC
   - Archicad to Revit tutorial
@@ -103,15 +100,13 @@ alerts:
 database:
   path: nodu_monitor.db
 scoring:
-  gemini_enabled: true
+  gemini_enabled: false
   gemini_model: gemini-2.5-flash
-  gemini_api_key: ${GEMINI_API_KEY}  # Environment variable, set locally or in .env
+  gemini_api_key: YOUR_GEMINI_API_KEY
 classifier:
   enabled: true
   batch_size: 15
   delay_seconds: 13
-  # A signal-vezerelt valaszgenerator (--generate-drafts) csak ekkora
-  # severity felett general draftot a valodi fajdalom-jelekre.
   draft_min_severity: 3
 stackoverflow:
   api_key: ''
@@ -179,13 +174,13 @@ linkedin_content:
   enabled: true
   posts_per_week: 2
   lookback_days: 7
-  language: "en"
+  language: en
 weekly_report:
   enabled: true
   day_of_week: mon
   hour: 8
   lookback_days: 7
-  language: "hu"
+  language: hu
 adhoc:
   default_channels:
   - reddit
