@@ -189,13 +189,8 @@ def run_action(action):
         _run_in_bg("github", lambda: GitHubConnector(config, db_path).run())
 
     elif action == "youtube":
-        def _yt():
-            from connectors.youtube_connector import poll_youtube
-            from storage.db import filter_and_save_posts
-            posts = poll_youtube(config)
-            if not posts: return 0
-            return filter_and_save_posts(db_path, posts, config.get("alerts", {}).get("min_keyword_matches", 1))
-        _run_in_bg("youtube", _yt)
+        from connectors.youtube_connector import YouTubeConnector
+        _run_in_bg("youtube", lambda: YouTubeConnector(config, db_path).run())
 
     elif action == "forums":
         from connectors.html_connector import HTMLConnector

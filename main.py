@@ -130,16 +130,10 @@ def run_github(config: dict, db_path: str) -> int:
 
 def run_youtube(config: dict, db_path: str) -> int:
     try:
-        from connectors.youtube_connector import poll_youtube
-        from storage.db import filter_and_save_posts
-        posts = poll_youtube(config)
-        if not posts:
-            return 0
-        n = filter_and_save_posts(db_path, posts, config.get("alerts", {}).get("min_keyword_matches", 1))
+        from connectors.youtube_connector import YouTubeConnector
+        connector = YouTubeConnector(config, db_path)
+        n = connector.run()
         return n
-    except ImportError as e:
-        print(f"[youtube] Függőségi hiba: {e}")
-        return 0
     except Exception as e:
         print(f"[youtube] HIBA: {e}")
         return 0
