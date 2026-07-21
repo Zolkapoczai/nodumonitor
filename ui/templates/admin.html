@@ -271,9 +271,7 @@
           </div>
           <div class="run-right">
             <span class="badge badge-idle" id="badge-{{ key }}">Nem futott</span>
-            <form method="POST" action="/run/{{ key }}" style="margin:0" onsubmit="setBadge('{{ key }}','run')">
-              <button type="submit" class="btn btn-secondary btn-sm">Futtatás</button>
-            </form>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="openRunProgressModal('{{ key }}', '{{ title }}')">Futtatás</button>
           </div>
         </div>
         {% endfor %}
@@ -297,9 +295,7 @@
           </div>
           <div class="run-right">
             <span class="badge badge-idle" id="badge-{{ key }}">Nem futott</span>
-            <form method="POST" action="/run/{{ key }}" style="margin:0" onsubmit="setBadge('{{ key }}','run')">
-              <button type="submit" class="btn btn-primary btn-sm">Indítás</button>
-            </form>
+            <button type="button" class="btn btn-primary btn-sm" onclick="openRunProgressModal('{{ key }}', '{{ title }}')">Indítás</button>
           </div>
         </div>
         {% endfor %}

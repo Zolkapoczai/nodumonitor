@@ -238,6 +238,8 @@ def run_action(action):
             return f"{kb_size // 1024} KB frissítve"
         _run_in_bg("build-knowledge", _build_kb)
 
+    if request.args.get("ajax") == "1" or request.is_json:
+        return jsonify({"ok": True, "action": action})
     return redirect(url_for("admin") + "?started=1")
 
 

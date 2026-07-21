@@ -34,6 +34,32 @@
 
 <div class="toast" id="toast"></div>
 
+<!-- Live Progress Pop-up Modal -->
+<div class="progress-modal-overlay" id="progressModal">
+  <div class="progress-modal-card">
+    <div class="progress-modal-header">
+      <div class="progress-modal-icon-spin">
+        <svg viewBox="0 0 24 24"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0 0 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 0 0 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>
+      </div>
+      <div>
+        <h3 class="progress-modal-title" id="pmTitle">Folyamat futtatása...</h3>
+        <div class="progress-modal-sub" id="pmSub">A rendszer végrehajtja a kért műveletet a háttérben</div>
+      </div>
+    </div>
+
+    <div class="progress-steps-list" id="pmSteps"></div>
+
+    <div class="progress-bar-track">
+      <div class="progress-bar-fill" id="pmBar"></div>
+    </div>
+
+    <div class="progress-modal-footer" id="pmFooter" style="display:none;">
+      <button type="button" class="btn btn-secondary" onclick="closeProgressModal()">Bezárás</button>
+      <a href="{{ url_for('dashboard') }}" class="btn btn-primary">Ugrás a Dashboardra ➔</a>
+    </div>
+  </div>
+</div>
+
 <script>
 function toast(msg) {
   const t = document.getElementById('toast');
@@ -51,12 +77,84 @@ function show(id, el) {
   if (el) el.classList.add('active');
 }
 
-// Visszajelzes a /save es /run utani atiranyitasrol
-(function() {
-  const p = new URLSearchParams(location.search);
-  if (p.get('saved'))   setTimeout(() => toast('Beállítások mentve.'), 80);
-  if (p.get('started')) setTimeout(() => toast('Folyamat elindítva a háttérben.'), 80);
-})();
+// --- Live Progress Pop-up Modal Controller ---
+let pmPollTimer = null;
+
+function openRunProgressModal(actionKey, actionTitle) {
+  const modal = document.getElementById('progressModal');
+  const titleEl = document.getElementById('pmTitle');
+  const subEl = document.getElementById('pmSub');
+  const stepsEl = document.getElementById('pmSteps');
+  const barEl = document.getElementById('pmBar');
+  const footerEl = document.getElementById('pmFooter');
+
+  titleEl.textContent = actionTitle + '...';
+  subEl.textContent = 'Adatgyűjtés és elemzés folyamatban a háttérben';
+  footerEl.style.display = 'none';
+  barEl.style.width = '20%';
+
+  stepsEl.innerHTML = `
+    <div class="step-item done">✓ 1. Kérés elküldve a szervernek</div>
+    <div class="step-item active" id="st-2">⏳ 2. Kapcsolódás és adatok lekérése...</div>
+    <div class="step-item" id="st-3">🤖 3. AI fájdalom-elemzés és mentés</div>
+  `;
+
+  modal.classList.add('active');
+
+  // Trigger AJAX call without page navigation
+  fetch('/run/' + actionKey + '?ajax=1', { method: 'POST' })
+    .then(r => r.json())
+    .then(() => {
+      barEl.style.width = '55%';
+      const st2 = document.getElementById('st-2');
+      if (st2) { st2.className = 'step-item done'; st2.innerHTML = '✓ 2. Adatok sikeresen letöltve'; }
+      const st3 = document.getElementById('st-3');
+      if (st3) { st3.className = 'step-item active'; }
+
+      // Start polling for job completion
+      if (pmPollTimer) clearInterval(pmPollTimer);
+      pmPollTimer = setInterval(() => pollJobStatus(actionKey), 1500);
+    })
+    .catch(() => {
+      subEl.textContent = 'Hiba történt a folyamat indításakor.';
+      barEl.style.width = '100%';
+      footerEl.style.display = 'flex';
+    });
+}
+
+function pollJobStatus(actionKey) {
+  fetch('/api/status')
+    .then(r => r.json())
+    .then(data => {
+      const job = (data.jobs || {})[actionKey];
+      if (!job) return;
+
+      if (job.status === 'done') {
+        clearInterval(pmPollTimer); pmPollTimer = null;
+        document.getElementById('pmBar').style.width = '100%';
+        document.getElementById('pmSub').textContent = 'A folyamat sikeresen befejeződött!';
+        
+        const stepsEl = document.getElementById('pmSteps');
+        stepsEl.innerHTML = `
+          <div class="step-item done">✓ 1. Kérés elküldve a szervernek</div>
+          <div class="step-item done">✓ 2. Adatok sikeresen letöltve</div>
+          <div class="step-item done">✓ 3. AI feldolgozás kész: ${job.result != null ? job.result : 'Kész'}</div>
+        `;
+        document.getElementById('pmFooter').style.display = 'flex';
+      } else if (job.status === 'error') {
+        clearInterval(pmPollTimer); pmPollTimer = null;
+        document.getElementById('pmBar').style.width = '100%';
+        document.getElementById('pmSub').textContent = 'Hiba történt: ' + (job.error || 'Ismeretlen hiba');
+        document.getElementById('pmFooter').style.display = 'flex';
+      }
+    })
+    .catch(() => {});
+}
+
+function closeProgressModal() {
+  document.getElementById('progressModal').classList.remove('active');
+  if (pmPollTimer) clearInterval(pmPollTimer);
+}
 </script>
 {% block scripts %}{% endblock %}
 </body>
