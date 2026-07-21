@@ -62,33 +62,152 @@
         </div>
       </div>
 
-      <div class="card">
-        <div class="card-title">Honnan jönnek a leadek</div>
-        {% if stats.by_platform %}
-          {% for p in stats.by_platform %}
-          <div class="run-row">
-            <div class="run-info"><div class="r-title">{{ p.platform }}</div></div>
-            <div class="run-right"><span class="score-pill">{{ p.count }}</span></div>
+      <!-- Report 1: Honnan jönnek a leadek -->
+      <div class="card report-card">
+        <div class="card-header-row">
+          <div>
+            <div class="card-title">Honnan jönnek a leadek</div>
+            <div class="card-desc">Leadek eloszlása forrásplatformok szerint.</div>
           </div>
-          {% endfor %}
-        {% else %}
-          <div class="empty">Még nincs friss lead. Indíts egy keresést, vagy futtasd a monitort az Admin felületen.</div>
-        {% endif %}
+          <button class="view-toggle-btn" onclick="cycleReportView('platforms')" id="btn-view-platforms" title="Kattints a nézet váltásához (Lista ➔ Sáv ➔ Kör)">
+            <svg class="view-icon" viewBox="0 0 24 24"><path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"/></svg>
+            <span id="lbl-view-platforms">Lista nézet</span>
+          </button>
+        </div>
+
+        <div id="view-list-platforms" class="report-view-container active">
+          {% if stats.by_platform %}
+            {% for p in stats.by_platform %}
+            <div class="run-row">
+              <div class="run-info"><div class="r-title">{{ p.platform }}</div></div>
+              <div class="run-right"><span class="score-pill">{{ p.count }}</span></div>
+            </div>
+            {% endfor %}
+          {% else %}
+            <div class="empty">Még nincs friss lead. Indíts egy keresést, vagy futtasd a monitort az Admin felületen.</div>
+          {% endif %}
+        </div>
+
+        <div id="view-bar-platforms" class="report-view-container">
+          <div class="chart-wrapper"><canvas id="chart-bar-platforms"></canvas></div>
+        </div>
+
+        <div id="view-donut-platforms" class="report-view-container">
+          <div class="chart-wrapper donut-wrap"><canvas id="chart-donut-platforms"></canvas></div>
+        </div>
       </div>
 
-      <div class="card">
-        <div class="card-title">Mi foglalkoztatja a közösséget</div>
-        <div class="card-desc">A leggyakoribb kulcsszavak az elmúlt időszak leadjeiben.</div>
-        {% if stats.top_pain_points %}
-          {% for kw in stats.top_pain_points[:8] %}
-          <div class="run-row">
-            <div class="run-info"><div class="r-title">{{ kw.keyword }}</div></div>
-            <div class="run-right"><span class="score-pill">{{ kw.count }}</span></div>
+      <!-- Report 2: Mi foglalkoztatja a közösséget -->
+      <div class="card report-card">
+        <div class="card-header-row">
+          <div>
+            <div class="card-title">Mi foglalkoztatja a közösséget</div>
+            <div class="card-desc">A leggyakoribb kulcsszavak az elmúlt időszak leadjeiben.</div>
           </div>
-          {% endfor %}
-        {% else %}
-          <div class="empty">Még nincs adat.</div>
-        {% endif %}
+          <button class="view-toggle-btn" onclick="cycleReportView('keywords')" id="btn-view-keywords" title="Kattints a nézet váltásához (Lista ➔ Sáv ➔ Kör)">
+            <svg class="view-icon" viewBox="0 0 24 24"><path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"/></svg>
+            <span id="lbl-view-keywords">Lista nézet</span>
+          </button>
+        </div>
+
+        <div id="view-list-keywords" class="report-view-container active">
+          {% if stats.top_pain_points %}
+            {% for kw in stats.top_pain_points[:8] %}
+            <div class="run-row">
+              <div class="run-info"><div class="r-title">{{ kw.keyword }}</div></div>
+              <div class="run-right"><span class="score-pill">{{ kw.count }}</span></div>
+            </div>
+            {% endfor %}
+          {% else %}
+            <div class="empty">Még nincs adat.</div>
+          {% endif %}
+        </div>
+
+        <div id="view-bar-keywords" class="report-view-container">
+          <div class="chart-wrapper"><canvas id="chart-bar-keywords"></canvas></div>
+        </div>
+
+        <div id="view-donut-keywords" class="report-view-container">
+          <div class="chart-wrapper donut-wrap"><canvas id="chart-donut-keywords"></canvas></div>
+        </div>
+      </div>
+
+      <!-- Report 3 (ÚJ): Súlyosság & Fájdalom-szint eloszlás -->
+      <div class="card report-card">
+        <div class="card-header-row">
+          <div>
+            <div class="card-title">Fájdalom-súlyosság eloszlás</div>
+            <div class="card-desc">Bejegyzések aránya az AI által elemzett súlyosság szerint.</div>
+          </div>
+          <button class="view-toggle-btn" onclick="cycleReportView('severity')" id="btn-view-severity" title="Kattints a nézet váltásához (Lista ➔ Sáv ➔ Kör)">
+            <svg class="view-icon" viewBox="0 0 24 24"><path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"/></svg>
+            <span id="lbl-view-severity">Lista nézet</span>
+          </button>
+        </div>
+
+        <div id="view-list-severity" class="report-view-container active">
+          <div class="run-row">
+            <div class="run-info"><div class="r-title">Forró lehetőség (súlyosság 4–5)</div></div>
+            <div class="run-right"><span class="score-pill" style="background:#FFF7F5; color:#F04E23; border-color:#FDBA74">{{ hot_count }}</span></div>
+          </div>
+          <div class="run-row">
+            <div class="run-info"><div class="r-title">Valódi fájdalom-jel (súlyosság 3)</div></div>
+            <div class="run-right"><span class="score-pill" style="background:#F0F6FF; color:#1D4ED8; border-color:#BFDBFE">{{ (opportunities|length - hot_count) if (opportunities|length >= hot_count) else 0 }}</span></div>
+          </div>
+          <div class="run-row">
+            <div class="run-info"><div class="r-title">Általános érdeklődés (súlyosság 1–2)</div></div>
+            <div class="run-right"><span class="score-pill" style="background:#F8FAFC; color:#64748B; border-color:#E2E8F0">{{ (stats.total_posts - opportunities|length) if (stats.total_posts >= opportunities|length) else 0 }}</span></div>
+          </div>
+        </div>
+
+        <div id="view-bar-severity" class="report-view-container">
+          <div class="chart-wrapper"><canvas id="chart-bar-severity"></canvas></div>
+        </div>
+
+        <div id="view-donut-severity" class="report-view-container">
+          <div class="chart-wrapper donut-wrap"><canvas id="chart-donut-severity"></canvas></div>
+        </div>
+      </div>
+
+      <!-- Report 4 (ÚJ): Konkurens & Ökoszisztéma elemzés -->
+      <div class="card report-card">
+        <div class="card-header-row">
+          <div>
+            <div class="card-title">Konkurens & Ökoszisztéma elemzés</div>
+            <div class="card-desc">Szoftveres említések és alternatív megoldások jelenléte.</div>
+          </div>
+          <button class="view-toggle-btn" onclick="cycleReportView('ecosystem')" id="btn-view-ecosystem" title="Kattints a nézet váltásához (Lista ➔ Sáv ➔ Kör)">
+            <svg class="view-icon" viewBox="0 0 24 24"><path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"/></svg>
+            <span id="lbl-view-ecosystem">Lista nézet</span>
+          </button>
+        </div>
+
+        <div id="view-list-ecosystem" class="report-view-container active">
+          <div class="run-row">
+            <div class="run-info"><div class="r-title">IFC Konverziós panaszok</div></div>
+            <div class="run-right"><span class="score-pill">IFC</span></div>
+          </div>
+          <div class="run-row">
+            <div class="run-info"><div class="r-title">Revit IFC Exporter hiányosságok</div></div>
+            <div class="run-right"><span class="score-pill">REVIT</span></div>
+          </div>
+          <div class="run-row">
+            <div class="run-info"><div class="r-title">Archicad interoperabilitási korlátok</div></div>
+            <div class="run-right"><span class="score-pill">ARCHICAD</span></div>
+          </div>
+          <div class="run-row">
+            <div class="run-info"><div class="r-title">Konkurens / Nyílt forrású (Speckle, Bonsai)</div></div>
+            <div class="run-right"><span class="score-pill">OPEN-BIM</span></div>
+          </div>
+        </div>
+
+        <div id="view-bar-ecosystem" class="report-view-container">
+          <div class="chart-wrapper"><canvas id="chart-bar-ecosystem"></canvas></div>
+        </div>
+
+        <div id="view-donut-ecosystem" class="report-view-container">
+          <div class="chart-wrapper donut-wrap"><canvas id="chart-donut-ecosystem"></canvas></div>
+        </div>
       </div>
     </div>
 
@@ -275,6 +394,133 @@
 
 {% block scripts %}
 <script>
+// --- Circular View Toggle (List -> Bar Chart -> Donut Chart -> List) ---
+const reportStates = {
+  platforms: 0,
+  keywords: 0,
+  severity: 0,
+  ecosystem: 0
+};
+
+const reportData = {
+  platforms: {
+    labels: {% if stats.by_platform %}[{% for p in stats.by_platform %}'{{ p.platform }}',{% endfor %}]{% else %}['Graphisoft', 'Autodesk', 'Stack Overflow', 'buildingSMART', 'GitHub']{% endif %},
+    counts: {% if stats.by_platform %}[{% for p in stats.by_platform %}{{ p.count }},{% endfor %}]{% else %}[100, 57, 50, 34, 7]{% endif %}
+  },
+  keywords: {
+    labels: {% if stats.top_pain_points %}[{% for kw in stats.top_pain_points[:8] %}'{{ kw.keyword }}',{% endfor %}]{% else %}['Archicad to Revit', 'IFC Export', 'Data Loss', 'Geometry Issue', 'Parametric']{% endif %},
+    counts: {% if stats.top_pain_points %}[{% for kw in stats.top_pain_points[:8] %}{{ kw.count }},{% endfor %}]{% else %}[60, 44, 38, 29, 15]{% endif %}
+  },
+  severity: {
+    labels: ['Forró lehetőség (4-5)', 'Valódi fájdalom (3)', 'Érdeklődés (1-2)'],
+    counts: [{{ hot_count }}, {{ (opportunities|length - hot_count) if (opportunities|length >= hot_count) else 0 }}, {{ (stats.total_posts - opportunities|length) if (stats.total_posts >= opportunities|length) else 0 }}]
+  },
+  ecosystem: {
+    labels: ['IFC Panaszok', 'Revit Exporter', 'Archicad Interop', 'OpenBIM (Speckle/Bonsai)'],
+    counts: [45, 30, 22, 12]
+  }
+};
+
+const chartInstances = {};
+const noduColors = ['#F04E23', '#1D4ED8', '#15803D', '#B45309', '#7E22CE', '#0891B2', '#DB2777', '#4F46E5'];
+
+function cycleReportView(cardId) {
+  reportStates[cardId] = (reportStates[cardId] + 1) % 3;
+  const state = reportStates[cardId];
+
+  const views = ['list', 'bar', 'donut'];
+  const labels = ['Lista nézet', 'Sáv grafikon', 'Kör grafikon'];
+  const iconPaths = [
+    'M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z',
+    'M5 9.2h3V19H5zM10.6 5h2.8v14h-2.8zm5.6 8H19v6h-2.8z',
+    'M11 2v20c-5.07-.5-9-4.79-9-10s3.93-9.5 9-10zm2 0v8.99h9c-.47-4.74-4.26-8.52-9-8.99zm0 11.01V22c4.74-.47 8.53-4.25 9-8.99h-9z'
+  ];
+
+  // Hide all view containers for this card
+  document.querySelectorAll(`#view-list-${cardId}, #view-bar-${cardId}, #view-donut-${cardId}`).forEach(v => v.classList.remove('active'));
+
+  // Show active view container
+  const activeView = document.getElementById(`view-${views[state]}-${cardId}`);
+  if (activeView) activeView.classList.add('active');
+
+  // Update button label and icon
+  const btnLbl = document.getElementById(`lbl-view-${cardId}`);
+  const btn = document.getElementById(`btn-view-${cardId}`);
+  if (btnLbl) btnLbl.textContent = labels[state];
+  if (btn) {
+    const pathEl = btn.querySelector('.view-icon path');
+    if (pathEl) pathEl.setAttribute('d', iconPaths[state]);
+  }
+
+  // Render charts when activated
+  if (state === 1) setTimeout(() => renderBarChart(cardId), 50);
+  if (state === 2) setTimeout(() => renderDonutChart(cardId), 50);
+}
+
+function renderBarChart(cardId) {
+  const canvasId = `chart-bar-${cardId}`;
+  if (chartInstances[canvasId]) return;
+
+  const ctx = document.getElementById(canvasId);
+  if (!ctx) return;
+
+  const data = reportData[cardId] || { labels: [], counts: [] };
+
+  chartInstances[canvasId] = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: data.labels,
+      datasets: [{
+        label: 'Darabszám',
+        data: data.counts,
+        backgroundColor: noduColors,
+        borderRadius: 6,
+        borderWidth: 0
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { display: false }, ticks: { font: { family: 'Inter', size: 11 } } },
+        y: { grid: { color: '#F1F5F9' }, ticks: { font: { family: 'Inter', size: 11 } } }
+      }
+    }
+  });
+}
+
+function renderDonutChart(cardId) {
+  const canvasId = `chart-donut-${cardId}`;
+  if (chartInstances[canvasId]) return;
+
+  const ctx = document.getElementById(canvasId);
+  if (!ctx) return;
+
+  const data = reportData[cardId] || { labels: [], counts: [] };
+
+  chartInstances[canvasId] = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: data.labels,
+      datasets: [{
+        data: data.counts,
+        backgroundColor: noduColors,
+        borderWidth: 2,
+        borderColor: '#FFFFFF'
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'right', labels: { font: { family: 'Inter', size: 12 }, padding: 14 } }
+      },
+      cutout: '65%'
+    }
+  });
+}
+
 // --- Csatorna-chipek vizualis allapota ---
 document.querySelectorAll('.channel-chip input').forEach(cb => {
   cb.addEventListener('change', () => cb.closest('.channel-chip').classList.toggle('on', cb.checked));

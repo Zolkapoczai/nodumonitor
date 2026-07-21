@@ -598,3 +598,52 @@ textarea { resize: vertical; min-height: 80px; }
   display: flex; align-items: center; gap: 8px; flex-shrink: 0;
   margin-left: auto;
 }
+
+/* ================= Report Card View Toggle & Chart Containers ================= */
+.report-card {
+  position: relative;
+}
+
+.card-header-row {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
+  margin-bottom: 16px;
+}
+
+.view-toggle-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px; border: 1px solid var(--border); border-radius: 20px;
+  font-family: var(--font-heading); font-size: 11.5px; font-weight: 700;
+  color: var(--text-dark); background: var(--bg);
+  cursor: pointer; user-select: none; transition: all .15s ease;
+  flex-shrink: 0;
+}
+
+.view-toggle-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-light);
+  transform: translateY(-1px);
+}
+
+.view-icon {
+  width: 14px; height: 14px; fill: currentColor; flex-shrink: 0;
+}
+
+.report-view-container {
+  display: none;
+}
+
+.report-view-container.active {
+  display: block;
+}
+
+.chart-wrapper {
+  position: relative;
+  height: 240px;
+  width: 100%;
+  padding-top: 10px;
+}
+
+.chart-wrapper.donut-wrap {
+  height: 220px;
+}
