@@ -270,14 +270,15 @@
 
         <div class="filter-pills-row">
           <span class="filter-label">Csatornák:</span>
-          <label class="filter-pill on"><input type="checkbox" value="youtube" class="raw-chan" checked onchange="runRawSearch()"> YouTube</label>
-          <label class="filter-pill on"><input type="checkbox" value="reddit" class="raw-chan" checked onchange="runRawSearch()"> Reddit</label>
-          <label class="filter-pill on"><input type="checkbox" value="stackoverflow" class="raw-chan" checked onchange="runRawSearch()"> Stack Overflow</label>
-          <label class="filter-pill on"><input type="checkbox" value="discourse" class="raw-chan" checked onchange="runRawSearch()"> Discourse</label>
-          <label class="filter-pill on"><input type="checkbox" value="github" class="raw-chan" checked onchange="runRawSearch()"> GitHub</label>
-          <label class="filter-pill on"><input type="checkbox" value="graphisoft" class="raw-chan" checked onchange="runRawSearch()"> Graphisoft</label>
-          <label class="filter-pill on"><input type="checkbox" value="autodesk" class="raw-chan" checked onchange="runRawSearch()"> Autodesk</label>
-          <label class="filter-pill on"><input type="checkbox" value="revitforum" class="raw-chan" checked onchange="runRawSearch()"> RevitForum</label>
+          <button type="button" class="filter-pill on" id="pill-all" onclick="selectChannelFilter('all')">Összes</button>
+          <button type="button" class="filter-pill" data-chan="youtube" onclick="selectChannelFilter('youtube')">YouTube</button>
+          <button type="button" class="filter-pill" data-chan="reddit" onclick="selectChannelFilter('reddit')">Reddit</button>
+          <button type="button" class="filter-pill" data-chan="stackoverflow" onclick="selectChannelFilter('stackoverflow')">Stack Overflow</button>
+          <button type="button" class="filter-pill" data-chan="discourse" onclick="selectChannelFilter('discourse')">Discourse</label>
+          <button type="button" class="filter-pill" data-chan="github" onclick="selectChannelFilter('github')">GitHub</button>
+          <button type="button" class="filter-pill" data-chan="graphisoft" onclick="selectChannelFilter('graphisoft')">Graphisoft</button>
+          <button type="button" class="filter-pill" data-chan="autodesk" onclick="selectChannelFilter('autodesk')">Autodesk</button>
+          <button type="button" class="filter-pill" data-chan="revitforum" onclick="selectChannelFilter('revitforum')">RevitForum</button>
         </div>
         <div class="filter-status-row" id="raw-status"></div>
       </div>
@@ -537,11 +538,31 @@ function esc(s) {
   return d.innerHTML;
 }
 
-// --- Nyers leadek kereses ---
+let activeChannelFilter = 'all';
+
+function selectChannelFilter(chan) {
+  activeChannelFilter = chan;
+  document.querySelectorAll('.filter-pills-row .filter-pill').forEach(btn => btn.classList.remove('on'));
+
+  if (chan === 'all') {
+    const pillAll = document.getElementById('pill-all');
+    if (pillAll) pillAll.classList.add('on');
+  } else {
+    const targetBtn = document.querySelector(`.filter-pill[data-chan="${chan}"]`);
+    if (targetBtn) targetBtn.classList.add('on');
+  }
+
+  runRawSearch();
+}
+
 function runRawSearch() {
   const q = document.getElementById('raw-query').value.trim();
-  const channels = [...document.querySelectorAll('.raw-chan:checked')].map(c => c.value);
-  if (!channels.length) { toast('Válassz legalább egy csatornát.'); return; }
+  let channels = [];
+  if (activeChannelFilter === 'all') {
+    channels = ['youtube', 'reddit', 'stackoverflow', 'discourse', 'github', 'graphisoft', 'autodesk', 'revitforum'];
+  } else {
+    channels = [activeChannelFilter];
+  }
 
   const btn = document.getElementById('raw-btn');
   btn.disabled = true; btn.textContent = 'Keresés...';
@@ -549,14 +570,15 @@ function runRawSearch() {
   document.getElementById('raw-results').innerHTML = '';
 
   const url = '/api/posts?q=' + encodeURIComponent(q) + '&platforms=' + encodeURIComponent(channels.join(','));
-  
+
   fetch(url).then(r => r.json()).then(data => {
-    btn.disabled = false; btn.textContent = 'Szűrés';
+    btn.disabled = false; btn.textContent = 'Keresés';
     const results = data.results || [];
-    document.getElementById('raw-status').textContent = results.length + ' találat' + (q ? ' erre: "' + q + '"' : '');
-    renderRawLeads(results);
+    const filterName = activeChannelFilter === 'all' ? 'Összes csatorna' : activeChannelFilter.toUpperCase();
+    document.getElementById('raw-status').textContent = results.length + ' találat (' + filterName + ')' + (q ? ' erre: "' + q + '"' : '');
+    renderRawLeads(results, activeChannelFilter);
   }).catch(() => {
-    btn.disabled = false; btn.textContent = 'Szűrés';
+    btn.disabled = false; btn.textContent = 'Keresés';
     toast('Hiba a keresés során.');
   });
 }
@@ -574,10 +596,14 @@ function formatCleanUrl(rawUrl) {
   }
 }
 
-function renderRawLeads(results) {
+function renderRawLeads(results, activeChan) {
   const box = document.getElementById('raw-results');
   if (!results.length) {
-    box.innerHTML = '<div class="empty">Nincs találat a megadott feltételekkel.</div>';
+    if (activeChan === 'youtube') {
+      box.innerHTML = '<div class="empty">Még nincs letöltött YouTube komment az adatbázisban.<br><br><a href="/admin" class="btn btn-primary btn-sm">1. Adj meg YouTube API kulcsot az Admin felületen</a> &nbsp; <a href="/admin" class="btn btn-secondary btn-sm">2. Indítsd el a YouTube kommentek gyűjtését</a></div>';
+    } else {
+      box.innerHTML = '<div class="empty">Nincs találat a megadott feltételekkel.</div>';
+    }
     return;
   }
   let html = '<div class="raw-leads-list">';
