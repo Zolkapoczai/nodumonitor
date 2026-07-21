@@ -137,24 +137,29 @@
     <!-- ===================== Nyers leadek ===================== -->
     <div id="s-raw" class="section">
       <h1 class="page-title">Nyers leadek</h1>
-      <p class="page-desc">Böngéssz az összes begyűjtött poszt között, beleértve azokat is, amiket a rendszer nem minősített fájdalomnak. Az eredmények időrendben jelennek meg.</p>
+      <p class="page-desc">Böngéssz az összes begyűjtött poszt között. Az eredmények időrendben jelennek meg.</p>
 
-      <div class="card">
-        <div class="search-box">
-          <input type="text" id="raw-query" placeholder="Keresés címben vagy szövegben... (opcionális)"
-            onkeydown="if(event.key==='Enter'){event.preventDefault();runRawSearch();}">
-          <button class="btn btn-primary" id="raw-btn" onclick="runRawSearch()">Szűrés</button>
+      <div class="card filter-card">
+        <div class="filter-search-row">
+          <div class="search-input-wrap">
+            <svg class="search-icon" viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+            <input type="text" id="raw-query" placeholder="Keresés címben vagy szövegben..."
+              onkeydown="if(event.key==='Enter'){event.preventDefault();runRawSearch();}">
+          </div>
+          <button class="btn btn-primary" id="raw-btn" onclick="runRawSearch()">Keresés</button>
         </div>
-        <div class="channel-row">
-          <label class="channel-chip on"><input type="checkbox" value="reddit" class="raw-chan" checked> Reddit</label>
-          <label class="channel-chip on"><input type="checkbox" value="stackoverflow" class="raw-chan" checked> Stack Overflow</label>
-          <label class="channel-chip on"><input type="checkbox" value="discourse" class="raw-chan" checked> Discourse</label>
-          <label class="channel-chip on"><input type="checkbox" value="github" class="raw-chan" checked> GitHub</label>
-          <label class="channel-chip on"><input type="checkbox" value="graphisoft" class="raw-chan" checked> Graphisoft</label>
-          <label class="channel-chip on"><input type="checkbox" value="autodesk" class="raw-chan" checked> Autodesk</label>
-          <label class="channel-chip on"><input type="checkbox" value="revitforum" class="raw-chan" checked> RevitForum</label>
+
+        <div class="filter-pills-row">
+          <span class="filter-label">Csatornák:</span>
+          <label class="filter-pill on"><input type="checkbox" value="reddit" class="raw-chan" checked onchange="runRawSearch()"> Reddit</label>
+          <label class="filter-pill on"><input type="checkbox" value="stackoverflow" class="raw-chan" checked onchange="runRawSearch()"> Stack Overflow</label>
+          <label class="filter-pill on"><input type="checkbox" value="discourse" class="raw-chan" checked onchange="runRawSearch()"> Discourse</label>
+          <label class="filter-pill on"><input type="checkbox" value="github" class="raw-chan" checked onchange="runRawSearch()"> GitHub</label>
+          <label class="filter-pill on"><input type="checkbox" value="graphisoft" class="raw-chan" checked onchange="runRawSearch()"> Graphisoft</label>
+          <label class="filter-pill on"><input type="checkbox" value="autodesk" class="raw-chan" checked onchange="runRawSearch()"> Autodesk</label>
+          <label class="filter-pill on"><input type="checkbox" value="revitforum" class="raw-chan" checked onchange="runRawSearch()"> RevitForum</label>
         </div>
-        <div class="card-desc" id="raw-status" style="margin-top:12px; margin-bottom:0"></div>
+        <div class="filter-status-row" id="raw-status"></div>
       </div>
 
       <div id="raw-results"></div>
@@ -305,26 +310,47 @@ function runRawSearch() {
   });
 }
 
+function formatCleanUrl(rawUrl) {
+  if (!rawUrl) return '';
+  try {
+    const u = new URL(rawUrl);
+    let host = u.hostname.replace('www.', '');
+    let path = u.pathname;
+    if (path.length > 25) path = path.slice(0, 25) + '…';
+    return host + path;
+  } catch (e) {
+    return rawUrl.slice(0, 35) + '…';
+  }
+}
+
 function renderRawLeads(results) {
   const box = document.getElementById('raw-results');
   if (!results.length) {
     box.innerHTML = '<div class="empty">Nincs találat a megadott feltételekkel.</div>';
     return;
   }
-  let html = '<div class="card">';
+  let html = '<div class="raw-leads-list">';
   results.forEach(r => {
-    html += '<div class="result-row" id="raw-' + r.id + '">' +
-      '<div class="result-main">' +
-        '<div class="result-title">' + esc(r.title || '(cím nélkül)') + '</div>' +
-        '<div class="result-meta"><span class="platform-pill">' + esc(r.platform) + '</span>' +
-          '<span class="score-pill">score: ' + (r.score || 0) + '</span>' + 
-          (r.author ? ' <span>szerző: ' + esc(r.author) + '</span>' : '') + '</div>' +
-        '<div class="result-snippet">' + esc((r.body || '').slice(0, 300)) + '...</div>' +
-        '<a class="result-url" href="' + esc(r.url) + '" target="_blank">' + esc(r.url) + '</a>' +
+    const cleanLink = formatCleanUrl(r.url);
+    const cleanBody = esc((r.body || '').replace(/&nbsp;/g, ' ').replace(/&[a-z]+;/g, '').trim().slice(0, 240));
+    html += '<div class="lead-item-card" id="raw-' + r.id + '">' +
+      '<div class="lead-item-header">' +
+        '<div class="lead-item-title">' + esc(r.title || '(cím nélkül)') + '</div>' +
+        '<div class="lead-item-badges">' +
+          '<span class="platform-pill">' + esc(r.platform) + '</span>' +
+          '<span class="score-pill">score: ' + (r.score || 0) + '</span>' +
+        '</div>' +
       '</div>' +
-      '<div class="result-actions">' +
-        '<button class="btn btn-secondary btn-sm" onclick="genDraft(' + r.id + ')">Választervezet</button>' +
-        '<button class="btn btn-primary btn-sm" onclick="toSalesOS(' + r.id + ', this)">Sales OS</button>' +
+      '<div class="lead-item-body">' + cleanBody + (cleanBody.length >= 240 ? '...' : '') + '</div>' +
+      '<div class="lead-item-footer">' +
+        '<a class="lead-item-link" href="' + esc(r.url) + '" target="_blank" title="' + esc(r.url) + '">' +
+          '<svg class="link-icon" viewBox="0 0 24 24"><path d="M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg>' +
+          '<span>' + esc(cleanLink) + '</span>' +
+        '</a>' +
+        '<div class="lead-item-actions">' +
+          '<button class="btn btn-secondary btn-sm" onclick="genDraft(' + r.id + ')">Választervezet</button>' +
+          '<button class="btn btn-primary btn-sm" onclick="toSalesOS(' + r.id + ', this)">Sales OS</button>' +
+        '</div>' +
       '</div>' +
     '</div>';
   });

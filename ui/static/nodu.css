@@ -459,3 +459,142 @@ textarea { resize: vertical; min-height: 80px; }
   .main { padding: 24px 20px; }
   .topbar-right { display: none; }
 }
+
+/* ================= Minimalist Filter Card & Toolbar ================= */
+.filter-card {
+  padding: 20px 24px;
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin-bottom: 24px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+}
+
+.filter-search-row {
+  display: flex; gap: 12px; align-items: center;
+  margin-bottom: 16px;
+}
+
+.search-input-wrap {
+  position: relative; flex: 1;
+  display: flex; align-items: center;
+}
+
+.search-input-wrap input {
+  padding-left: 38px;
+  height: 42px; font-size: 14px;
+  border-radius: 8px; border: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.search-input-wrap input:focus {
+  background: #FFFFFF;
+  border-color: var(--accent);
+}
+
+.search-icon {
+  position: absolute; left: 12px; width: 18px; height: 18px;
+  fill: var(--text-muted); pointer-events: none;
+}
+
+.filter-pills-row {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding-top: 14px; border-top: 1px dashed var(--border);
+}
+
+.filter-label {
+  font-family: var(--font-heading);
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--text-muted);
+  margin-right: 4px;
+}
+
+.filter-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 12px; border: 1px solid var(--border); border-radius: 20px;
+  font-size: 12px; font-weight: 600; cursor: pointer; user-select: none;
+  background: #FFFFFF; color: var(--text-muted);
+  transition: all .15s ease;
+}
+
+.filter-pill input { display: none; }
+
+.filter-pill:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.filter-pill.on {
+  border-color: var(--accent);
+  background: var(--accent-light);
+  color: var(--accent);
+}
+
+.filter-status-row {
+  font-size: 12px; color: var(--text-muted);
+  margin-top: 10px; font-weight: 500;
+}
+
+/* ================= Raw Leads Item List ================= */
+.raw-leads-list {
+  display: flex; flex-direction: column; gap: 14px;
+}
+
+.lead-item-card {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px 24px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+  transition: all .15s ease;
+}
+
+.lead-item-card:hover {
+  box-shadow: 0 4px 14px rgba(0,0,0,0.05);
+  border-color: var(--border-strong);
+}
+
+.lead-item-header {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
+  margin-bottom: 10px;
+}
+
+.lead-item-title {
+  font-family: var(--font-heading);
+  font-size: 15px; font-weight: 700; color: var(--text);
+  line-height: 1.35; flex: 1;
+}
+
+.lead-item-badges {
+  display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+}
+
+.lead-item-body {
+  font-size: 13.5px; color: var(--text-dark);
+  line-height: 1.55; margin-bottom: 14px;
+  word-break: break-word;
+}
+
+.lead-item-footer {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding-top: 12px; border-top: 1px solid var(--bg);
+  flex-wrap: wrap;
+}
+
+.lead-item-link {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 600; color: var(--blue);
+  text-decoration: none; max-width: 60%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.lead-item-link:hover { text-decoration: underline; }
+
+.link-icon {
+  width: 14px; height: 14px; fill: currentColor; flex-shrink: 0;
+}
+
+.lead-item-actions {
+  display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+  margin-left: auto;
+}
