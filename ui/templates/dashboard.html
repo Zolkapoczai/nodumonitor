@@ -69,13 +69,13 @@
             <div class="card-title">Honnan jönnek a leadek</div>
             <div class="card-desc">Leadek eloszlása forrásplatformok szerint.</div>
           </div>
-          <button class="view-toggle-btn" onclick="cycleReportView('platforms')" id="btn-view-platforms" title="Kattints a nézet váltásához (Lista ➔ Sáv ➔ Kör)">
-            <svg class="view-icon" viewBox="0 0 24 24"><path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"/></svg>
-            <span id="lbl-view-platforms">Lista nézet</span>
+          <button class="view-toggle-btn" onclick="cycleReportView('platforms')" id="btn-view-platforms" title="Kattints a nézet váltásához (Sáv ➔ Kör ➔ Lista)">
+            <svg class="view-icon" viewBox="0 0 24 24"><path d="M5 9.2h3V19H5zM10.6 5h2.8v14h-2.8zm5.6 8H19v6h-2.8z"/></svg>
+            <span id="lbl-view-platforms">Sáv grafikon</span>
           </button>
         </div>
 
-        <div id="view-list-platforms" class="report-view-container active">
+        <div id="view-list-platforms" class="report-view-container">
           {% if stats.by_platform %}
             {% for p in stats.by_platform %}
             <div class="run-row">
@@ -88,7 +88,7 @@
           {% endif %}
         </div>
 
-        <div id="view-bar-platforms" class="report-view-container">
+        <div id="view-bar-platforms" class="report-view-container active">
           <div class="chart-wrapper"><canvas id="chart-bar-platforms"></canvas></div>
         </div>
 
@@ -104,13 +104,13 @@
             <div class="card-title">Mi foglalkoztatja a közösséget</div>
             <div class="card-desc">A leggyakoribb kulcsszavak az elmúlt időszak leadjeiben.</div>
           </div>
-          <button class="view-toggle-btn" onclick="cycleReportView('keywords')" id="btn-view-keywords" title="Kattints a nézet váltásához (Lista ➔ Sáv ➔ Kör)">
-            <svg class="view-icon" viewBox="0 0 24 24"><path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"/></svg>
-            <span id="lbl-view-keywords">Lista nézet</span>
+          <button class="view-toggle-btn" onclick="cycleReportView('keywords')" id="btn-view-keywords" title="Kattints a nézet váltásához (Sáv ➔ Kör ➔ Lista)">
+            <svg class="view-icon" viewBox="0 0 24 24"><path d="M5 9.2h3V19H5zM10.6 5h2.8v14h-2.8zm5.6 8H19v6h-2.8z"/></svg>
+            <span id="lbl-view-keywords">Sáv grafikon</span>
           </button>
         </div>
 
-        <div id="view-list-keywords" class="report-view-container active">
+        <div id="view-list-keywords" class="report-view-container">
           {% if stats.top_pain_points %}
             {% for kw in stats.top_pain_points[:8] %}
             <div class="run-row">
@@ -123,7 +123,7 @@
           {% endif %}
         </div>
 
-        <div id="view-bar-keywords" class="report-view-container">
+        <div id="view-bar-keywords" class="report-view-container active">
           <div class="chart-wrapper"><canvas id="chart-bar-keywords"></canvas></div>
         </div>
 
@@ -139,13 +139,13 @@
             <div class="card-title">Fájdalom-súlyosság eloszlás</div>
             <div class="card-desc">Bejegyzések aránya az AI által elemzett súlyosság szerint.</div>
           </div>
-          <button class="view-toggle-btn" onclick="cycleReportView('severity')" id="btn-view-severity" title="Kattints a nézet váltásához (Lista ➔ Sáv ➔ Kör)">
-            <svg class="view-icon" viewBox="0 0 24 24"><path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"/></svg>
-            <span id="lbl-view-severity">Lista nézet</span>
+          <button class="view-toggle-btn" onclick="cycleReportView('severity')" id="btn-view-severity" title="Kattints a nézet váltásához (Sáv ➔ Kör ➔ Lista)">
+            <svg class="view-icon" viewBox="0 0 24 24"><path d="M5 9.2h3V19H5zM10.6 5h2.8v14h-2.8zm5.6 8H19v6h-2.8z"/></svg>
+            <span id="lbl-view-severity">Sáv grafikon</span>
           </button>
         </div>
 
-        <div id="view-list-severity" class="report-view-container active">
+        <div id="view-list-severity" class="report-view-container">
           <div class="run-row">
             <div class="run-info"><div class="r-title">Forró lehetőség (súlyosság 4–5)</div></div>
             <div class="run-right"><span class="score-pill" style="background:#FFF7F5; color:#F04E23; border-color:#FDBA74">{{ hot_count }}</span></div>
@@ -160,7 +160,7 @@
           </div>
         </div>
 
-        <div id="view-bar-severity" class="report-view-container">
+        <div id="view-bar-severity" class="report-view-container active">
           <div class="chart-wrapper"><canvas id="chart-bar-severity"></canvas></div>
         </div>
 
@@ -176,13 +176,13 @@
             <div class="card-title">Konkurens & Ökoszisztéma elemzés</div>
             <div class="card-desc">Szoftveres említések és alternatív megoldások jelenléte.</div>
           </div>
-          <button class="view-toggle-btn" onclick="cycleReportView('ecosystem')" id="btn-view-ecosystem" title="Kattints a nézet váltásához (Lista ➔ Sáv ➔ Kör)">
-            <svg class="view-icon" viewBox="0 0 24 24"><path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"/></svg>
-            <span id="lbl-view-ecosystem">Lista nézet</span>
+          <button class="view-toggle-btn" onclick="cycleReportView('ecosystem')" id="btn-view-ecosystem" title="Kattints a nézet váltásához (Sáv ➔ Kör ➔ Lista)">
+            <svg class="view-icon" viewBox="0 0 24 24"><path d="M5 9.2h3V19H5zM10.6 5h2.8v14h-2.8zm5.6 8H19v6h-2.8z"/></svg>
+            <span id="lbl-view-ecosystem">Sáv grafikon</span>
           </button>
         </div>
 
-        <div id="view-list-ecosystem" class="report-view-container active">
+        <div id="view-list-ecosystem" class="report-view-container">
           <div class="run-row">
             <div class="run-info"><div class="r-title">IFC Konverziós panaszok</div></div>
             <div class="run-right"><span class="score-pill">IFC</span></div>
@@ -201,7 +201,7 @@
           </div>
         </div>
 
-        <div id="view-bar-ecosystem" class="report-view-container">
+        <div id="view-bar-ecosystem" class="report-view-container active">
           <div class="chart-wrapper"><canvas id="chart-bar-ecosystem"></canvas></div>
         </div>
 
@@ -395,13 +395,17 @@
 
 {% block scripts %}
 <script>
-// --- Circular View Toggle (List -> Bar Chart -> Donut Chart -> List) ---
+// --- Circular View Toggle (Bar Chart -> Donut Chart -> List -> Bar Chart) ---
 const reportStates = {
-  platforms: 0,
-  keywords: 0,
-  severity: 0,
-  ecosystem: 0
+  platforms: 1,
+  keywords: 1,
+  severity: 1,
+  ecosystem: 1
 };
+
+window.addEventListener('DOMContentLoaded', () => {
+  ['platforms', 'keywords', 'severity', 'ecosystem'].forEach(id => renderBarChart(id));
+});
 
 const reportData = {
   platforms: {
