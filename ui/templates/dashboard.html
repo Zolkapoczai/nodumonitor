@@ -87,8 +87,9 @@
         {% set heat = 'hot' if (o.severity or 0) >= 4 else ('warm' if o.severity == 3 else 'cool') %}
         <div class="opp-card" id="opp-{{ o.post_id }}">
           <div class="opp-head">
-            {% if o.nodu_mention %}<span class="badge-referral">✨ ORGANIC REFERRAL</span>{% endif %}
-            {% if o.solved_internally %}<span class="badge-hidden-opp">💡 HIDDEN OPP</span>{% endif %}
+            {% if o.nodu_mention %}<span class="badge-referral"><svg viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg> ORGANIC REFERRAL</span>{% endif %}
+            {% if o.solved_internally %}<span class="badge-hidden-opp"><svg viewBox="0 0 24 24"><path d="M12 2a7 7 0 00-7 7c0 2.38 1.19 4.47 3 5.74V17a1 1 0 001 1h6a1 1 0 001-1v-2.26c1.81-1.27 3-3.36 3-5.74a7 7 0 00-7-7zM9 21a1 1 0 001 1h4a1 1 0 001-1v-1H9v1z"/></svg> HIDDEN OPP</span>{% endif %}
+            {% if o.competitor_mentioned %}<span class="badge-competitor"><svg viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/></svg> COMPETITOR{% if o.competitor_name %}: {{ o.competitor_name | upper }}{% endif %}</span>{% endif %}
             <span class="sev-badge sev-{{ heat }}">súlyosság {{ o.severity }}</span>
             {% if o.buying_intent %}<span class="intent-badge">vásárlási szándék</span>{% endif %}
             <span class="platform-pill">{{ o.platform }}</span>

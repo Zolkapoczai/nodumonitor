@@ -30,7 +30,7 @@ from storage.db import get_unclassified_posts, get_signals_for_review, insert_si
 # A modell + prompt verziojat kodolja — ha a promptot vagy a modellt valtjuk,
 # ezt is bumpeljuk, hogy a regi/uj jelek megkulonboztethetok legyenek
 # visszamenoleges ujraszamolasnal (audit §9, scoring_configs elozmenye).
-CLASSIFIER_VERSION = "gemini-2.5-flash-v2"
+CLASSIFIER_VERSION = "gemini-2.5-flash-v3"
 
 _ISSUE_TYPES = ["parametric_data", "metadata", "geometry", "coordination", "other"]
 
@@ -64,11 +64,6 @@ MEZOK:
   ezt a szoftvert hasznalja/erinti (nem kizarolagos - lehet mindketto magas)
 - ifc_involved: erintett-e az IFC formatum a leirt problemaban
 - issue_types: 0-3 cimke a listabol: {_ISSUE_TYPES}
-  (parametric_data = elem-parameterek/tulajdonsagok elvesznek/rosszul mapp­elodnek;
-   metadata = klasszifikacio/attributum-metaadat problema;
-   geometry = geometria torzul/eltunik/duplikalodik;
-   coordination = tobb-diszciplinas koordinacio/munkafolyamat problema;
-   other = egyeb, ha egyik sem illik)
 - severity: 1-5 egesz szam (1 = trivialis/kiváncsisagi kerdes, 3 = valos, de kezelheto
   kellemetlenseg, 5 = sulyos, blokkolo problema hatarido-nyomassal vagy tobbszori
   probalkozassal)
@@ -76,15 +71,16 @@ MEZOK:
   hanem alternativat/eszkozt/tanacsot keres)
 - buying_intent_signals: 0-4 rovid angol kifejezes, ami erre utal (pl.
   "asking for alternative tool", "mentions deadline pressure", "evaluating options")
-  — ures lista, ha nincs ilyen jel
 - role_hypothesis: a szerzo valoszinu szerepe egy rovid angol kifejezesben
-  (pl. "BIM Coordinator", "Architect", "Software Developer", "unknown" ha nem
-  allapithato meg a szovegbol)
 - solved_internally: true, ha a szerzo leirja, hogy KORABBAN volt adatcsere problemajuk, 
   de valamilyen belső workaronddal/scripttel (sajat megoldassal) mar "megoldottak",
   vagy manualisan oldjak meg a feladatot. Ez jelzi, hogy van/volt fajdalom.
 - nodu_mention: true, ha a bejegyzes/komment organikusan MEGEMLITI a "nodu" vagy a
   "nodu bridge" nevet (pl. mert valaki mas ajanlja ezt a megoldast).
+- competitor_mentioned: true, ha a szerzo kifejezetten megemlit egy versenytars
+  adatcsere megoldast (pl. Speckle, BIMcollab, DiRoots, Ideate, Flux, Konstru stb.)
+  mint eszkozt, amivel probalkozik, vagy amire atvaltott.
+- competitor_name: a megemlitett versenytars neve (pl. "Speckle"), vagy ures string.
 - confidence: 0.0-1.0, mennyire biztos a sajat osztalyozasodban
 - rationale: 1 mondat angolul, MIERT ezt a dontest hoztad (kulonosen is_pain es
   severity indoklasa)
@@ -118,6 +114,8 @@ _SCHEMA = {
         "role_hypothesis": {"type": "STRING"},
         "solved_internally": {"type": "BOOLEAN"},
         "nodu_mention": {"type": "BOOLEAN"},
+        "competitor_mentioned": {"type": "BOOLEAN"},
+        "competitor_name": {"type": "STRING"},
         "confidence": {"type": "NUMBER"},
         "rationale": {"type": "STRING"},
     },
@@ -125,7 +123,8 @@ _SCHEMA = {
         "is_pain", "pain_summary", "tech_summary", "archicad_probability",
         "revit_probability", "ifc_involved", "issue_types", "severity",
         "buying_intent", "buying_intent_signals", "role_hypothesis",
-        "solved_internally", "nodu_mention", "confidence", "rationale",
+        "solved_internally", "nodu_mention", "competitor_mentioned",
+        "competitor_name", "confidence", "rationale",
     ],
 }
 
@@ -202,6 +201,8 @@ class PainClassifier:
             "role_hypothesis": parsed.get("role_hypothesis", ""),
             "solved_internally": 1 if parsed.get("solved_internally") else 0,
             "nodu_mention": 1 if parsed.get("nodu_mention") else 0,
+            "competitor_mentioned": 1 if parsed.get("competitor_mentioned") else 0,
+            "competitor_name": parsed.get("competitor_name", ""),
             "confidence": parsed.get("confidence"),
             "rationale": parsed.get("rationale", ""),
             "classifier_version": CLASSIFIER_VERSION,

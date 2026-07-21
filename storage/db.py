@@ -73,6 +73,8 @@ def init_db(db_path: str) -> None:
             classified_at         TEXT    NOT NULL,
             solved_internally     INTEGER DEFAULT 0,
             nodu_mention          INTEGER DEFAULT 0,
+            competitor_mentioned  INTEGER DEFAULT 0,
+            competitor_name       TEXT,
             UNIQUE(post_id)
         );
     """)
@@ -86,6 +88,9 @@ def init_db(db_path: str) -> None:
         conn.execute("ALTER TABLE signals ADD COLUMN solved_internally INTEGER DEFAULT 0")
     if "nodu_mention" not in signal_cols:
         conn.execute("ALTER TABLE signals ADD COLUMN nodu_mention INTEGER DEFAULT 0")
+    if "competitor_mentioned" not in signal_cols:
+        conn.execute("ALTER TABLE signals ADD COLUMN competitor_mentioned INTEGER DEFAULT 0")
+        conn.execute("ALTER TABLE signals ADD COLUMN competitor_name TEXT")
         
     conn.commit()
     conn.close()
@@ -167,13 +172,13 @@ def insert_signal(db_path: str, record: dict) -> bool:
                  archicad_probability, revit_probability, ifc_involved,
                  issue_types, severity, buying_intent, buying_intent_signals,
                  role_hypothesis, confidence, rationale, classifier_version, classified_at,
-                 solved_internally, nodu_mention)
+                 solved_internally, nodu_mention, competitor_mentioned, competitor_name)
             VALUES
                 (:post_id, :is_pain, :pain_summary, :tech_summary,
                  :archicad_probability, :revit_probability, :ifc_involved,
                  :issue_types, :severity, :buying_intent, :buying_intent_signals,
                  :role_hypothesis, :confidence, :rationale, :classifier_version, :classified_at,
-                 :solved_internally, :nodu_mention)
+                 :solved_internally, :nodu_mention, :competitor_mentioned, :competitor_name)
             """,
             record,
         )
@@ -246,7 +251,8 @@ def get_recent_pain_signals(db_path: str, lookback_days: int = 7, limit: int = 8
     rows = conn.execute(
         """
         SELECT s.pain_summary, s.tech_summary, s.issue_types, s.severity,
-               s.buying_intent, s.solved_internally, s.nodu_mention, p.platform, p.title
+               s.buying_intent, s.solved_internally, s.nodu_mention, 
+               s.competitor_mentioned, s.competitor_name, p.platform, p.title
         FROM signals s JOIN posts p ON s.post_id = p.id
         WHERE s.is_pain = 1 AND p.search_term IS NULL AND p.fetched_at >= ?
         ORDER BY s.nodu_mention DESC, s.severity DESC, s.buying_intent DESC, s.confidence DESC
@@ -277,7 +283,9 @@ def get_post_with_signal(db_path: str, post_id: int) -> dict | None:
                s.buying_intent    AS sig_buying_intent,
                s.role_hypothesis  AS sig_role_hypothesis,
                s.solved_internally AS sig_solved_internally,
-               s.nodu_mention     AS sig_nodu_mention
+               s.nodu_mention     AS sig_nodu_mention,
+               s.competitor_mentioned AS sig_competitor_mentioned,
+               s.competitor_name  AS sig_competitor_name
         FROM posts p LEFT JOIN signals s ON s.post_id = p.id
         WHERE p.id = ?
         """,
@@ -305,7 +313,9 @@ def get_pain_posts_without_draft(db_path: str, min_severity: int = 3,
                s.buying_intent    AS sig_buying_intent,
                s.role_hypothesis  AS sig_role_hypothesis,
                s.solved_internally AS sig_solved_internally,
-               s.nodu_mention     AS sig_nodu_mention
+               s.nodu_mention     AS sig_nodu_mention,
+               s.competitor_mentioned AS sig_competitor_mentioned,
+               s.competitor_name  AS sig_competitor_name
         FROM signals s JOIN posts p ON s.post_id = p.id
         LEFT JOIN drafts d ON d.post_id = p.id
         WHERE (s.is_pain = 1 OR s.nodu_mention = 1) AND s.severity >= ? AND p.search_term IS NULL
