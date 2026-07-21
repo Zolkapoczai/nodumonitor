@@ -1,0 +1,42 @@
+# Database & runtime
+nodu_monitor.db
+nodu_monitor.db-wal
+nodu_monitor.db-shm
+*.db
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Config & secrets
+config.local.yaml
+.env
+.env.local
+.env.*.local
+
+# Logs & tmp
+logs/
+*.log
+tmp/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project-specific
+.claude/
+.git/

@@ -1,0 +1,353 @@
+{% extends "base.html" %}
+{% block title %}NODU Monitor — Admin{% endblock %}
+{% block topbar_sub %}Admin{% endblock %}
+
+{% block body %}
+<div class="layout">
+
+  <nav class="sidebar">
+    <div class="nav-group-label">Beállítások</div>
+    <div class="nav-item active" onclick="show('api', this)">API kulcsok</div>
+    <div class="nav-item" onclick="show('alerts', this)">Riasztások</div>
+    <div class="nav-item" onclick="show('keywords', this)">Kulcsszavak</div>
+    <div class="nav-group-label">Működés</div>
+    <div class="nav-item" onclick="show('run', this)">Monitor indítása</div>
+    <div class="nav-item" onclick="show('status', this)">Rendszerállapot</div>
+  </nav>
+
+  <main class="main">
+
+    <form method="POST" action="/save" id="config-form">
+
+      <!-- ===================== API kulcsok ===================== -->
+      <div id="s-api" class="section active">
+        <h1 class="page-title">API kulcsok</h1>
+        <p class="page-desc">A monitor működéséhez szükséges hozzáférési adatok. A Mentés a config.yaml fájlba írja őket.</p>
+
+        <div class="card">
+          <div class="card-title">Reddit</div>
+          <div class="card-desc">
+            Az r/Revit, r/ArchiCAD és r/BIM fórumok figyeléséhez. Ingyenes developer fiók elegendő.<br>
+            Létrehozás: reddit.com &rarr; Beállítások &rarr; Safety &amp; Privacy &rarr; App Preferences &rarr; Create App (legyen <em>script</em> típusú)
+          </div>
+          <div class="field">
+            <label>Client ID</label>
+            <input type="text" name="reddit_client_id"
+              value="{{ config.reddit.client_id if config.reddit.client_id != 'YOUR_REDDIT_CLIENT_ID' else '' }}"
+              placeholder="Pl.: aBcDeFgHiJkL1234">
+          </div>
+          <div class="field">
+            <label>Client Secret</label>
+            <input type="password" name="reddit_client_secret"
+              value="{{ config.reddit.client_secret if config.reddit.client_secret != 'YOUR_REDDIT_CLIENT_SECRET' else '' }}"
+              placeholder="Pl.: xYzAbCdEfGhIjKl...">
+          </div>
+          <div class="field">
+            <label>Figyelt subredditek</label>
+            <div class="hint">Vesszővel elválasztva</div>
+            <input type="text" name="reddit_subreddits" value="{{ config.reddit.subreddits | join(', ') }}">
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Gemini API: válasz-javaslat generálás</div>
+          <div class="card-desc">
+            Nélküle a monitor figyeli a fórumokat, de válaszjavaslatot nem generál.<br>
+            Kulcs: aistudio.google.com &rarr; Get API Key &rarr; Create API Key
+          </div>
+          <div class="toggle-row">
+            <label class="toggle">
+              <input type="checkbox" name="gemini_enabled" id="gemini-toggle"
+                {% if config.scoring.gemini_enabled %}checked{% endif %}
+                onchange="setDisabled('gemini-fields', !this.checked)">
+              <div class="track"></div>
+              <div class="thumb"></div>
+            </label>
+            <div class="toggle-text">
+              <div class="t-label">Válasz-javaslat generálás bekapcsolva</div>
+              <div class="t-sub">Gemini API-t használ (gyors, olcsó)</div>
+            </div>
+          </div>
+          <div id="gemini-fields" class="{{ '' if config.scoring.gemini_enabled else 'disabled-block' }}">
+            <div class="field">
+              <label>API kulcs</label>
+              <input type="password" name="gemini_api_key"
+                value="{{ config.scoring.gemini_api_key if config.scoring.gemini_api_key != 'YOUR_GEMINI_API_KEY' else '' }}"
+                placeholder="AIzaSy...">
+            </div>
+            <div class="field">
+              <label>Modell</label>
+              <select name="gemini_model">
+                <option value="gemini-2.5-flash"
+                  {% if config.scoring.gemini_model == 'gemini-2.5-flash' %}selected{% endif %}>
+                  Gemini 2.5 Flash: gyors, olcsó (ajánlott)
+                </option>
+                <option value="gemini-2.5-pro"
+                  {% if config.scoring.gemini_model == 'gemini-2.5-pro' %}selected{% endif %}>
+                  Gemini 2.5 Pro: jobb minőség, drágább
+                </option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="save-bar">
+          <button type="submit" class="btn btn-primary">Mentés</button>
+          <span class="save-hint">config.yaml fájlba mentve</span>
+        </div>
+      </div>
+
+      <!-- ===================== Riasztások ===================== -->
+      <div id="s-alerts" class="section">
+        <h1 class="page-title">Riasztások</h1>
+        <p class="page-desc">Ha a monitor releváns bejegyzést talál, e-mailben vagy Slacken értesíthet.</p>
+
+        <div class="card">
+          <div class="card-title">E-mail riasztás</div>
+          <div class="card-desc">
+            Gmail fiókon a legegyszerűbb. Normál jelszó helyett App Password szükséges.<br>
+            myaccount.google.com &rarr; Biztonság &rarr; 2-lépéses azonosítás &rarr; Alkalmazásjelszavak
+          </div>
+          <div class="toggle-row">
+            <label class="toggle">
+              <input type="checkbox" name="email_enabled" id="email-toggle"
+                {% if config.alerts.email.enabled %}checked{% endif %}
+                onchange="setDisabled('email-fields', !this.checked)">
+              <div class="track"></div>
+              <div class="thumb"></div>
+            </label>
+            <div class="toggle-text">
+              <div class="t-label">E-mail értesítések bekapcsolva</div>
+            </div>
+          </div>
+          <div id="email-fields" class="{{ '' if config.alerts.email.enabled else 'disabled-block' }}">
+            <div class="field">
+              <label>Feladó e-mail</label>
+              <input type="email" name="email_from"
+                value="{{ config.alerts.email.from_address if config.alerts.email.from_address != 'YOUR_EMAIL@gmail.com' else '' }}"
+                placeholder="sajat@gmail.com">
+            </div>
+            <div class="field">
+              <label>Címzett</label>
+              <input type="email" name="email_to" value="{{ config.alerts.email.to_address }}" placeholder="poczai@nodu.build">
+            </div>
+            <div class="field">
+              <label>Gmail App Password</label>
+              <input type="password" name="email_password"
+                value="{{ config.alerts.email.app_password if config.alerts.email.app_password != 'YOUR_APP_PASSWORD' else '' }}"
+                placeholder="xxxx xxxx xxxx xxxx">
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Slack riasztás</div>
+          <div class="card-desc">
+            Slack Incoming Webhook URL szükséges. Létrehozás: api.slack.com/messaging/webhooks
+          </div>
+          <div class="toggle-row">
+            <label class="toggle">
+              <input type="checkbox" name="slack_enabled" id="slack-toggle"
+                {% if config.alerts.slack.enabled %}checked{% endif %}
+                onchange="setDisabled('slack-fields', !this.checked)">
+              <div class="track"></div>
+              <div class="thumb"></div>
+            </label>
+            <div class="toggle-text">
+              <div class="t-label">Slack értesítések bekapcsolva</div>
+            </div>
+          </div>
+          <div id="slack-fields" class="{{ '' if config.alerts.slack.enabled else 'disabled-block' }}">
+            <div class="field">
+              <label>Webhook URL</label>
+              <input type="password" name="slack_webhook"
+                value="{{ config.alerts.slack.webhook_url if config.alerts.slack.webhook_url != 'YOUR_SLACK_WEBHOOK_URL' else '' }}"
+                placeholder="https://hooks.slack.com/services/...">
+            </div>
+          </div>
+        </div>
+
+        <div class="save-bar">
+          <button type="submit" class="btn btn-primary">Mentés</button>
+          <span class="save-hint">config.yaml fájlba mentve</span>
+        </div>
+      </div>
+
+      <!-- ===================== Kulcsszavak ===================== -->
+      <div id="s-keywords" class="section">
+        <h1 class="page-title">Kulcsszavak</h1>
+        <p class="page-desc">A pontozó ezekre szűr. Soronként egy kifejezés. Primary: 3 pont, fájdalompont: 2, kontextus: 1.</p>
+
+        <div class="card">
+          <div class="card-title">Elsődleges kulcsszavak (3 pont)</div>
+          <div class="card-desc">A legfontosabb kifejezések, amelyek erős jelet adnak.</div>
+          <div class="field">
+            <textarea name="kw_primary" rows="8">{{ config.keywords.primary | join('\n') }}</textarea>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Fájdalompontok (2 pont)</div>
+          <div class="card-desc">Konkrét problémák, amelyeket a Bridge megold.</div>
+          <div class="field">
+            <textarea name="kw_pain" rows="7">{{ config.keywords.pain_points | join('\n') }}</textarea>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Kontextus (1 pont)</div>
+          <div class="card-desc">Szerepkörök és témák, amelyek megerősítik a relevanciát.</div>
+          <div class="field">
+            <textarea name="kw_context" rows="5">{{ config.keywords.context | join('\n') }}</textarea>
+          </div>
+        </div>
+
+        <div class="save-bar">
+          <button type="submit" class="btn btn-primary">Mentés</button>
+          <span class="save-hint">config.yaml fájlba mentve</span>
+        </div>
+      </div>
+
+    </form><!-- /config-form -->
+
+    <!-- ===================== Monitor indítása ===================== -->
+    <div id="s-run" class="section">
+      <h1 class="page-title">Monitor indítása</h1>
+      <p class="page-desc">A connectorok kézzel futtathatók. Az eredmények az adatbázisba kerülnek; ha a Gemini be van kapcsolva, a dashboardon válaszjavaslat generálható.</p>
+
+      <div class="card">
+        <div class="card-title">Adatgyűjtés</div>
+        <div class="card-desc">Releváns bejegyzések összegyűjtése. A futtatás a háttérben zajlik.</div>
+
+        {% set runners = [
+          ('reddit', 'Reddit', 'r/Revit, r/ArchiCAD, r/BIM: legfrissebb posztok és kommentek'),
+          ('playwright', 'JS fórumok (Playwright)', 'Graphisoft és Autodesk Community valós idejű scraping'),
+          ('stackoverflow', 'Stack Overflow', 'Stack Exchange API: revit, archicad, ifc témák'),
+          ('discourse', 'buildingSMART fórum', 'Discourse API: forums.buildingsmart.org'),
+          ('github', 'GitHub issues', 'IfcOpenShell/Bonsai, Speckle, xeokit repók'),
+          ('forums', 'Fórumok (HTML)', 'Khoros és phpBB fórumok közvetlen scraping')
+        ] %}
+        {% for key, title, desc in runners %}
+        <div class="run-row">
+          <div class="run-info">
+            <div class="r-title">{{ title }}</div>
+            <div class="r-desc">{{ desc }}</div>
+          </div>
+          <div class="run-right">
+            <span class="badge badge-idle" id="badge-{{ key }}">Nem futott</span>
+            <form method="POST" action="/run/{{ key }}" style="margin:0" onsubmit="setBadge('{{ key }}','run')">
+              <button type="submit" class="btn btn-secondary btn-sm">Futtatás</button>
+            </form>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+
+      <div class="card">
+        <div class="card-title">Feldolgozás és értesítés</div>
+        <div class="card-desc">Válaszjavaslatok, heti riport és LinkedIn tartalom. Feltétel: a Gemini API be van kapcsolva.</div>
+
+        {% set processors = [
+          ('generate-drafts', 'Válaszjavaslat generálás', 'Minden releváns, feldolgozatlan bejegyzésre 1 javaslat'),
+          ('weekly-report', 'Heti riport', 'Slack-összefoglaló: források, top fájdalompontok'),
+          ('linkedin-content', 'LinkedIn tartalom', 'Heti poszt-javaslatok a top fájdalompontokból')
+        ] %}
+        {% for key, title, desc in processors %}
+        <div class="run-row">
+          <div class="run-info">
+            <div class="r-title">{{ title }}</div>
+            <div class="r-desc">{{ desc }}</div>
+          </div>
+          <div class="run-right">
+            <span class="badge badge-idle" id="badge-{{ key }}">Nem futott</span>
+            <form method="POST" action="/run/{{ key }}" style="margin:0" onsubmit="setBadge('{{ key }}','run')">
+              <button type="submit" class="btn btn-primary btn-sm">Indítás</button>
+            </form>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- ===================== Rendszerállapot ===================== -->
+    <div id="s-status" class="section">
+      <h1 class="page-title">Rendszerállapot</h1>
+      <p class="page-desc">Az adatbázis és a feldolgozás aktuális állapota (utolsó {{ stats.lookback_days }} nap).</p>
+
+      <div class="metric-grid">
+        <div class="metric-card accent">
+          <div class="metric-value accent-v">{{ stats.total_posts }}</div>
+          <div class="metric-label">Új bejegyzés</div>
+        </div>
+        <div class="metric-card blue">
+          <div class="metric-value">{{ stats.pending_drafts }}</div>
+          <div class="metric-label">Jóváhagyásra váró draft</div>
+        </div>
+        <div class="metric-card green">
+          <div class="metric-value">{{ stats.by_platform | length }}</div>
+          <div class="metric-label">Aktív forrás</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Források</div>
+        {% if stats.by_platform %}
+          {% for p in stats.by_platform %}
+          <div class="run-row">
+            <div class="run-info"><div class="r-title">{{ p.platform }}</div></div>
+            <div class="run-right"><span class="score-pill">{{ p.count }}</span></div>
+          </div>
+          {% endfor %}
+        {% else %}
+          <div class="empty">Még nincs adat. Indíts el egy connectort a Monitor indítása alatt.</div>
+        {% endif %}
+      </div>
+
+      <div class="card">
+        <div class="card-title">Top fájdalompontok</div>
+        {% if stats.top_pain_points %}
+          {% for kw in stats.top_pain_points[:10] %}
+          <div class="run-row">
+            <div class="run-info"><div class="r-title">{{ kw.keyword }}</div></div>
+            <div class="run-right"><span class="score-pill">{{ kw.count }}</span></div>
+          </div>
+          {% endfor %}
+        {% else %}
+          <div class="empty">Még nincs adat.</div>
+        {% endif %}
+      </div>
+    </div>
+
+  </main>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function setDisabled(id, disabled) {
+  const el = document.getElementById(id);
+  if (el) el.classList.toggle('disabled-block', disabled);
+}
+function setBadge(key, state) {
+  const el = document.getElementById('badge-' + key);
+  if (el) {
+    el.className = 'badge badge-' + (state === 'run' ? 'run' : 'idle');
+    el.textContent = state === 'run' ? 'Fut...' : 'Nem futott';
+  }
+}
+// Job-statusz polling
+setInterval(function() {
+  fetch('/api/status').then(r => r.json()).then(data => {
+    const jobs = data.jobs || {};
+    ['reddit','search','playwright','stackoverflow','forums','generate-drafts','weekly-report','linkedin-content'].forEach(key => {
+      const j = jobs[key]; const el = document.getElementById('badge-' + key);
+      if (!j || !el) return;
+      el.className = 'badge';
+      if (j.status === 'running') { el.className += ' badge-run'; el.textContent = 'Fut...'; }
+      else if (j.status === 'done') { el.className += ' badge-done'; el.textContent = 'Kész' + (j.result ? ' (' + j.result + ')' : ''); }
+      else if (j.status === 'error') { el.className += ' badge-error'; el.textContent = 'Hiba'; }
+    });
+  }).catch(() => {});
+}, 3000);
+</script>
+{% endblock %}

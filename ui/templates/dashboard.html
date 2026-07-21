@@ -1,0 +1,473 @@
+{% extends "base.html" %}
+{% block title %}NODU Monitor — Dashboard{% endblock %}
+{% block topbar_sub %}Dashboard{% endblock %}
+
+{% block body %}
+<div class="layout">
+
+  <nav class="sidebar">
+    <div class="nav-group-label">Sales</div>
+    <div class="nav-item active" onclick="show('overview', this)">Áttekintő</div>
+    <div class="nav-item" onclick="show('opportunities', this)" id="nav-opps">
+      Lehetőségek
+      {% if opportunities %}<span class="nav-badge">{{ opportunities|length }}</span>{% endif %}
+    </div>
+    <div class="nav-item" onclick="show('adhoc', this)">Ad-hoc keresés</div>
+    <div class="nav-item" onclick="show('linkedin', this)">LinkedIn válasz</div>
+    <div class="nav-item" onclick="show('drafts', this)" id="nav-drafts">
+      Választervezetek
+      {% if drafts %}<span class="nav-badge">{{ drafts|length }}</span>{% endif %}
+    </div>
+  </nav>
+
+  <main class="main">
+
+    <!-- ===================== Áttekintő ===================== -->
+    <div id="s-overview" class="section active">
+      <h1 class="page-title">Áttekintő</h1>
+      <p class="page-desc">A lead-folyamat aktuális állapota (utolsó {{ stats.lookback_days }} nap).</p>
+
+      <div class="metric-grid">
+        <div class="metric-card accent">
+          <div class="metric-value accent-v">{{ hot_count }}</div>
+          <div class="metric-label">Forró lehetőség (súlyosság 4–5)</div>
+        </div>
+        <div class="metric-card blue">
+          <div class="metric-value">{{ opportunities | length }}</div>
+          <div class="metric-label">Valódi fájdalom-jel</div>
+        </div>
+        <div class="metric-card green">
+          <div class="metric-value">{{ drafts | length }}</div>
+          <div class="metric-label">Jóváhagyásra váró válasz</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-value">{{ stats.total_posts }}</div>
+          <div class="metric-label">Új nyers lead a héten</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Honnan jönnek a leadek</div>
+        {% if stats.by_platform %}
+          {% for p in stats.by_platform %}
+          <div class="run-row">
+            <div class="run-info"><div class="r-title">{{ p.platform }}</div></div>
+            <div class="run-right"><span class="score-pill">{{ p.count }}</span></div>
+          </div>
+          {% endfor %}
+        {% else %}
+          <div class="empty">Még nincs friss lead. Indíts egy keresést, vagy futtasd a monitort az Admin felületen.</div>
+        {% endif %}
+      </div>
+
+      <div class="card">
+        <div class="card-title">Mi foglalkoztatja a közösséget</div>
+        <div class="card-desc">A leggyakoribb kulcsszavak az elmúlt időszak leadjeiben.</div>
+        {% if stats.top_pain_points %}
+          {% for kw in stats.top_pain_points[:8] %}
+          <div class="run-row">
+            <div class="run-info"><div class="r-title">{{ kw.keyword }}</div></div>
+            <div class="run-right"><span class="score-pill">{{ kw.count }}</span></div>
+          </div>
+          {% endfor %}
+        {% else %}
+          <div class="empty">Még nincs adat.</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- ===================== Lehetőségek ===================== -->
+    <div id="s-opportunities" class="section">
+      <h1 class="page-title">Lehetőségek</h1>
+      <p class="page-desc">Az AI-osztályozó által valódi fájdalomként felismert bejegyzések, súlyosság szerint rendezve. A puszta kulcsszó-egyezés (pl. semleges kérdés, funkció-bejelentés) ide nem kerül be.</p>
+
+      {% if opportunities %}
+        {% for o in opportunities %}
+        {% set heat = 'hot' if (o.severity or 0) >= 4 else ('warm' if o.severity == 3 else 'cool') %}
+        <div class="opp-card" id="opp-{{ o.post_id }}">
+          <div class="opp-head">
+            <span class="sev-badge sev-{{ heat }}">súlyosság {{ o.severity }}</span>
+            {% if o.buying_intent %}<span class="intent-badge">vásárlási szándék</span>{% endif %}
+            <span class="platform-pill">{{ o.platform }}</span>
+            {% if o.ifc_involved %}<span class="issue-chip">IFC</span>{% endif %}
+          </div>
+          <div class="opp-title">{{ o.title or '(cím nélkül)' }}</div>
+          <div class="opp-pain">{{ o.pain_summary }}</div>
+          {% if o.tech_summary %}<div class="opp-tech">{{ o.tech_summary }}</div>{% endif %}
+          <div class="opp-meta">
+            <span>{{ o.author or 'ismeretlen szerző' }}{% if o.role_hypothesis %} · {{ o.role_hypothesis }}{% endif %}</span>
+            <span>Archicad {{ (o.archicad_probability * 100) | round | int }}% · Revit {{ (o.revit_probability * 100) | round | int }}%</span>
+            {% if o.issue_types %}
+              {% for t in o.issue_types.split(',') %}<span class="issue-chip">{{ t.strip() }}</span>{% endfor %}
+            {% endif %}
+          </div>
+          <div class="opp-actions">
+            <button class="btn btn-primary btn-sm" onclick="genDraftOpp({{ o.post_id }}, this)">Válasz generálása</button>
+            <a class="btn btn-secondary btn-sm" href="{{ o.url }}" target="_blank">Eredeti megnyitása</a>
+          </div>
+        </div>
+        {% endfor %}
+      {% else %}
+        <div class="empty">
+          Még nincs osztályozott fájdalom-jel.<br>
+          Futtasd a gyűjtést (Admin), majd az osztályozót: <code>python main.py --classify</code>.
+        </div>
+      {% endif %}
+    </div>
+
+    <!-- ===================== Ad-hoc keresés ===================== -->
+    <div id="s-adhoc" class="section">
+      <h1 class="page-title">Ad-hoc keresés</h1>
+      <p class="page-desc">Keress rá egy eseti kifejezésre (például egy friss Autodesk-bejelentésre) a Reddit és a Stack Overflow natív keresőjével.</p>
+
+      <div class="card">
+        <div class="search-box">
+          <input type="text" id="adhoc-query" placeholder="Pl.: Autodesk Forma, Revit 2026 IFC, Archicad migration"
+            onkeydown="if(event.key==='Enter'){event.preventDefault();runAdhoc();}">
+          <button class="btn btn-primary" id="adhoc-btn" onclick="runAdhoc()">Keresés</button>
+        </div>
+        <div class="channel-row">
+          <label class="channel-chip on"><input type="checkbox" value="reddit" checked> Reddit</label>
+          <label class="channel-chip on"><input type="checkbox" value="stackoverflow" checked> Stack Overflow</label>
+        </div>
+        <div class="card-desc" id="adhoc-status" style="margin-top:12px; margin-bottom:0"></div>
+      </div>
+
+      <div id="adhoc-results"></div>
+    </div>
+
+    <!-- ===================== LinkedIn válasz ===================== -->
+    <div id="s-linkedin" class="section">
+      <h1 class="page-title">LinkedIn válasz</h1>
+      <p class="page-desc">Illessz be egy LinkedIn-posztot — a rendszer eldönti, hogy a NODU Bridge, az általános nodu.build szakértői hang, vagy egy semleges válasz illik-e rá, és megírja a választ. Nincs automata posztolás — a végleges szöveget kézzel másolod be.</p>
+
+      <div class="card">
+        <div class="hint">LinkedIn-poszt szövege</div>
+        <textarea id="li-post-text" rows="6" style="width:100%; resize:vertical"
+          placeholder="Illeszd be ide a posztot, amire válaszolni szeretnél..."></textarea>
+        <div style="display:flex; gap:12px; margin-top:12px">
+          <div style="flex:1">
+            <div class="hint">Szerző neve (opcionális)</div>
+            <input type="text" id="li-author-name" placeholder="Pl.: Jane Doe">
+          </div>
+          <div style="flex:1">
+            <div class="hint">Szerepe / cége (opcionális)</div>
+            <input type="text" id="li-author-role" placeholder="Pl.: BIM Coordinator @ ...">
+          </div>
+        </div>
+        <div style="display:flex; gap:8px; margin-top:14px">
+          <button class="btn btn-primary" id="li-btn" onclick="composeLinkedin()">Válasz generálása</button>
+          <button class="btn btn-secondary" id="li-clear-btn" onclick="clearLinkedin()" style="display:none">Törlés</button>
+        </div>
+        <div class="card-desc" id="li-status" style="margin-top:10px; margin-bottom:0"></div>
+      </div>
+
+      <div id="li-result"></div>
+    </div>
+
+    <!-- ===================== Választervezetek ===================== -->
+    <div id="s-drafts" class="section">
+      <h1 class="page-title">Választervezetek</h1>
+      <p class="page-desc">Jóváhagyásra váró javaslatok. Elfogadás után a végleges szöveg másolható és kézzel postolható.</p>
+
+      {% if drafts %}
+        {% for d in drafts %}
+        <div class="draft-card" id="dcard-{{ d.draft_id }}">
+          <div class="draft-head">
+            <div class="draft-head-title">{{ d.title or '(cím nélkül)' }}</div>
+            <div class="draft-head-meta">
+              {{ d.platform | upper }} &middot; {{ d.source }}
+              &nbsp;<span class="score-pill">score: {{ d.score }}</span>
+            </div>
+            <a class="draft-head-url" href="{{ d.url }}" target="_blank">{{ d.url }}</a>
+          </div>
+          <div class="draft-body">
+            <div class="sec-label">Eredeti bejegyzés</div>
+            <div class="original-text">
+              {{ (d.body or '')[:380] }}{% if d.body and d.body|length > 380 %}&hellip;{% endif %}
+            </div>
+
+            <div class="sec-label">Javasolt válasz</div>
+            <div class="draft-text" id="dtext-{{ d.draft_id }}">{{ d.draft_text }}</div>
+
+            <div class="copy-section" id="copy-{{ d.draft_id }}" style="display:none">
+              <div class="sec-label">Másold ki és postold kézzel:</div>
+              <textarea class="copy-area" id="ta-{{ d.draft_id }}" readonly>{{ d.draft_text }}</textarea>
+              <div class="copy-btns">
+                <button type="button" class="btn btn-success btn-sm" onclick="doCopy({{ d.draft_id }})">Másolás a vágólapra</button>
+                <button type="button" class="btn btn-primary btn-sm" onclick="confirmApprove({{ d.draft_id }})">Megvan, jóváhagyom</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="cancelApprove({{ d.draft_id }})">Mégse</button>
+              </div>
+            </div>
+
+            <div id="done-{{ d.draft_id }}" style="display:none">
+              <div class="done-state">Jóváhagyva, postolásra vár</div>
+            </div>
+
+            <div class="draft-actions" id="actions-{{ d.draft_id }}" style="margin-top:14px">
+              <button type="button" class="btn btn-success btn-sm" onclick="startApprove({{ d.draft_id }})">Jóváhagyás</button>
+              <button type="button" class="btn btn-danger btn-sm" onclick="doReject({{ d.draft_id }})">Elutasítás</button>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      {% else %}
+        <div class="empty">
+          Nincs jóváhagyásra váró válasz.<br>
+          Az ad-hoc keresés találatainál vagy az Admin &rarr; Draft generálással készíthetsz javaslatokat.
+        </div>
+      {% endif %}
+    </div>
+
+  </main>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// --- Csatorna-chipek vizualis allapota ---
+document.querySelectorAll('.channel-chip input').forEach(cb => {
+  cb.addEventListener('change', () => cb.closest('.channel-chip').classList.toggle('on', cb.checked));
+});
+
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s == null ? '' : String(s);
+  return d.innerHTML;
+}
+
+// --- Ad-hoc kereses ---
+let adhocPoll = null;
+
+function runAdhoc() {
+  const q = document.getElementById('adhoc-query').value.trim();
+  if (!q) { toast('Írj be egy keresési kifejezést.'); return; }
+  const channels = [...document.querySelectorAll('.channel-chip input:checked')].map(c => c.value);
+  if (!channels.length) { toast('Válassz legalább egy csatornát.'); return; }
+
+  const btn = document.getElementById('adhoc-btn');
+  btn.disabled = true; btn.textContent = 'Keresés...';
+  document.getElementById('adhoc-status').textContent = 'Keresés folyamatban a háttérben...';
+  document.getElementById('adhoc-results').innerHTML = '';
+
+  fetch('/search/adhoc', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query: q, channels: channels })
+  }).then(r => r.json()).then(() => {
+    if (adhocPoll) clearInterval(adhocPoll);
+    adhocPoll = setInterval(() => checkAdhoc(q), 2500);
+  }).catch(() => { resetAdhocBtn(); toast('Nem sikerült elindítani a keresést.'); });
+}
+
+function checkAdhoc(query) {
+  fetch('/api/status').then(r => r.json()).then(data => {
+    const j = (data.jobs || {})['adhoc'];
+    if (!j) return;
+    if (j.status === 'done') {
+      clearInterval(adhocPoll); adhocPoll = null;
+      loadAdhocResults(query);
+    } else if (j.status === 'error') {
+      clearInterval(adhocPoll); adhocPoll = null;
+      resetAdhocBtn();
+      document.getElementById('adhoc-status').textContent = 'Hiba a keresés során.';
+    }
+  }).catch(() => {});
+}
+
+function loadAdhocResults(query) {
+  fetch('/api/adhoc-results?query=' + encodeURIComponent(query)).then(r => r.json()).then(data => {
+    resetAdhocBtn();
+    const results = data.results || [];
+    document.getElementById('adhoc-status').textContent =
+      results.length + ' találat erre: "' + query + '"';
+    renderAdhoc(results);
+  }).catch(() => resetAdhocBtn());
+}
+
+function resetAdhocBtn() {
+  const btn = document.getElementById('adhoc-btn');
+  btn.disabled = false; btn.textContent = 'Keresés';
+}
+
+function renderAdhoc(results) {
+  const box = document.getElementById('adhoc-results');
+  if (!results.length) {
+    box.innerHTML = '<div class="empty">Nincs találat. Próbálj más kifejezést vagy csatornát.</div>';
+    return;
+  }
+  let html = '<div class="card">';
+  results.forEach(r => {
+    html += '<div class="result-row" id="res-' + r.id + '">' +
+      '<div class="result-main">' +
+        '<div class="result-title">' + esc(r.title || '(cím nélkül)') + '</div>' +
+        '<div class="result-meta"><span class="platform-pill">' + esc(r.platform) + '</span>' +
+          '<span class="score-pill">score: ' + (r.score || 0) + '</span></div>' +
+        '<div class="result-snippet">' + esc((r.body || '').slice(0, 240)) + '</div>' +
+        '<a class="result-url" href="' + esc(r.url) + '" target="_blank">' + esc(r.url) + '</a>' +
+      '</div>' +
+      '<div class="result-actions">' +
+        '<button class="btn btn-secondary btn-sm" onclick="genDraft(' + r.id + ')">Választervezet</button>' +
+        '<button class="btn btn-primary btn-sm" onclick="toPipedrive(' + r.id + ', this)">Pipedrive</button>' +
+      '</div>' +
+    '</div>';
+  });
+  html += '</div>';
+  box.innerHTML = html;
+}
+
+function genDraft(id) {
+  toast('Választervezet generálása...');
+  fetch('/lead/' + id + '/draft', { method: 'POST' }).then(r => r.json()).then(d => {
+    if (d.ok) toast('Választervezet kész — nézd a Választervezetek fülön.');
+    else toast(d.error || 'Nem sikerült. Be van kapcsolva a Gemini API az Adminban?');
+  }).catch(() => toast('Hiba a választervezet generálásakor.'));
+}
+
+// --- Valasz generalasa egy Lehetoseg-kartyarol ---
+function genDraftOpp(postId, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Generálás...'; }
+  fetch('/lead/' + postId + '/draft', { method: 'POST' }).then(r => r.json()).then(d => {
+    if (d.ok) {
+      if (btn) btn.textContent = 'Kész — lásd a Választervezetek fülön';
+      toast('Válasz elkészült a fájdalomra reflektálva.');
+    } else {
+      if (btn) { btn.disabled = false; btn.textContent = 'Válasz generálása'; }
+      toast(d.error || 'Nem sikerült. Be van kapcsolva a Gemini API az Adminban?');
+    }
+  }).catch(() => {
+    if (btn) { btn.disabled = false; btn.textContent = 'Válasz generálása'; }
+    toast('Hiba a válasz generálásakor.');
+  });
+}
+
+// --- LinkedIn valaszgeneralas ---
+const LI_FIT_LABELS = {
+  bridge: { text: 'NODU Bridge', cls: 'sev-hot' },
+  nodu:   { text: 'nodu.build', cls: 'sev-warm' },
+  none:   { text: 'semleges', cls: 'sev-cool' },
+};
+
+function updateLiClearBtn() {
+  const hasText = document.getElementById('li-post-text').value.trim().length > 0;
+  const hasResult = document.getElementById('li-result').innerHTML.trim().length > 0;
+  document.getElementById('li-clear-btn').style.display = (hasText || hasResult) ? 'inline-block' : 'none';
+}
+document.getElementById('li-post-text').addEventListener('input', updateLiClearBtn);
+
+function clearLinkedin() {
+  document.getElementById('li-post-text').value = '';
+  document.getElementById('li-author-name').value = '';
+  document.getElementById('li-author-role').value = '';
+  document.getElementById('li-result').innerHTML = '';
+  document.getElementById('li-status').textContent = '';
+  updateLiClearBtn();
+}
+
+function composeLinkedin() {
+  const postText = document.getElementById('li-post-text').value.trim();
+  if (!postText) { toast('Illessz be egy poszt-szöveget.'); return; }
+
+  const btn = document.getElementById('li-btn');
+  btn.disabled = true; btn.textContent = 'Generálás...';
+  document.getElementById('li-status').textContent = 'Válasz generálása folyamatban...';
+  document.getElementById('li-result').innerHTML = '';
+
+  fetch('/linkedin/compose', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      post_text: postText,
+      author_name: document.getElementById('li-author-name').value.trim(),
+      author_role: document.getElementById('li-author-role').value.trim(),
+    })
+  }).then(r => r.json()).then(d => {
+    btn.disabled = false; btn.textContent = 'Válasz generálása';
+    document.getElementById('li-status').textContent = '';
+    if (!d.ok) { toast(d.error || 'Nem sikerült a válasz generálása.'); return; }
+    renderLinkedinResult(d);
+  }).catch(() => {
+    btn.disabled = false; btn.textContent = 'Válasz generálása';
+    document.getElementById('li-status').textContent = '';
+    toast('Hiba a válasz generálásakor.');
+  });
+}
+
+function renderLinkedinResult(d) {
+  const fit = LI_FIT_LABELS[d.fit_type] || LI_FIT_LABELS.none;
+  const box = document.getElementById('li-result');
+  box.innerHTML =
+    '<div class="opp-card">' +
+      '<div class="opp-head"><span class="sev-badge ' + fit.cls + '">' + esc(fit.text) + '</span></div>' +
+      '<div class="sec-label">Javasolt válasz</div>' +
+      '<div class="draft-text" id="li-reply-text">' + esc(d.reply_text) + '</div>' +
+      '<div class="opp-tech" style="margin-top:10px">Indoklás: ' + esc(d.rationale) + '</div>' +
+      '<div class="opp-actions" style="margin-top:14px">' +
+        '<button class="btn btn-success btn-sm" onclick="copyLinkedinReply()">Másolás a vágólapra</button>' +
+      '</div>' +
+      '<textarea id="li-reply-raw" style="position:absolute; left:-9999px">' + esc(d.reply_text) + '</textarea>' +
+    '</div>';
+  updateLiClearBtn();
+}
+
+function copyLinkedinReply() {
+  const ta = document.getElementById('li-reply-raw');
+  ta.style.position = 'static'; ta.style.left = '0';
+  ta.select();
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(ta.value).then(() => toast('Válasz vágólapra másolva.'));
+  } else {
+    document.execCommand('copy');
+    toast('Válasz vágólapra másolva.');
+  }
+  ta.style.position = 'absolute'; ta.style.left = '-9999px';
+}
+
+function toPipedrive(id, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Küldés...'; }
+  fetch('/lead/' + id + '/to-pipedrive', { method: 'POST' }).then(r => r.json()).then(d => {
+    if (d.ok) { toast('Elküldve a Pipedrive-csatornára.'); if (btn) btn.textContent = 'Elküldve'; }
+    else { toast(d.error || 'Nem sikerült. Be van állítva az n8n webhook?'); if (btn) { btn.disabled = false; btn.textContent = 'Pipedrive'; } }
+  }).catch(() => { toast('Hiba a küldéskor.'); if (btn) { btn.disabled = false; btn.textContent = 'Pipedrive'; } });
+}
+
+// --- Draft műveletek ---
+function startApprove(id) {
+  document.getElementById('actions-' + id).style.display = 'none';
+  document.getElementById('copy-' + id).style.display = 'block';
+  const ta = document.getElementById('ta-' + id);
+  setTimeout(() => { ta.select(); ta.focus(); }, 50);
+}
+function cancelApprove(id) {
+  document.getElementById('copy-' + id).style.display = 'none';
+  document.getElementById('actions-' + id).style.display = 'flex';
+}
+function doCopy(id) {
+  const ta = document.getElementById('ta-' + id);
+  ta.select();
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(ta.value).then(() => toast('Szöveg vágólapra másolva.'));
+  } else {
+    document.execCommand('copy');
+    toast('Szöveg vágólapra másolva.');
+  }
+}
+function confirmApprove(id) {
+  fetch('/draft/' + id + '/approve', { method: 'POST' }).then(r => r.json()).then(() => {
+    document.getElementById('copy-' + id).style.display = 'none';
+    document.getElementById('done-' + id).style.display = 'block';
+    toast('Draft jóváhagyva.');
+  });
+}
+function doReject(id) {
+  if (!confirm('Biztosan elutasítod ezt a javaslatot?')) return;
+  fetch('/draft/' + id + '/reject', { method: 'POST' }).then(r => r.json()).then(() => {
+    const card = document.getElementById('dcard-' + id);
+    card.style.transition = 'opacity .3s';
+    card.style.opacity = '0';
+    setTimeout(() => card.remove(), 300);
+    toast('Draft elutasítva.');
+  });
+}
+</script>
+{% endblock %}

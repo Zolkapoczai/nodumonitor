@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}NODU Monitor{% endblock %}</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='nodu.css') }}">
+{% block head %}{% endblock %}
+</head>
+<body>
+
+<header class="topbar">
+  <div class="logo">
+    <div class="logo-mark"></div>
+    <span class="logo-name">NODU Bridge</span>
+  </div>
+  <div class="topbar-sep"></div>
+  <nav class="topbar-nav">
+    <a class="topbar-link {{ 'active' if active_view == 'dashboard' else '' }}" href="{{ url_for('dashboard') }}">Dashboard</a>
+    <a class="topbar-link {{ 'active' if active_view == 'admin' else '' }}" href="{{ url_for('admin') }}">Admin</a>
+  </nav>
+  <div class="topbar-right">{% block topbar_sub %}{% endblock %}</div>
+</header>
+
+{% block body %}{% endblock %}
+
+<div class="toast" id="toast"></div>
+
+<script>
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2600);
+}
+
+// Szekcio-valtas a bal oldali menuben (egy oldalon belul)
+function show(id, el) {
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(a => a.classList.remove('active'));
+  const sec = document.getElementById('s-' + id);
+  if (sec) sec.classList.add('active');
+  if (el) el.classList.add('active');
+}
+
+// Visszajelzes a /save es /run utani atiranyitasrol
+(function() {
+  const p = new URLSearchParams(location.search);
+  if (p.get('saved'))   setTimeout(() => toast('Beállítások mentve.'), 80);
+  if (p.get('started')) setTimeout(() => toast('Folyamat elindítva a háttérben.'), 80);
+})();
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

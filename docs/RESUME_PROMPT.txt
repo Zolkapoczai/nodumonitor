@@ -1,0 +1,9 @@
+Folytatom a NODU Monitor fejlesztését (C:\NODU\Sales system\Nodu sales dashboard).
+
+Olvasd el először: docs/HANDOFF.md — ez a teljes kontextus (architektúra, mit építettünk eddig, élesben megtanult hibák/leckék, config-állapot).
+
+Ha mélyebb stratégiai háttér kell: docs/01-architektura-audit-2026-07.md
+
+Következő feladat: a HANDOFF.md §7/B pontja — a "Nyers-lead kereső" (2. szakasz): search_posts() DB-helper + GET /api/posts route + új "Nyers leadek" dashboard-fül, hogy a teljes posts tábla (jelenleg ~185 nyers, még nem osztályozott poszt) böngészhető/kereshető legyen. Ez megbeszélve és megbecsülve van, de még nem kezdődött el.
+
+Legyél alapos, de token-takarékos.

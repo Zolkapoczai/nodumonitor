@@ -1,0 +1,182 @@
+reddit:
+  client_id: YOUR_REDDIT_CLIENT_ID
+  client_secret: YOUR_REDDIT_CLIENT_SECRET
+  user_agent: NODU-Bridge-Monitor/0.1 by NODU
+  subreddits:
+  - Revit
+  - ArchiCAD
+  - BIM
+  poll_interval_minutes: 60
+  post_limit: 25
+forums:
+  graphisoft:
+    base_url: https://community.graphisoft.com
+    search_urls:
+    - https://community.graphisoft.com/t5/forums/searchpage/tab/message?q=ifc+revit
+    - https://community.graphisoft.com/t5/forums/searchpage/tab/message?q=archicad+revit+interop
+    board_urls:
+    - https://community.graphisoft.com/t5/Collaboration-with-other/bd-p/collaboration
+    poll_interval_minutes: 120
+    user_agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
+      like Gecko) Chrome/125.0.0.0 Safari/537.36
+  autodesk:
+    base_url: https://forums.autodesk.com
+    search_urls:
+    - https://forums.autodesk.com/t5/forums/searchpage/tab/message?q=archicad+ifc+revit
+    - https://forums.autodesk.com/t5/forums/searchpage/tab/message?q=ifc+interoperability+revit
+    board_urls:
+    - https://forums.autodesk.com/t5/revit-architecture-forum/bd-p/160
+    poll_interval_minutes: 120
+    user_agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
+      like Gecko) Chrome/125.0.0.0 Safari/537.36
+  revitforum:
+    base_url: https://www.revitforum.org
+    search_urls:
+    - https://www.revitforum.org/search.php?keywords=archicad+ifc&sr=posts&sf=all
+    - https://www.revitforum.org/search.php?keywords=ifc+conversion&sr=posts&sf=all
+    board_urls:
+    - https://www.revitforum.org/forum/revit-platform/revit-general-discussion
+    poll_interval_minutes: 120
+    user_agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
+      like Gecko) Chrome/125.0.0.0 Safari/537.36
+keywords:
+  primary:
+  - archicad revit
+  - revit archicad
+  - archicad to revit
+  - revit to archicad
+  - ifc conversion
+  - ifc exchange
+  - ifc interoperability
+  - ifc export
+  - ifc import
+  - parametric conversion
+  - ac to rvt
+  - rvt to ac
+  pain_points:
+  - ifc export problem
+  - missing elements
+  - geometry issue
+  - geometry disappears
+  - lost parameters
+  - duplicate geometry
+  - data loss
+  - ifc2x3
+  - ifc4
+  - archicad interop
+  context:
+  - bim coordinator
+  - bim manager
+  - file exchange
+  - open bim
+  - bim coordination
+  - multi-discipline
+alerts:
+  email:
+    enabled: false
+    smtp_host: smtp.gmail.com
+    smtp_port: 587
+    from_address: YOUR_EMAIL@gmail.com
+    to_address: poczai@nodu.build
+    app_password: YOUR_APP_PASSWORD
+  slack:
+    enabled: false
+    webhook_url: YOUR_SLACK_WEBHOOK_URL
+  webhook:
+    enabled: false
+    url: YOUR_N8N_WEBHOOK_URL
+    min_score: 5
+  min_keyword_matches: 1
+  daily_digest: true
+  digest_hour: 8
+database:
+  path: nodu_monitor.db
+scoring:
+  gemini_enabled: true
+  gemini_model: gemini-2.5-flash
+  gemini_api_key: ${GEMINI_API_KEY}  # Environment variable, set locally or in .env
+classifier:
+  enabled: true
+  batch_size: 15
+  delay_seconds: 13
+  # A signal-vezerelt valaszgenerator (--generate-drafts) csak ekkora
+  # severity felett general draftot a valodi fajdalom-jelekre.
+  draft_min_severity: 3
+stackoverflow:
+  api_key: ''
+  poll_interval_minutes: 180
+  sites:
+  - stackoverflow
+  - softwareengineering.stackexchange
+  tagged_queries:
+  - revit+archicad
+  - revit+ifc
+  - archicad+bim
+  text_queries:
+  - archicad revit ifc conversion
+  - archicad to revit parametric
+github:
+  poll_interval_minutes: 240
+  token: ''
+  repos:
+  - IfcOpenShell/IfcOpenShell
+  - specklesystems/speckle-server
+  - xeokit/xeokit-sdk
+  queries:
+  - archicad revit
+  - revit archicad
+  - archicad ifc export
+discourse:
+  poll_interval_minutes: 240
+  forums:
+    buildingsmart:
+      base_url: https://forums.buildingsmart.org
+      queries:
+      - revit archicad
+      - archicad revit
+      - ifc export revit
+      - archicad ifc
+playwright:
+  enabled: true
+  headless: true
+  timeout_ms: 15000
+  poll_interval_minutes: 90
+  forums:
+    graphisoft:
+      search_urls:
+      - https://community.graphisoft.com/t5/forums/searchpage/tab/message?q=archicad+revit
+      - https://community.graphisoft.com/t5/forums/searchpage/tab/message?q=ifc+export+revit
+      message_selector: .lia-quilt-column-left-content
+      title_selector: .MessageSubject a
+      body_selector: .lia-message-body-content
+      author_selector: .lia-message-byline a
+      cookie_banner_text: Use necessary cookies only
+    autodesk:
+      search_urls:
+      - https://forums.autodesk.com/t5/forums/searchpage/tab/message?q=archicad+ifc+revit
+      - https://forums.autodesk.com/t5/forums/searchpage/tab/message?q=archicad+revit+interop
+      message_selector: .lia-message-item
+      title_selector: .lia-message-subject a
+      body_selector: .lia-message-body-content
+      author_selector: .lia-user-name-link
+      cookie_banner_text: Decline
+wishlist:
+  url: https://nodu.build/bridge
+  utm_campaign: bridge_waitlist
+  cta_in_drafts: true
+linkedin_content:
+  enabled: true
+  posts_per_week: 2
+  lookback_days: 7
+weekly_report:
+  enabled: true
+  day_of_week: mon
+  hour: 8
+  lookback_days: 7
+adhoc:
+  default_channels:
+  - reddit
+  - stackoverflow
+  result_limit: 10
+ui:
+  admin_password: ''
