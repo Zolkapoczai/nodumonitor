@@ -144,6 +144,10 @@ def save():
         config["keywords"]["pain_points"] = [s.strip() for s in f.get("kw_pain", "").splitlines() if s.strip()]
         config["keywords"]["context"] = [s.strip() for s in f.get("kw_context", "").splitlines() if s.strip()]
 
+    if "content_language" in f:
+        config.setdefault("linkedin_content", {})
+        config["linkedin_content"]["language"] = f.get("content_language", "en").strip()
+
     save_config(config)
     return redirect(url_for("admin") + "?saved=1")
 
@@ -198,13 +202,14 @@ def run_action(action):
         _run_in_bg("weekly-report", _weekly)
 
     elif action == "linkedin-content":
-        from responder.draft_generator import generate_linkedin_content
-        from alerts.notifier import send_linkedin_suggestions
+        from responder.draft_generator import generate_content_pipeline
+        from alerts.notifier import send_content_pipeline_ideas
         def _linkedin():
-            posts = generate_linkedin_content(config, db_path)
-            if posts:
-                send_linkedin_suggestions(posts, config.get("alerts", {}))
-            return f"{len(posts)} javaslat"
+            res = generate_content_pipeline(config, db_path)
+            if res:
+                send_content_pipeline_ideas(res, config.get("alerts", {}))
+                return "1 cikk + " + str(len(res.get("linkedin_posts", []))) + " teaser"
+            return "Nincs elég adat"
         _run_in_bg("linkedin-content", _linkedin)
 
     return redirect(url_for("admin") + "?started=1")

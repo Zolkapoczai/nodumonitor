@@ -175,25 +175,36 @@ def send_weekly_digest(stats: dict, alert_config: dict, subscriber_count: int = 
         print(f"[digest] Heti osszefoglalo hiba: {e}")
 
 
-def send_linkedin_suggestions(posts: list[str], alert_config: dict) -> None:
-    """LinkedIn poszt-javaslatok Slack-re, joovahagyasra (responder.generate_linkedin_content)."""
+def send_content_pipeline_ideas(pipeline_data: dict, alert_config: dict) -> None:
+    """Tartalommarketing pipeline (blog + linkedin teaserek) Slack-re (responder.generate_content_pipeline)."""
     sc = alert_config.get("slack", {})
-    if not sc.get("enabled") or not sc.get("webhook_url") or not posts:
+    if not sc.get("enabled") or not sc.get("webhook_url") or not pipeline_data:
         return
 
+    blog_title = pipeline_data.get("blog_title", "Nincs cím")
+    blog_audience = pipeline_data.get("blog_audience", "-")
+    blog_problem = pipeline_data.get("blog_core_problem", "-")
+    blog_outline = pipeline_data.get("blog_outline", "-")
+    posts = pipeline_data.get("linkedin_posts", [])
+
     blocks = [
-        {"type": "header", "text": {"type": "plain_text", "text": f"LinkedIn poszt-javaslatok ({len(posts)})"}}
+        {"type": "header", "text": {"type": "plain_text", "text": "📝 Tartalommarketing Javaslat (Content Pipeline)"}},
+        {"type": "section", "text": {"type": "mrkdwn", "text": f"*Új Szakmai Blogcikk Ötlet:*\n*{blog_title}*"}},
+        {"type": "section", "text": {"type": "mrkdwn", "text": f"*Célközönség:* {blog_audience}\n*Fő fájdalom:* {blog_problem}"}},
+        {"type": "section", "text": {"type": "mrkdwn", "text": f"*Vázlat:*\n{blog_outline}"}},
+        {"type": "divider"},
+        {"type": "section", "text": {"type": "mrkdwn", "text": f"*Kísérő LinkedIn Teaser posztok ({len(posts)} db):*"}}
     ]
+
     for i, p in enumerate(posts, 1):
         text = p if len(p) <= 2800 else p[:2800] + " [...]"
-        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"*Javaslat {i}*\n{text}"}})
-        blocks.append({"type": "divider"})
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"*Poszt {i}*\n{text}"}})
 
     try:
         _post_slack_blocks(sc["webhook_url"], blocks)
-        print(f"[linkedin] {len(posts)} javaslat elkuldve Slack-re.")
+        print(f"[content-pipeline] Javaslat elküldve Slack-re.")
     except Exception as e:
-        print(f"[linkedin] Slack-kuldes hiba: {e}")
+        print(f"[content-pipeline] Slack-küldés hiba: {e}")
 
 
 def send_alerts(posts: list[dict], alert_config: dict) -> None:

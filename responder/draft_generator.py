@@ -294,66 +294,93 @@ def review_drafts(db_path: str) -> None:
     print("\nReview befejezve.")
 
 
-_LINKEDIN_SYSTEM_PROMPT = """
+_CONTENT_PIPELINE_SYSTEM_PROMPT = """
 Te a NODU Bridge BIM szoftver tartalomfelelose vagy. A NODU Bridge parametrikus
 adatcsere Archicad es Revit kozott: az elemek logikajat konvertalja, nem statikus
 geometriat.
 
-Feladatod: rovid, ertekes LinkedIn poszt-javaslatokat irni BIM koordinatoroknak es
-menedzsereknek, a valos kozossegi fajdalompontok alapjan.
+Feladatod: A heti leggyakoribb kozossegi fajdalompontok alapjan kitalalni EGY 
+szakmai blogcikk/cikk vazlatot, es ehhez irni {n_posts} db LinkedIn teaser posztot, 
+ami a cikkre mutat es promotalja azt.
+
+A kimeneted KIZAROLAG egy JSON objektum legyen az alabbi strukturaval:
+{{
+  "blog_title": "A cikk cime",
+  "blog_audience": "Célközönség (pl. BIM Managerek, Építészek)",
+  "blog_core_problem": "A fo fajdalom, amit a cikk korbejar (1-2 mondat)",
+  "blog_outline": "Vazlatpontok (3-4 pontban, mik lesznek a cikk fejezetei)",
+  "linkedin_posts": [
+    "Az elso LinkedIn teaser poszt szovege...",
+    "A masodik LinkedIn teaser poszt szovege..."
+  ]
+}}
 
 Szabalyok:
-- Minden poszt egy konkret, valos fajdalompontbol induljon ki (a felhasznaloi uzenet adja meg)
-- Elsodlegesen ertekes szakmai gondolat legyen, ne reklam
-- A NODU Bridge-et finoman, legfeljebb a poszt vegen emlitsd
-- A poszt vegen egyetlen, vilagos felhivas: a korai hozzaferesi lista hivatkozasa
-  (a felhasznaloi uzenet adja meg a pontos linket, valtoztatas nelkul azt hasznald)
-- Magyar nyelv, 120-180 szo posztonkent
-- Nincs emoji; legfeljebb 2-3 relevans hashtag a poszt vegen
-- Soha ne tulígerd a terméket
+- A NYELV: a megadott `{language}` nyelven irj mindent (blog cime, vazlata, posztok)!
+- A LinkedIn posztok elsodlegesen ertekes szakmai gondolatok legyenek, amik ravezetik az olvasot a blogcikkre.
+- A NODU Bridge-et finoman, legfeljebb a poszt vegen emlitsd.
+- A poszt vegen egyetlen, vilagos felhivas: a korai hozzaferesi lista hivatkozasa (a felhasznaloi uzenet adja meg a pontos linket).
+- Posztok hossza 120-180 szo posztonkent.
+- Nincs emoji; legfeljebb 2-3 relevans hashtag a poszt vegen.
+- Soha ne tuligerd a termeket.
 """.strip()
 
+_CONTENT_PIPELINE_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "blog_title": {"type": "STRING"},
+        "blog_audience": {"type": "STRING"},
+        "blog_core_problem": {"type": "STRING"},
+        "blog_outline": {"type": "STRING"},
+        "linkedin_posts": {
+            "type": "ARRAY",
+            "items": {"type": "STRING"}
+        }
+    },
+    "required": ["blog_title", "blog_audience", "blog_core_problem", "blog_outline", "linkedin_posts"]
+}
 
-def generate_linkedin_content(config: dict, db_path: str) -> list[str]:
+def generate_content_pipeline(config: dict, db_path: str) -> dict | None:
     """
-    Heti LinkedIn poszt-javaslatok a DB leggyakoribb fajdalompontjaibol.
-    Visszaadja a poszt-javaslatok listajat (a Slack-kuldest a hivo vegzi).
+    Heti blogcikk vázlat és hozzá tartozó LinkedIn poszt-javaslatok a DB 
+    leggyakoribb fájdalompontjaiból. A configban beállított nyelven generál.
     """
     lc = config.get("linkedin_content", {})
     if not lc.get("enabled", False):
-        print("[linkedin] linkedin_content.enabled: false. Kihagy.")
-        return []
+        print("[content-pipeline] linkedin_content.enabled: false. Kihagy.")
+        return None
 
     sc = config.get("scoring", {})
     api_key = sc.get("gemini_api_key", "")
     if not sc.get("gemini_enabled", False) or not api_key or api_key == "YOUR_GEMINI_API_KEY":
-        print("[linkedin] Gemini API nincs beallitva (scoring.gemini_enabled / api_key). Kihagy.")
-        return []
+        print("[content-pipeline] Gemini API nincs beallitva. Kihagy.")
+        return None
 
     lookback = lc.get("lookback_days", 7)
-    # A poszt-javaslatok mostantol a Pain Classifier valodi fajdalom-jeleire
-    # epulnek (pain_summary), nem a nyers kulcsszo-gyakorisagra (2026-07-21).
     signals = get_recent_pain_signals(db_path, lookback_days=lookback, limit=8)
     if not signals:
-        print("[linkedin] Nincs osztalyozott fajdalom-jel a periodusban "
-              "(futtasd eloszor: --classify). Kihagy.")
-        return []
+        print("[content-pipeline] Nincs osztalyozott fajdalom-jel a periodusban. Kihagy.")
+        return None
 
     n_posts = lc.get("posts_per_week", 2)
+    language = lc.get("language", "en")
+    lang_name = "English" if language == "en" else "Hungarian"
     link = _wishlist_link(config, "linkedin", "organic")
+    
     pain_lines = "\n".join(
         f"- (sulyossag {s['severity']}) {s['pain_summary']}"
         + (f" [tipus: {s['issue_types']}]" if s.get("issue_types") else "")
         for s in signals
     )
 
+    sys_prompt = _CONTENT_PIPELINE_SYSTEM_PROMPT.format(n_posts=n_posts, language=lang_name)
     user_msg = (
         f"A kozossegben az elmult {lookback} napban ezeket a VALODI fajdalmakat "
         f"detektalta a rendszer (sulyossaggal, a legsulyosabb elol):\n{pain_lines}\n\n"
-        f"Irj {n_posts} kulonbozo LinkedIn poszt-javaslatot. Mindegyik EGY konkret "
-        f"fajdalombol induljon ki (valaszd a legsulyosabbakat/legrelevansabbakat). "
-        f"A poszt vegere ezt a pontos hivatkozast tedd felhivaskent: {link}\n\n"
-        f"A posztokat valaszd el egymastol egy onallo sorban allo '---' jellel."
+        f"Kerlek, generalj egyetlen blogcikk vazlatot, amely a fenti fajdalmak kozul "
+        f"a legfontosabbra ad megoldast, valamint {n_posts} db LinkedIn posztot, amely "
+        f"erre a cikkre iranyitja a figyelmet.\n"
+        f"A poszt vegere ezt a pontos hivatkozast tedd felhivaskent: {link}\n"
     )
 
     model = sc.get("gemini_model", "gemini-2.5-flash")
@@ -363,21 +390,21 @@ def generate_linkedin_content(config: dict, db_path: str) -> list[str]:
             model=model,
             contents=user_msg,
             config=types.GenerateContentConfig(
-                system_instruction=_LINKEDIN_SYSTEM_PROMPT,
-                max_output_tokens=1600,
+                system_instruction=sys_prompt,
+                response_mime_type="application/json",
+                response_schema=_CONTENT_PIPELINE_SCHEMA,
+                max_output_tokens=2000,
                 thinking_config=types.ThinkingConfig(thinking_budget=0),
             ),
         )
-        text = resp.text.strip()
+        if not resp.text:
+            return None
+        res = json.loads(resp.text)
+        print(f"[content-pipeline] Generalva: '{res.get('blog_title')}' + {len(res.get('linkedin_posts', []))} LinkedIn poszt.")
+        return res
     except Exception as e:
-        print(f"[linkedin] HIBA: {e}")
-        return []
-
-    posts = [p.strip() for p in text.split("---") if p.strip()]
-    print(f"[linkedin] {len(posts)} poszt-javaslat generalva.")
-    for i, p in enumerate(posts, 1):
-        print(f"\n--- LinkedIn poszt-javaslat {i} ---\n{p}\n")
-    return posts
+        print(f"[content-pipeline] HIBA: {e}")
+        return None
 
 
 _LINKEDIN_REPLY_SYSTEM_PROMPT = """

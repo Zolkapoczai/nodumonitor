@@ -91,6 +91,20 @@
           </div>
         </div>
 
+        <div class="card">
+          <div class="card-title">Tartalommarketing (Content Pipeline)</div>
+          <div class="card-desc">
+            A rendszer a detektált fájdalmak alapján blogcikk-vázlatokat és LinkedIn teaser posztokat tud generálni.
+          </div>
+          <div class="field">
+            <label>Generált tartalom nyelve</label>
+            <select name="content_language">
+              <option value="en" {% if config.linkedin_content.language == 'en' %}selected{% endif %}>Angol (nemzetközi piac)</option>
+              <option value="hu" {% if config.linkedin_content.language == 'hu' %}selected{% endif %}>Magyar</option>
+            </select>
+          </div>
+        </div>
+
         <div class="save-bar">
           <button type="submit" class="btn btn-primary">Mentés</button>
           <span class="save-hint">config.yaml fájlba mentve</span>
@@ -245,12 +259,12 @@
 
       <div class="card">
         <div class="card-title">Feldolgozás és értesítés</div>
-        <div class="card-desc">Válaszjavaslatok, heti riport és LinkedIn tartalom. Feltétel: a Gemini API be van kapcsolva.</div>
+        <div class="card-desc">Válaszjavaslatok, heti riport és tartalom-marketing. Feltétel: a Gemini API be van kapcsolva.</div>
 
         {% set processors = [
           ('generate-drafts', 'Válaszjavaslat generálás', 'Minden releváns, feldolgozatlan bejegyzésre 1 javaslat'),
           ('weekly-report', 'Heti riport', 'Slack-összefoglaló: források, top fájdalompontok'),
-          ('linkedin-content', 'LinkedIn tartalom', 'Heti poszt-javaslatok a top fájdalompontokból')
+          ('linkedin-content', 'Tartalom Pipeline (Blog + LinkedIn)', 'Heti blog- és poszt-javaslatok a top fájdalompontokból')
         ] %}
         {% for key, title, desc in processors %}
         <div class="run-row">

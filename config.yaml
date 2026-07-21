@@ -170,6 +170,7 @@ linkedin_content:
   enabled: true
   posts_per_week: 2
   lookback_days: 7
+  language: "en"
 weekly_report:
   enabled: true
   day_of_week: mon
