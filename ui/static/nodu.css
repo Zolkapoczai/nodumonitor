@@ -1,11 +1,11 @@
-/* NODU Monitor — High-Impact B2B Spec Design System (matching nodu.bridge flyer design) */
+/* NODU Monitor — Sleek, High-Performance Interactive Design System */
 
 :root {
   --topbar:        #0F172A;
   --topbar-border: #1E293B;
   --accent:        #F04E23; /* Nodu Orange/Red */
   --accent-hover:  #D93B12;
-  --accent-light:  #FFF5F2;
+  --accent-light:  #FFF7F5;
   --accent-border: #FDBA74;
   --bg:            #F8FAFC;
   --card-bg:       #FFFFFF;
@@ -17,11 +17,11 @@
   
   --green:         #15803D;
   --green-bg:      #F0FDF4;
-  --green-border:  #86EFAC;
+  --green-border:  #BBF7D0;
   
   --blue:          #1D4ED8;
-  --blue-bg:       #EFF6FF;
-  --blue-border:   #93C5FD;
+  --blue-bg:       #F0F6FF;
+  --blue-border:   #BFDBFE;
   
   --purple:        #7E22CE;
   --purple-bg:     #F3E8FF;
@@ -57,13 +57,13 @@ body {
   display: flex; align-items: center;
   padding: 0 28px;
   position: sticky; top: 0; z-index: 100;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.12);
 }
 .logo { display: flex; align-items: center; gap: 12px; }
 .logo-mark {
   width: 24px; height: 24px;
   background: var(--accent);
-  clip-path: polygon(0 0, 100% 0, 80% 100%, 0 100%);
+  clip-path: polygon(0 0, 100% 0, 85% 100%, 0 100%);
   flex-shrink: 0;
 }
 .logo-text-group { display: flex; flex-direction: column; justify-content: center; }
@@ -83,7 +83,7 @@ body {
 .topbar-nav { display: flex; gap: 6px; }
 .topbar-link {
   color: #94A3B8; font-size: 13px; font-weight: 600; text-decoration: none;
-  padding: 6px 14px; border-radius: 6px; transition: all .15s ease;
+  padding: 6px 16px; border-radius: 6px; transition: all .15s ease;
   font-family: var(--font-heading); letter-spacing: .02em;
 }
 .topbar-link:hover { color: #FFFFFF; background: rgba(255,255,255,.06); }
@@ -109,12 +109,8 @@ body {
 .nav-group-label {
   font-family: var(--font-heading);
   font-size: 11px; font-weight: 700; text-transform: uppercase;
-  letter-spacing: .1em; color: var(--accent);
+  letter-spacing: .1em; color: var(--text-muted);
   padding: 0 20px 10px;
-  display: flex; align-items: center; gap: 6px;
-}
-.nav-group-label::before {
-  content: '—'; color: var(--accent); font-weight: 800;
 }
 .nav-group-label + .nav-group-label,
 .nav-item + .nav-group-label { margin-top: 24px; }
@@ -137,7 +133,7 @@ body {
 }
 
 /* Main Content Area */
-.main { flex: 1; padding: 40px 52px; max-width: 960px; }
+.main { flex: 1; padding: 36px 48px; max-width: 980px; }
 
 /* Sections */
 .section { display: none; }
@@ -147,85 +143,109 @@ body {
   font-family: var(--font-heading);
   font-size: 24px; font-weight: 700; letter-spacing: -.02em;
   color: var(--text); margin-bottom: 6px;
-  text-transform: uppercase;
-  display: flex; align-items: center; gap: 8px;
-}
-.page-title::before {
-  content: '—'; color: var(--accent); font-weight: 800;
-}
-.page-title span.highlight {
-  color: var(--accent);
 }
 .page-desc {
   font-size: 13.5px; color: var(--text-muted);
-  margin-bottom: 30px; line-height: 1.6;
+  margin-bottom: 28px; line-height: 1.6;
 }
 
 /* ================= Cards ================= */
 .card {
   background: var(--card-bg);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 10px;
   padding: 24px 28px;
   margin-bottom: 24px;
   box-shadow: 0 1px 3px rgba(0,0,0,0.03);
 }
 .card-title {
   font-family: var(--font-heading);
-  font-size: 14px; font-weight: 700; text-transform: uppercase;
-  letter-spacing: .05em; color: var(--text);
-  margin-bottom: 6px;
-  display: flex; align-items: center; gap: 6px;
-}
-.card-title::before {
-  content: '—'; color: var(--accent); font-weight: 800;
+  font-size: 15px; font-weight: 700;
+  color: var(--text); margin-bottom: 6px;
 }
 .card-desc { font-size: 12.5px; color: var(--text-muted); margin-bottom: 20px; line-height: 1.5; }
 .card-divider { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
 
-/* Highlight Card (like the orange card on Nodu flyer) */
-.card.accent-card {
-  border: 1.5px solid var(--accent);
-  background: var(--accent-light);
-}
-
-/* ================= Metrics Grid (2x2 Stat Callout Boxes) ================= */
+/* ================= Interactive Clickable Metric Grid ================= */
 .metric-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 16px; margin-bottom: 28px;
 }
+
 .metric-card {
-  background: var(--card-bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 10px;
   padding: 20px 22px;
-  transition: transform .15s ease, box-shadow .15s ease;
+  border: 1px solid var(--border);
+  background: #FFFFFF;
+  transition: all .2s ease;
+  position: relative;
+  user-select: none;
 }
-.metric-card:hover {
-  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+
+/* Clickable state styling */
+.metric-card.clickable {
+  cursor: pointer;
 }
-.metric-card.accent {
-  border: 1.5px solid var(--accent);
-  background: var(--accent-light);
+.metric-card.clickable:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 10px 24px rgba(0,0,0,0.08);
 }
-.metric-card.green {
-  border-top: 3px solid var(--green);
+.metric-card.clickable:active {
+  transform: translateY(-1px);
 }
-.metric-card.blue {
-  border-top: 3px solid var(--blue);
+
+.metric-top {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 8px;
 }
+
 .metric-value {
   font-family: var(--font-heading);
-  font-size: 32px; font-weight: 700; letter-spacing: -.03em;
-  line-height: 1.05; color: var(--text);
-  margin-bottom: 6px;
+  font-size: 34px; font-weight: 700; letter-spacing: -.03em;
+  line-height: 1; color: var(--text);
 }
-.metric-value.accent-v { color: var(--accent); }
+
+.metric-arrow {
+  font-size: 18px; color: var(--text-muted);
+  transition: transform .2s ease, color .2s ease;
+  opacity: 0.6;
+}
+.metric-card.clickable:hover .metric-arrow {
+  transform: translateX(4px);
+  opacity: 1;
+  color: var(--accent);
+}
+
+/* Distinct card themes */
+.metric-card.accent {
+  background: var(--accent-light);
+  border-color: var(--accent-border);
+}
+.metric-card.accent .metric-value { color: var(--accent); }
+
+.metric-card.blue {
+  background: var(--blue-bg);
+  border-color: var(--blue-border);
+}
+.metric-card.blue .metric-value { color: var(--blue); }
+
+.metric-card.green {
+  background: var(--green-bg);
+  border-color: var(--green-border);
+}
+.metric-card.green .metric-value { color: var(--green); }
+
+.metric-card.neutral {
+  background: #FFFFFF;
+  border-color: var(--border);
+}
+.metric-card.neutral .metric-value { color: var(--text-dark); }
+
 .metric-label {
-  font-family: var(--font-heading);
-  font-size: 11px; font-weight: 700; text-transform: uppercase;
-  letter-spacing: .06em; color: var(--text-muted);
+  font-family: var(--font-body);
+  font-size: 12px; font-weight: 600;
+  color: var(--text-muted);
   line-height: 1.35;
 }
 
@@ -319,7 +339,7 @@ textarea { resize: vertical; min-height: 80px; }
 
 /* Opportunity / Lead Cards */
 .opp-card {
-  border: 1px solid var(--border); border-radius: 8px; background: #FFFFFF;
+  border: 1px solid var(--border); border-radius: 10px; background: #FFFFFF;
   padding: 20px 24px; margin-bottom: 16px; border-left: 4px solid var(--border-strong);
   box-shadow: 0 1px 3px rgba(0,0,0,0.03);
 }
@@ -388,7 +408,7 @@ textarea { resize: vertical; min-height: 80px; }
 
 /* Draft Cards */
 .draft-card {
-  border: 1px solid var(--border); border-radius: 8px;
+  border: 1px solid var(--border); border-radius: 10px;
   overflow: hidden; margin-bottom: 20px; background: #FFFFFF;
   box-shadow: 0 1px 3px rgba(0,0,0,0.03);
 }

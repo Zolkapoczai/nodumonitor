@@ -25,24 +25,39 @@
 
     <!-- ===================== Áttekintő ===================== -->
     <div id="s-overview" class="section active">
-      <h1 class="page-title">Áttekintő <span class="highlight">— PIPELINE OVERVIEW</span></h1>
+      <h1 class="page-title">Áttekintő</h1>
       <p class="page-desc">A lead-folyamat és a fájdalom-jelek aktuális állapota (utolsó {{ stats.lookback_days }} nap).</p>
 
       <div class="metric-grid">
-        <div class="metric-card accent">
-          <div class="metric-value accent-v">{{ hot_count }}</div>
+        <div class="metric-card accent clickable" onclick="show('opportunities', document.getElementById('nav-opps'))" title="Ugrás a Forró lehetőségekhez">
+          <div class="metric-top">
+            <div class="metric-value accent-v">{{ hot_count }}</div>
+            <div class="metric-arrow">&rarr;</div>
+          </div>
           <div class="metric-label">Forró lehetőség (súlyosság 4–5)</div>
         </div>
-        <div class="metric-card blue">
-          <div class="metric-value">{{ opportunities | length }}</div>
+
+        <div class="metric-card blue clickable" onclick="show('opportunities', document.getElementById('nav-opps'))" title="Ugrás a fájdalom-jelekhez">
+          <div class="metric-top">
+            <div class="metric-value blue-v">{{ opportunities | length }}</div>
+            <div class="metric-arrow">&rarr;</div>
+          </div>
           <div class="metric-label">Valódi fájdalom-jel</div>
         </div>
-        <div class="metric-card green">
-          <div class="metric-value">{{ drafts | length }}</div>
+
+        <div class="metric-card green clickable" onclick="show('drafts', document.getElementById('nav-drafts'))" title="Ugrás a választervezetekhez">
+          <div class="metric-top">
+            <div class="metric-value green-v">{{ drafts | length }}</div>
+            <div class="metric-arrow">&rarr;</div>
+          </div>
           <div class="metric-label">Jóváhagyásra váró válasz</div>
         </div>
-        <div class="metric-card">
-          <div class="metric-value">{{ stats.total_posts }}</div>
+
+        <div class="metric-card neutral clickable" onclick="show('raw', document.querySelector('.nav-item[onclick*=\'raw\']'))" title="Ugrás a nyers leadekhez">
+          <div class="metric-top">
+            <div class="metric-value">{{ stats.total_posts }}</div>
+            <div class="metric-arrow">&rarr;</div>
+          </div>
           <div class="metric-label">Új nyers lead a héten</div>
         </div>
       </div>

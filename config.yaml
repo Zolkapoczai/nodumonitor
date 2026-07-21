@@ -1,12 +1,15 @@
 reddit:
-  client_id: TEST_REDDIT
+  client_id: YOUR_REDDIT_CLIENT_ID
   client_secret: YOUR_REDDIT_CLIENT_SECRET
   user_agent: NODU-Bridge-Monitor/0.1 by NODU
-  subreddits: []
+  subreddits:
+  - Revit
+  - ArchiCAD
+  - BIM
   poll_interval_minutes: 60
   post_limit: 25
 youtube:
-  api_key: TEST_APP_KEY
+  api_key: YOUR_YOUTUBE_API_KEY
   search_queries:
   - Revit Archicad IFC
   - Archicad to Revit tutorial
@@ -100,9 +103,9 @@ alerts:
 database:
   path: nodu_monitor.db
 scoring:
-  gemini_enabled: false
+  gemini_enabled: true
   gemini_model: gemini-2.5-flash
-  gemini_api_key: YOUR_GEMINI_API_KEY
+  gemini_api_key: ${GEMINI_API_KEY}
 classifier:
   enabled: true
   batch_size: 15
