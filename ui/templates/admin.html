@@ -50,6 +50,20 @@
         </div>
 
         <div class="card">
+          <div class="card-title">YouTube Data API</div>
+          <div class="card-desc">
+            A YouTube oktatóvideók és webinarok alatti kommentek figyeléséhez (pl. "Archicad to Revit tutorial" alatti panaszok).<br>
+            Létrehozás: Google Cloud Console &rarr; API & Services &rarr; YouTube Data API v3 engedélyezése &rarr; Credentials &rarr; Create API Key
+          </div>
+          <div class="field">
+            <label>API Key</label>
+            <input type="password" name="youtube_api_key"
+              value="{{ config.youtube.api_key if config.youtube.api_key != 'YOUR_YOUTUBE_API_KEY' else '' }}"
+              placeholder="Pl.: AIzaSy...">
+          </div>
+        </div>
+
+        <div class="card">
           <div class="card-title">Gemini API: válasz-javaslat generálás</div>
           <div class="card-desc">
             Nélküle a monitor figyeli a fórumokat, de válaszjavaslatot nem generál.<br>
@@ -246,6 +260,7 @@
           ('stackoverflow', 'Stack Overflow', 'Stack Exchange API: revit, archicad, ifc témák'),
           ('discourse', 'buildingSMART fórum', 'Discourse API: forums.buildingsmart.org'),
           ('github', 'GitHub issues', 'IfcOpenShell/Bonsai, Speckle, xeokit repók'),
+          ('youtube', 'YouTube kommentek', 'YouTube Data API v3 (tutorialok és webinarok kommentjei)'),
           ('forums', 'Fórumok (HTML)', 'Khoros és phpBB fórumok közvetlen scraping')
         ] %}
         {% for key, title, desc in runners %}
@@ -361,7 +376,7 @@ function setBadge(key, state) {
 setInterval(function() {
   fetch('/api/status').then(r => r.json()).then(data => {
     const jobs = data.jobs || {};
-    ['reddit','search','playwright','stackoverflow','forums','generate-drafts','weekly-report','linkedin-content','build-knowledge'].forEach(key => {
+    ['reddit','search','playwright','stackoverflow','forums','github','youtube','generate-drafts','weekly-report','linkedin-content','build-knowledge'].forEach(key => {
       const j = jobs[key]; const el = document.getElementById('badge-' + key);
       if (!j || !el) return;
       el.className = 'badge';

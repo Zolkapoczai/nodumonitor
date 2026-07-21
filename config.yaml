@@ -8,6 +8,15 @@ reddit:
   - BIM
   poll_interval_minutes: 60
   post_limit: 25
+youtube:
+  api_key: YOUR_YOUTUBE_API_KEY
+  search_queries:
+  - Revit Archicad IFC
+  - Archicad to Revit tutorial
+  - Revit to Archicad workflow
+  max_videos_per_query: 5
+  max_comments_per_video: 20
+  poll_interval_minutes: 180
 forums:
   graphisoft:
     base_url: https://community.graphisoft.com

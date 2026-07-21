@@ -152,6 +152,11 @@ def save():
         config.setdefault("weekly_report", {})
         config["weekly_report"]["language"] = f.get("report_language", "hu").strip()
 
+    if "youtube_api_key" in f:
+        config.setdefault("youtube", {})
+        yt_key = f.get("youtube_api_key", "").strip()
+        config["youtube"]["api_key"] = yt_key if yt_key else "YOUR_YOUTUBE_API_KEY"
+
     save_config(config)
     return redirect(url_for("admin") + "?saved=1")
 
@@ -182,6 +187,15 @@ def run_action(action):
     elif action == "github":
         from connectors.github_connector import GitHubConnector
         _run_in_bg("github", lambda: GitHubConnector(config, db_path).run())
+
+    elif action == "youtube":
+        def _yt():
+            from connectors.youtube_connector import poll_youtube
+            from storage.db import filter_and_save_posts
+            posts = poll_youtube(config)
+            if not posts: return 0
+            return filter_and_save_posts(db_path, posts, config.get("alerts", {}).get("min_keyword_matches", 1))
+        _run_in_bg("youtube", _yt)
 
     elif action == "forums":
         from connectors.html_connector import HTMLConnector

@@ -38,8 +38,8 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from storage.db import init_db, get_new_posts, mark_alerted, get_weekly_stats
 from connectors.html_connector import HTMLConnector
-from alerts.notifier import send_alerts, send_weekly_digest, send_linkedin_suggestions
-from responder.draft_generator import generate_drafts, review_drafts, generate_linkedin_content
+from alerts.notifier import send_alerts, send_weekly_digest, send_content_pipeline_ideas
+from responder.draft_generator import generate_drafts, review_drafts, generate_content_pipeline
 
 
 def load_config() -> dict:
@@ -128,6 +128,23 @@ def run_github(config: dict, db_path: str) -> int:
         return 0
 
 
+def run_youtube(config: dict, db_path: str) -> int:
+    try:
+        from connectors.youtube_connector import poll_youtube
+        from storage.db import filter_and_save_posts
+        posts = poll_youtube(config)
+        if not posts:
+            return 0
+        n = filter_and_save_posts(db_path, posts, config.get("alerts", {}).get("min_keyword_matches", 1))
+        return n
+    except ImportError as e:
+        print(f"[youtube] Függőségi hiba: {e}")
+        return 0
+    except Exception as e:
+        print(f"[youtube] HIBA: {e}")
+        return 0
+
+
 def run_classify(config: dict, db_path: str, batch_size: int = None) -> int:
     from classifier.pain_classifier import PainClassifier
     classifier = PainClassifier(config, db_path)
@@ -152,16 +169,18 @@ def run_digest(config: dict, db_path: str) -> None:
 
 
 def run_linkedin_content(config: dict, db_path: str) -> int:
-    posts = generate_linkedin_content(config, db_path)
+    posts = generate_content_pipeline(config, db_path)
     if posts:
-        send_linkedin_suggestions(posts, config.get("alerts", {}))
-    return len(posts)
+        send_content_pipeline_ideas(posts, config.get("alerts", {}))
+    return len(posts) if posts else 0
 
 
 def run_weekly_report(config: dict, db_path: str) -> None:
+    from responder.draft_generator import generate_trend_analysis
     days = config.get("weekly_report", {}).get("lookback_days", 7)
     stats = get_weekly_stats(db_path, days)
-    send_weekly_digest(stats, config.get("alerts", {}))
+    trend = generate_trend_analysis(config, db_path)
+    send_weekly_digest(stats, config.get("alerts", {}), trend_analysis=trend)
     print(f"[weekly] {stats['total_posts']} uj poszt, {stats['pending_drafts']} pending draft az utolso {days} napban.")
 
 
@@ -252,6 +271,15 @@ def register_jobs(scheduler, config: dict, db_path: str) -> None:
         next_run_time=datetime.now(tz=timezone.utc),
     )
 
+    youtube_interval = config.get("youtube", {}).get("poll_interval_minutes", 180)
+    scheduler.add_job(
+        lambda: run_youtube(config, db_path),
+        "interval",
+        minutes=youtube_interval,
+        id="youtube",
+        next_run_time=datetime.now(tz=timezone.utc),
+    )
+
     digest_hour = config.get("alerts", {}).get("digest_hour", 8)
     scheduler.add_job(
         lambda: run_digest(config, db_path),
@@ -290,15 +318,16 @@ def describe_schedule(config: dict) -> str:
     so_interval = config.get("stackoverflow", {}).get("poll_interval_minutes", 180)
     dc_interval = config.get("discourse", {}).get("poll_interval_minutes", 240)
     gh_interval = config.get("github", {}).get("poll_interval_minutes", 240)
+    yt_interval = config.get("youtube", {}).get("poll_interval_minutes", 180)
     digest_hour = config.get("alerts", {}).get("digest_hour", 8)
     wr = config.get("weekly_report", {})
     lines = [
-        f"Reddit: {reddit_interval} perc | Playwright: {pw_interval} perc | SO: {so_interval} perc "
-        f"| Discourse: {dc_interval} perc | GitHub: {gh_interval} perc",
-        f"Napi digest + webhook: {digest_hour}:00",
+        f"Reddit: {reddit_interval} perc | PW: {pw_interval} perc | SO: {so_interval} perc "
+        f"| Disc: {dc_interval} perc | Git: {gh_interval} perc | YT: {yt_interval} perc",
+        f"Napi digest: {digest_hour}:00",
     ]
     if wr.get("enabled", True):
-        lines.append(f"Heti riport + LinkedIn javaslat: {wr.get('day_of_week', 'mon')} {wr.get('hour', 8)}:00")
+        lines.append(f"Heti riport: {wr.get('day_of_week', 'mon')} {wr.get('hour', 8)}:00")
     return " | ".join(lines)
 
 
@@ -323,6 +352,7 @@ def main():
     parser.add_argument("--stackoverflow",    action="store_true", help="Stack Overflow / Stack Exchange")
     parser.add_argument("--discourse",        action="store_true", help="buildingSMART forum (Discourse API)")
     parser.add_argument("--github",           action="store_true", help="GitHub issues (IfcOpenShell, Speckle, xeokit)")
+    parser.add_argument("--youtube",          action="store_true", help="YouTube kommentek lekérése")
     parser.add_argument("--classify",         action="store_true", help="Pain Classifier: LLM-osztalyozas a meglevo posztokon")
     parser.add_argument("--review-signals",   action="store_true", help="Osztalyozott jelek kezi kiertekelo riportja")
     parser.add_argument("--digest",           action="store_true", help="Napi összefoglaló + n8n webhook")
@@ -380,7 +410,7 @@ def main():
 
     any_flag = (
         args.reddit or args.forums or args.playwright or args.stackoverflow
-        or args.discourse or args.github
+        or args.discourse or args.github or args.youtube
     )
 
     if args.reddit or not any_flag:
@@ -400,6 +430,9 @@ def main():
 
     if args.github or not any_flag:
         run_github(config, db_path)
+
+    if args.youtube or not any_flag:
+        run_youtube(config, db_path)
 
     run_digest(config, db_path)
 
