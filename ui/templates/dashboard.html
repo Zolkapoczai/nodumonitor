@@ -308,7 +308,7 @@ function renderRawLeads(results) {
       '</div>' +
       '<div class="result-actions">' +
         '<button class="btn btn-secondary btn-sm" onclick="genDraft(' + r.id + ')">Választervezet</button>' +
-        '<button class="btn btn-primary btn-sm" onclick="toPipedrive(' + r.id + ', this)">Pipedrive</button>' +
+        '<button class="btn btn-primary btn-sm" onclick="toSalesOS(' + r.id + ', this)">Sales OS</button>' +
       '</div>' +
     '</div>';
   });
@@ -388,7 +388,7 @@ function renderAdhoc(results) {
       '</div>' +
       '<div class="result-actions">' +
         '<button class="btn btn-secondary btn-sm" onclick="genDraft(' + r.id + ')">Választervezet</button>' +
-        '<button class="btn btn-primary btn-sm" onclick="toPipedrive(' + r.id + ', this)">Pipedrive</button>' +
+        '<button class="btn btn-primary btn-sm" onclick="toSalesOS(' + r.id + ', this)">Sales OS</button>' +
       '</div>' +
     '</div>';
   });
@@ -516,12 +516,12 @@ function copyLinkedinReply() {
   ta.style.position = 'absolute'; ta.style.left = '-9999px';
 }
 
-function toPipedrive(id, btn) {
+function toSalesOS(id, btn) {
   if (btn) { btn.disabled = true; btn.textContent = 'Küldés...'; }
-  fetch('/lead/' + id + '/to-pipedrive', { method: 'POST' }).then(r => r.json()).then(d => {
-    if (d.ok) { toast('Elküldve a Pipedrive-csatornára.'); if (btn) btn.textContent = 'Elküldve'; }
-    else { toast(d.error || 'Nem sikerült. Be van állítva az n8n webhook?'); if (btn) { btn.disabled = false; btn.textContent = 'Pipedrive'; } }
-  }).catch(() => { toast('Hiba a küldéskor.'); if (btn) { btn.disabled = false; btn.textContent = 'Pipedrive'; } });
+  fetch('/lead/' + id + '/to-sales-os', { method: 'POST' }).then(r => r.json()).then(d => {
+    if (d.ok) { toast('Elküldve a Sales OS-be.'); if (btn) btn.textContent = 'Elküldve'; }
+    else { toast(d.error || 'Nem sikerült. Be van állítva az n8n webhook?'); if (btn) { btn.disabled = false; btn.textContent = 'Sales OS'; } }
+  }).catch(() => { toast('Hiba a küldéskor.'); if (btn) { btn.disabled = false; btn.textContent = 'Sales OS'; } });
 }
 
 // --- Draft műveletek ---

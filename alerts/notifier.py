@@ -95,7 +95,7 @@ def send_slack(posts: list[dict], alert_config: dict) -> None:
 
 
 def send_webhook(posts: list[dict], alert_config: dict) -> None:
-    """n8n webhook — Pipedrive lead-létrehozáshoz."""
+    """n8n webhook — SalesOS lead-létrehozáshoz."""
     wc = alert_config.get("webhook", {})
     if not wc.get("enabled") or not wc.get("url"):
         return
@@ -141,7 +141,7 @@ def send_weekly_digest(stats: dict, alert_config: dict, subscriber_count: int = 
     """
     Heti Slack-osszefoglalo a scraper statisztikaibol (storage.db.get_weekly_stats).
     Csak akkor kuld, ha a Slack engedelyezve van (alerts.slack.enabled + webhook_url).
-    A subscriber_count opcionalis (wishlist feliratkozok szama Pipedrive/n8n felol).
+    A subscriber_count opcionalis (wishlist feliratkozok szama SalesOS/n8n felol).
     """
     sc = alert_config.get("slack", {})
     if not sc.get("enabled") or not sc.get("webhook_url"):

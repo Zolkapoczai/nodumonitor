@@ -124,7 +124,7 @@ def get_new_posts(db_path: str) -> list[dict]:
 
 
 def get_post(db_path: str, post_id: int) -> dict | None:
-    """Egyetlen poszt lekerese id alapjan (draft-generalashoz, Pipedrive-kuldeshez)."""
+    """Egyetlen poszt lekerese id alapjan (draft-generalashoz, SalesOS-kuldeshez)."""
     conn = get_connection(db_path)
     row = conn.execute("SELECT * FROM posts WHERE id = ?", (post_id,)).fetchone()
     conn.close()

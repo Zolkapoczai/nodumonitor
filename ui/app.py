@@ -283,8 +283,8 @@ def lead_draft(post_id):
     return jsonify({"ok": False, "error": "Nem sikerült. Be van kapcsolva a Gemini API az Adminban?"})
 
 
-@app.route("/lead/<int:post_id>/to-pipedrive", methods=["POST"])
-def lead_to_pipedrive(post_id):
+@app.route("/lead/<int:post_id>/to-sales-os", methods=["POST"])
+def lead_to_sales_os(post_id):
     config = load_config()
     db_path = get_db_path(config)
     post = get_post(db_path, post_id)
