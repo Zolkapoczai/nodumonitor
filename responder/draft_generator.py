@@ -14,6 +14,8 @@ import json
 from google import genai
 from google.genai import types
 from datetime import datetime, timezone
+
+from env_secrets import get_secret
 from storage.db import (
     save_draft, get_pending_drafts, mark_draft, mark_alerted,
     get_post_with_signal, get_pain_posts_without_draft,
@@ -151,7 +153,7 @@ def generate_draft_for_post(config: dict, db_path: str, post_id: int):
     Visszaadja a draft_id-t, vagy None ha nem sikerult.
     """
     sc = config.get("scoring", {})
-    api_key = sc.get("gemini_api_key", "")
+    api_key = get_secret("GEMINI_API_KEY", sc.get("gemini_api_key"))
     if not sc.get("gemini_enabled", False) or not api_key or api_key == "YOUR_GEMINI_API_KEY":
         print("[responder] Gemini API nincs beallitva. Kihagy.")
         return None
@@ -210,7 +212,7 @@ def generate_drafts(config: dict, db_path: str, batch_size: int = 10) -> int:
         print("[responder] Gemini API ki van kapcsolva (scoring.gemini_enabled: false). Kihagy.")
         return 0
 
-    api_key = sc.get("gemini_api_key", "")
+    api_key = get_secret("GEMINI_API_KEY", sc.get("gemini_api_key"))
     if not api_key or api_key == "YOUR_GEMINI_API_KEY":
         print("[responder] Nincs Gemini API kulcs beállítva. Kihagy.")
         return 0
@@ -367,7 +369,7 @@ def generate_content_pipeline(config: dict, db_path: str) -> dict | None:
         return None
 
     sc = config.get("scoring", {})
-    api_key = sc.get("gemini_api_key", "")
+    api_key = get_secret("GEMINI_API_KEY", sc.get("gemini_api_key"))
     if not sc.get("gemini_enabled", False) or not api_key or api_key == "YOUR_GEMINI_API_KEY":
         print("[content-pipeline] Gemini API nincs beallitva. Kihagy.")
         return None
@@ -446,7 +448,7 @@ def generate_trend_analysis(config: dict, db_path: str) -> str:
     írat egy narratív vezetői összefoglalót (trendeket).
     """
     sc = config.get("scoring", {})
-    api_key = sc.get("gemini_api_key", "")
+    api_key = get_secret("GEMINI_API_KEY", sc.get("gemini_api_key"))
     if not sc.get("gemini_enabled", False) or not api_key or api_key == "YOUR_GEMINI_API_KEY":
         return "AI Trendelemzés nem elérhető: Gemini API nincs beállítva."
 
@@ -609,7 +611,7 @@ def generate_linkedin_reply(config: dict, post_text: str, author_name: str = "",
     Nincs DB-perzisztencia — szinkron, egyszeri hasznalatra.
     """
     sc = config.get("scoring", {})
-    api_key = sc.get("gemini_api_key", "")
+    api_key = get_secret("GEMINI_API_KEY", sc.get("gemini_api_key"))
     if not sc.get("gemini_enabled", False) or not api_key or api_key == "YOUR_GEMINI_API_KEY":
         print("[linkedin-reply] Gemini API nincs beallitva. Kihagy.")
         return None
@@ -651,8 +653,8 @@ def generate_linkedin_reply(config: dict, post_text: str, author_name: str = "",
         )
         if not resp.text:
             print("[linkedin-reply] Ures valasz.")
-            return None
+            return {"error": "A Gemini API üres választ adott."}
         return json.loads(resp.text)
     except Exception as e:
         print(f"[linkedin-reply] HIBA: {e}")
-        return None
+        return {"error": f"Gemini API Hiba: {e}"}

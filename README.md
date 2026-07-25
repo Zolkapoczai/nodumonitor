@@ -124,16 +124,22 @@ Vagy bármely SQLite klienssel (pl. DB Browser for SQLite).
 
 ## Platform státusz
 
-| Platform | Connector | Állapot |
+| Platform | Connector | Állapot (2026-07-25) |
 |---|---|---|
-| r/Revit (Reddit) | PRAW API | Müködik, API kulcs szükséges |
-| r/ArchiCAD (Reddit) | PRAW API | Müködik, API kulcs szükséges |
-| r/BIM (Reddit) | PRAW API | Müködik, API kulcs szükséges |
-| Graphisoft Community | Playwright (headless Chromium) | Müködik, `pip install playwright && playwright install chromium` |
-| Autodesk Community | Playwright (headless Chromium) | Müködik |
-| RevitForum.org | HTML scraping | Müködik |
-| Discord | Bot API | Nem implementált (bot invite szükséges) |
-| LinkedIn | Manuális | Scraping tiltott |
+| Graphisoft Community | Playwright (headless Chromium) | ✅ Működik. **Absolute interpreter-úttal indítsd** — a Store-os Python alatt nem találja a böngészőt |
+| Autodesk Community | Playwright (headless Chromium) | ✅ Működik — a legnagyobb volumen |
+| GitHub Issues | Search API | ✅ Működik — **a legjobb jelminőség** (14 jelből 11 fájdalom) |
+| buildingSMART fórum | Discourse JSON API | ✅ Működik (`order:latest` + `latest.json`, 3 s szünet a 429 ellen) |
+| Stack Exchange | API v2.3 | ✅ Működik. A tag-szeparátor `;`, **nem** `+` |
+| Web-keresés (Brave) | `SearchProvider` adapter | ✅ Működik — `BRAVE_API_KEY` a `.env`-ben, `freshness: py` |
+| Reddit (r/Revit, r/ArchiCAD, r/BIM +5) | PRAW API | ⏸️ **API-kulcsra vár** (jóváhagyás kell). Áthidalva: a Reddit-tartalom a Brave-keresőn jön (`site:reddit.com`) |
+| YouTube kommentek | Data API | ⚠️ Működik, de gyenge jelminőség (13 jelből 1 fájdalom) |
+| RevitForum.org | — | ⛔ **Kivezetve** — XenForo-ra migrált Cloudflare mögé, a phpBB-szelektorok halottak |
+| Discord | Bot API | Nem implementált |
+| LinkedIn | Kereső (publikus posztok) | Scraping tiltott; a Brave-kereső `site:linkedin.com` query-je hozza a publikus posztokat |
+
+Üzemi részletek, mérések és a döntések indoklása: [`docs/02-lead-volume-audit-2026-07.md`](docs/02-lead-volume-audit-2026-07.md).
+Állapot-ellenőrzés: `python main.py --health` vagy `GET /health` (503, ha bármely connector elhallgatott).
 
 ---
 

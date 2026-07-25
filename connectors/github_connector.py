@@ -98,12 +98,14 @@ class GitHubConnector:
         repos = self.gh_config.get("repos", _DEFAULT_REPOS)
         queries = self.gh_config.get("queries", _DEFAULT_QUERIES)
         total = 0
+        total_seen = 0
         started = _now()
         error_msg = None
 
         try:
             for query in queries:
                 items = self._search(query, repos)
+                total_seen += len(items)
                 total += self._save(items)
                 time.sleep(_DELAY_S)
         except Exception as e:
@@ -117,8 +119,9 @@ class GitHubConnector:
             finished_at=_now(),
             new_posts=total,
             error=error_msg,
+            items_seen=total_seen,
         )
-        print(f"[github] {total} uj bejegyzes mentve")
+        print(f"[github] {total} uj bejegyzes mentve ({total_seen} issue latva)")
         return total
 
     def search(self, query: str, search_term: str = None) -> int:

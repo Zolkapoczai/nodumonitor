@@ -65,6 +65,54 @@ def setup_logging() -> None:
     sys.stderr = _StreamToLogger(logging.getLogger("stderr"), logging.ERROR)
 
 
+def preflight(config: dict) -> None:
+    """
+    Indulasi onellenorzes. Azert van, mert 2026-07-21 → 07-24 kozott a
+    Playwright-connector 46 futason keresztul csendben halott volt, es semmi
+    nem jelezte (ld. docs/02-lead-volume-audit-2026-07.md §3.1).
+
+    Ket dolgot naploz ERROR szinten, ha baj van:
+      1. melyik Python-interpreter fut — a Microsoft Store-os
+         `WindowsApps\\python.exe` alias alatt a %LOCALAPPDATA% olvasasa
+         virtualizalt, ezert a telepitett Chromium "nem letezik";
+      2. letezik-e valojaban a Playwright bongeszo-binaris.
+    """
+    log = logging.getLogger("preflight")
+    log.info("Interpreter: %s", sys.executable)
+
+    if "\\WindowsApps\\" in sys.executable or "/WindowsApps/" in sys.executable:
+        log.error(
+            "ROSSZ INTERPRETER: a Microsoft Store-os Python alias fut. Ez alatt a "
+            "%%LOCALAPPDATA%%\\ms-playwright olvasasa virtualizalt, ezert a Playwright "
+            "nem talalja a bongeszot. Inditsd absolute uttal: "
+            "...\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe server.py"
+        )
+
+    if not config.get("playwright", {}).get("enabled", True):
+        log.info("Playwright letiltva a configban — bongeszo-ellenorzes kihagyva.")
+        return
+
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        log.error("Playwright nincs telepitve (pip install playwright) — a Khoros-forumok nem gyujthetok.")
+        return
+
+    try:
+        with sync_playwright() as p:
+            exe = p.chromium.executable_path
+        if os.path.exists(exe):
+            log.info("Playwright chromium OK: %s", exe)
+        else:
+            log.error(
+                "PLAYWRIGHT BONGESZO HIANYZIK: %s. A Graphisoft/Autodesk gyujtes NEM fog "
+                "mukodni. Javitas: 'playwright install chromium' UGYANAZZAL az interpreterrel, "
+                "amivel a server.py fut.", exe,
+            )
+    except Exception as e:
+        log.error("Playwright onellenorzes nem futott le: %s", e)
+
+
 def main() -> None:
     setup_logging()
     log = logging.getLogger("server")
@@ -80,6 +128,8 @@ def main() -> None:
     db_path = os.path.join(BASE_DIR, config.get("database", {}).get("path", "nodu_monitor.db"))
     init_db(db_path)
     log.info("Adatbázis: %s", db_path)
+
+    preflight(config)
 
     scheduler = BackgroundScheduler(job_defaults=JOB_DEFAULTS)
     register_jobs(scheduler, config, db_path)

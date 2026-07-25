@@ -16,7 +16,7 @@
     <div class="logo-mark"></div>
     <div class="logo-text-group">
       <span class="logo-name">nodu<span class="logo-name-sub">.monitor</span></span>
-      <span class="logo-tagline">ARCHICAD &rarr; REVIT NATIVE PARAMETRIC MONITOR</span>
+      <span class="logo-tagline">ARCHICAD REVIT NATIVE PARAMETRIC MONITOR</span>
     </div>
   </div>
   <div class="topbar-sep"></div>
@@ -39,7 +39,7 @@
   <div class="progress-modal-card">
     <div class="progress-modal-header">
       <div class="progress-modal-icon-spin">
-        <svg viewBox="0 0 24 24"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0 0 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 0 0 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>
+        
       </div>
       <div>
         <h3 class="progress-modal-title" id="pmTitle">Folyamat futtatása...</h3>
@@ -55,7 +55,7 @@
 
     <div class="progress-modal-footer" id="pmFooter" style="display:none;">
       <button type="button" class="btn btn-secondary" onclick="closeProgressModal()">Bezárás</button>
-      <a href="{{ url_for('dashboard') }}" class="btn btn-primary">Ugrás a Dashboardra ➔</a>
+      <a href="{{ url_for('dashboard') }}" class="btn btn-primary">Ugrás a Dashboardra </a>
     </div>
   </div>
 </div>
@@ -94,9 +94,9 @@ function openRunProgressModal(actionKey, actionTitle) {
   barEl.style.width = '20%';
 
   stepsEl.innerHTML = `
-    <div class="step-item done">✓ 1. Kérés elküldve a szervernek</div>
-    <div class="step-item active" id="st-2">⏳ 2. Kapcsolódás és adatok lekérése...</div>
-    <div class="step-item" id="st-3">🤖 3. AI fájdalom-elemzés és mentés</div>
+    <div class="step-item done">1. Kérés elküldve a szervernek</div>
+    <div class="step-item active" id="st-2">2. Kapcsolódás és adatok lekérése...</div>
+    <div class="step-item" id="st-3">3. AI fájdalom-elemzés és mentés</div>
   `;
 
   modal.classList.add('active');
@@ -107,7 +107,7 @@ function openRunProgressModal(actionKey, actionTitle) {
     .then(() => {
       barEl.style.width = '55%';
       const st2 = document.getElementById('st-2');
-      if (st2) { st2.className = 'step-item done'; st2.innerHTML = '✓ 2. Adatok sikeresen letöltve'; }
+      if (st2) { st2.className = 'step-item done'; st2.innerHTML = '2. Adatok sikeresen letöltve'; }
       const st3 = document.getElementById('st-3');
       if (st3) { st3.className = 'step-item active'; }
 
@@ -136,9 +136,9 @@ function pollJobStatus(actionKey) {
         
         const stepsEl = document.getElementById('pmSteps');
         stepsEl.innerHTML = `
-          <div class="step-item done">✓ 1. Kérés elküldve a szervernek</div>
-          <div class="step-item done">✓ 2. Adatok sikeresen letöltve</div>
-          <div class="step-item done">✓ 3. AI feldolgozás kész: ${job.result != null ? job.result : 'Kész'}</div>
+          <div class="step-item done">1. Kérés elküldve a szervernek</div>
+          <div class="step-item done">2. Adatok sikeresen letöltve</div>
+          <div class="step-item done">3. AI feldolgozás kész: ${job.result != null ? job.result : 'Kész'}</div>
         `;
         document.getElementById('pmFooter').style.display = 'flex';
       } else if (job.status === 'error') {

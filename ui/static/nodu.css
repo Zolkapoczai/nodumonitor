@@ -174,22 +174,40 @@ body {
 }
 
 .metric-card {
-  border-radius: 10px;
-  padding: 20px 22px;
-  border: 1px solid var(--border);
-  background: #FFFFFF;
-  transition: all .2s ease;
+  border-radius: 16px;
+  padding: 24px 26px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  background: linear-gradient(145deg, #ffffff 0%, #f9fbfc 100%);
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.03), inset 0 2px 4px rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(8px);
+  transition: all .3s cubic-bezier(0.25, 0.8, 0.25, 1);
   position: relative;
   user-select: none;
+  overflow: hidden;
 }
+
+/* Subtle shine effect */
+.metric-card::after {
+  content: '';
+  position: absolute;
+  top: 0; left: -150%;
+  width: 50%; height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.8), transparent);
+  transform: skewX(-20deg);
+  transition: left 0.6s ease;
+}
+.metric-card.clickable:hover::after {
+  left: 150%;
+}
+
 
 /* Clickable state styling */
 .metric-card.clickable {
   cursor: pointer;
 }
 .metric-card.clickable:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 10px 24px rgba(0,0,0,0.08);
+  transform: translateY(-4px) scale(1.01);
+  box-shadow: 0 16px 32px rgba(0,0,0,0.07), inset 0 2px 4px rgba(255, 255, 255, 0.8);
 }
 .metric-card.clickable:active {
   transform: translateY(-1px);
@@ -218,36 +236,19 @@ body {
 }
 
 /* Distinct card themes */
-.metric-card.accent {
-  background: var(--accent-light);
-  border-color: var(--accent-border);
-}
+.metric-card.accent { background: linear-gradient(135deg, #fff3f0 0%, #ffe9e3 100%); border-color: rgba(255, 126, 94, 0.2); }
 .metric-card.accent .metric-value { color: var(--accent); }
 
-.metric-card.blue {
-  background: var(--blue-bg);
-  border-color: var(--blue-border);
-}
+.metric-card.blue { background: linear-gradient(135deg, #f0f7ff 0%, #e3f0ff 100%); border-color: rgba(56, 124, 255, 0.2); }
 .metric-card.blue .metric-value { color: var(--blue); }
 
-.metric-card.green {
-  background: var(--green-bg);
-  border-color: var(--green-border);
-}
+.metric-card.green { background: linear-gradient(135deg, #f2fbf5 0%, #e6f7ec 100%); border-color: rgba(26, 178, 83, 0.2); }
 .metric-card.green .metric-value { color: var(--green); }
 
-.metric-card.neutral {
-  background: #FFFFFF;
-  border-color: var(--border);
-}
+.metric-card.neutral { background: linear-gradient(135deg, #ffffff 0%, #f6f8fa 100%); border-color: rgba(200, 204, 209, 0.4); }
 .metric-card.neutral .metric-value { color: var(--text-dark); }
 
-.metric-label {
-  font-family: var(--font-body);
-  font-size: 12px; font-weight: 600;
-  color: var(--text-muted);
-  line-height: 1.35;
-}
+.metric-label { font-family: var(--font-heading); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dark); line-height: 1.4; opacity: 0.8; margin-top: 8px; }
 
 /* ================= Form Controls ================= */
 .field { margin-bottom: 16px; }
@@ -730,4 +731,21 @@ textarea { resize: vertical; min-height: 80px; }
 .progress-modal-footer {
   display: flex; justify-content: flex-end; gap: 10px;
   padding-top: 16px; border-top: 1px solid var(--border);
+}
+
+/* Hot Opportunity Highlight */
+.opp-card.hot-opp {
+  border-left: 4px solid var(--accent);
+  background: linear-gradient(90deg, var(--accent-light) 0%, #ffffff 5%);
+  box-shadow: 0 4px 12px rgba(255, 90, 31, 0.08);
+}
+.opp-card.hot-opp .opp-title {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.metric-sub-badge { display: inline-flex; align-items: center; background: rgba(255, 90, 31, 0.12); color: var(--accent); padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.02em; margin-left: 12px; vertical-align: middle; font-family: var(--font-heading); }
+.metric-value-row {
+  display: flex;
+  align-items: baseline;
 }

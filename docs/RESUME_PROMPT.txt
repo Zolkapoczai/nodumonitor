@@ -1,9 +1,21 @@
 Folytatom a NODU Monitor fejlesztését (C:\NODU\Sales system\Nodu sales dashboard).
 
-Olvasd el először: docs/HANDOFF.md — ez a teljes kontextus (architektúra, mit építettünk eddig, élesben megtanult hibák/leckék, config-állapot).
+Olvasd el először: docs/HANDOFF.md — teljes kontextus (architektúra, élesben megtanult
+leckék, config-állapot, nyitott munka). Ha az üzemállapot/mérések/döntések kellenek:
+docs/02-lead-volume-audit-2026-07.md. Stratégiai háttér: docs/01-architektura-audit-2026-07.md.
 
-Ha mélyebb stratégiai háttér kell: docs/01-architektura-audit-2026-07.md
+Mielőtt bármit módosítasz: futtasd le a `python main.py --health`-et (vagy GET
+localhost:5050/health) — ez megmutatja, melyik connector termel és melyik hallgatott el.
+A szervert MINDIG absolute interpreter-úttal indítsd (HANDOFF §4/6), különben a
+Playwright csendben meghal.
 
-Következő feladat: a HANDOFF.md §7/B pontja — a "Nyers-lead kereső" (2. szakasz): search_posts() DB-helper + GET /api/posts route + új "Nyers leadek" dashboard-fül, hogy a teljes posts tábla (jelenleg ~185 nyers, még nem osztályozott poszt) böngészhető/kereshető legyen. Ez megbeszélve és megbecsülve van, de még nem kezdődött el.
+KÖVETKEZŐ FELADAT (HANDOFF §7/A): az OSArch bekötése a Discourse-connectorba.
+A community.osarch.org egy openBIM/IfcOpenShell-közösség, Discourse-alapú, tehát a
+meglévő connectors/discourse_connector.py egy config-blokkal lefedi — ugyanaz a
+latest.json + kereső logika futna rá, mint a buildingSMART-on. A Brave-kereső hozta fel
+mint lefedetlen forrást (docs/02-...md §5a). Becslés ~30 perc.
+Ellenőrizd élesben, hogy a /search.json és /latest.json végpont ott is nyitott-e, és
+figyelj a rate limitre (a buildingSMART 429-et adott 8 gyors kérésnél; ezért van 3 s szünet).
 
-Legyél alapos, de token-takarékos.
+Legyél alapos, de token-takarékos. Ne módosíts kódot mérés nélkül: ebben a projektben
+minden fontos állítás élesben verifikált (runs.items_seen, /health, DB-lekérdezések).

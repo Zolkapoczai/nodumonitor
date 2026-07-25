@@ -8,13 +8,27 @@ def _utcnow() -> datetime:
 
 
 def get_connection(db_path: str) -> sqlite3.Connection:
-    conn = sqlite3.connect(db_path)
+    # timeout=30: a szerver-processz (utemezo + Flask szalak) es egy parhuzamos
+    # CLI-futas (`python main.py --github`) egyszerre nyulhat a DB-hez. Az
+    # sqlite3 alapertelmezett 5 masodperces varakozasa kevesnek bizonyult:
+    # 2026-07-24-en "database is locked" hibaval szakadt meg egy connector-futas
+    # es a digest is. WAL-modban (ld. init_db) az olvasok nem blokkoljak egymast,
+    # a hosszabb timeout pedig kivedi az egyideju iras-csucsokat.
+    conn = sqlite3.connect(db_path, timeout=30.0)
     conn.row_factory = sqlite3.Row
     return conn
 
 
 def init_db(db_path: str) -> None:
     conn = get_connection(db_path)
+    # WAL: egy iro + sok olvaso egyszerre. A rollback-journal alapmodban egy iras
+    # MINDEN olvasot blokkol, ami ket processz mellett (server.py + CLI) rendszeres
+    # "database is locked" hibat adott. A beallitas a DB-fajlon perzisztens,
+    # eleg egyszer kiadni; itt azert van, hogy uj/masolt DB-n is bekapcsoljon.
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+    except sqlite3.OperationalError as e:
+        print(f"[db] WAL-mod bekapcsolasa nem sikerult ({e}) — tovabb a jelenlegi modban.")
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS posts (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -40,7 +54,8 @@ def init_db(db_path: str) -> None:
             started_at  TEXT    NOT NULL,
             finished_at TEXT,
             new_posts   INTEGER DEFAULT 0,
-            error       TEXT
+            error       TEXT,
+            items_seen  INTEGER
         );
 
         CREATE TABLE IF NOT EXISTS drafts (
@@ -82,6 +97,15 @@ def init_db(db_path: str) -> None:
     cols = [r[1] for r in conn.execute("PRAGMA table_info(posts)").fetchall()]
     if "search_term" not in cols:
         conn.execute("ALTER TABLE posts ADD COLUMN search_term TEXT")
+
+    # items_seen: hany NYERS elemet latott a connector (kulcsszo-szures es dedup
+    # ELOTT). Ez valasztja el a ket, korabban megkulonboztethetetlen esetet:
+    #   new_posts=0, items_seen>0  -> egeszseges, csak nincs uj tartalom
+    #   new_posts=0, items_seen=0  -> ELTORT (szelektor/API), csak nem dobott kivetelt
+    # A regi sorokban NULL marad = "nem tudjuk" (ld. docs/02-lead-volume-audit-2026-07.md §3.11).
+    run_cols = [r[1] for r in conn.execute("PRAGMA table_info(runs)").fetchall()]
+    if "items_seen" not in run_cols:
+        conn.execute("ALTER TABLE runs ADD COLUMN items_seen INTEGER")
         
     signal_cols = [r[1] for r in conn.execute("PRAGMA table_info(signals)").fetchall()]
     if "solved_internally" not in signal_cols:
@@ -97,7 +121,23 @@ def init_db(db_path: str) -> None:
 
 
 def insert_post(db_path: str, record: dict) -> bool:
-    """Insert a post. Returns True if new, False if already exists."""
+    """Insert a post. Returns True if new, False if already exists. Ignores posts older than 1 year."""
+    created_str = record.get("created_at")
+    if created_str:
+        try:
+            # Parse ISO string and check age
+            dt_str = str(created_str).replace('Z', '+00:00')
+            dt = datetime.fromisoformat(dt_str)
+            now = datetime.now(timezone.utc)
+            # If naive datetime, make it aware (or compare naive)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            
+            if (now - dt) > timedelta(days=365):
+                return False  # Silently ignore older than 365 days
+        except Exception:
+            pass # Fallback: if parsing fails, let it be inserted
+
     conn = get_connection(db_path)
     try:
         conn.execute(
@@ -227,7 +267,8 @@ def get_opportunities(db_path: str, only_pain: bool = True, min_severity: int = 
     rows = conn.execute(
         f"""
         SELECT s.*, p.title, p.url, p.platform, p.source, p.author,
-               p.body, p.keywords, p.score AS keyword_score, p.created_at AS post_created_at
+               p.body, p.keywords, p.score AS keyword_score, p.created_at AS post_created_at,
+               p.status AS post_status
         FROM signals s JOIN posts p ON s.post_id = p.id
         WHERE {' AND '.join(where)}
         ORDER BY s.nodu_mention DESC, s.is_pain DESC, s.severity DESC, s.buying_intent DESC,
@@ -366,21 +407,21 @@ def search_posts(db_path: str, query: str = "", platforms: list[str] = None, lim
     return [dict(r) for r in rows]
 
 
-def get_adhoc_results(db_path: str, query: str = None, limit: int = 50) -> list[dict]:
+def get_adhoc_results(db_path: str, query: str = None, limit: int = 10, offset: int = 0) -> list[dict]:
     """
     Ad-hoc keresesi talalatok (search_term-mel jelolt posztok).
-    query megadasaval egy konkret keresesre szur, kulonben a legutobbi talalatok.
+    Csak a feldolgozatlan (status='new') elemeket adja vissza, lapozassal.
     """
     conn = get_connection(db_path)
     if query:
         rows = conn.execute(
-            "SELECT * FROM posts WHERE search_term = ? ORDER BY score DESC, fetched_at DESC LIMIT ?",
-            (query, limit),
+            "SELECT * FROM posts WHERE search_term = ? AND status = 'new' ORDER BY score DESC, fetched_at DESC LIMIT ? OFFSET ?",
+            (query, limit, offset),
         ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT * FROM posts WHERE search_term IS NOT NULL ORDER BY fetched_at DESC LIMIT ?",
-            (limit,),
+            "SELECT * FROM posts WHERE search_term IS NOT NULL AND status = 'new' ORDER BY fetched_at DESC LIMIT ? OFFSET ?",
+            (limit, offset),
         ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -436,14 +477,91 @@ def mark_draft(db_path: str, draft_id: int, status: str, note: str = None) -> No
 
 
 def log_run(db_path: str, connector: str, started_at: str, finished_at: str,
-            new_posts: int, error: str = None) -> None:
+            new_posts: int, error: str = None, items_seen: int = None) -> None:
+    """
+    Egy connector-futas naplozasa.
+
+    items_seen: a NYERS, begyujtott elemek szama a kulcsszo-szures es a dedup
+    ELOTT. Ha None, a futas "nem tudjuk" jelolest kap. Add meg mindig, ahol
+    lehet — ez az egyetlen mezo, amibol kideritheto, hogy egy 0 uj posztot
+    hozo futas egeszseges volt-e (nincs uj tartalom) vagy eltort (nem latott
+    semmit).
+    """
     conn = get_connection(db_path)
     conn.execute(
-        "INSERT INTO runs (connector, started_at, finished_at, new_posts, error) VALUES (?,?,?,?,?)",
-        (connector, started_at, finished_at, new_posts, error),
+        "INSERT INTO runs (connector, started_at, finished_at, new_posts, error, items_seen)"
+        " VALUES (?,?,?,?,?,?)",
+        (connector, started_at, finished_at, new_posts, error, items_seen),
     )
     conn.commit()
     conn.close()
+
+
+def get_connector_health(db_path: str, window: int = 5,
+                         active_within_hours: int = 24) -> list[dict]:
+    """
+    Connector-egeszseg a `runs` naplobol — a nema hibak felderitesere.
+
+    Csak azokat a connectorokat vizsgalja, amelyek az elmult `active_within_hours`
+    oraban legalabb egyszer futottak (igy a kivezetett connectorok nem zajonganak),
+    es mindegyik utolso `window` futasat ertekeli:
+
+      error     — MINDEN vizsgalt futas kivetellel allt le
+      blind     — MINDEN vizsgalt futas 0 nyers elemet latott (szelektor/API-toress)
+      unknown   — kevesebb futas van, mint `window`, vagy egyik sem jelent items_seen-t
+      ok        — minden mas (ha csak 1 futas is latott elemet, a cso el)
+
+    A `new_posts=0` MAGABAN sosem hiba: egy egeszseges connector is adhat sokszor
+    nullat, ha nincs uj tartalom.
+    """
+    cutoff = (_utcnow() - timedelta(hours=active_within_hours)).isoformat()
+    conn = get_connection(db_path)
+
+    active = [
+        r["connector"]
+        for r in conn.execute(
+            "SELECT DISTINCT connector FROM runs WHERE started_at >= ?", (cutoff,)
+        ).fetchall()
+    ]
+
+    report = []
+    for connector in sorted(active):
+        rows = conn.execute(
+            """
+            SELECT new_posts, error, items_seen, started_at
+            FROM runs WHERE connector = ?
+            ORDER BY started_at DESC LIMIT ?
+            """,
+            (connector, window),
+        ).fetchall()
+
+        last_error = next((r["error"] for r in rows if r["error"]), None)
+        seen_values = [r["items_seen"] for r in rows if r["items_seen"] is not None]
+        new_total = sum(r["new_posts"] or 0 for r in rows)
+
+        if len(rows) < window:
+            status = "unknown"
+        elif all(r["error"] for r in rows):
+            status = "error"
+        elif not seen_values:
+            status = "unknown"
+        elif all(v == 0 for v in seen_values):
+            status = "blind"
+        else:
+            status = "ok"
+
+        report.append({
+            "connector": connector,
+            "status": status,
+            "runs_considered": len(rows),
+            "new_posts_in_window": new_total,
+            "items_seen_in_window": sum(seen_values) if seen_values else None,
+            "last_error": last_error,
+            "last_run": rows[0]["started_at"] if rows else None,
+        })
+
+    conn.close()
+    return report
 
 
 def get_weekly_stats(db_path: str, lookback_days: int = 7) -> dict:

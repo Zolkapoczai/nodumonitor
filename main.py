@@ -16,6 +16,8 @@ Futtatás:
     python main.py --review         # pending draft-ok áttekintése (interaktív CLI)
     python main.py --linkedin-content # heti LinkedIn poszt-javaslatok (Slack-re)
     python main.py --weekly-report  # heti Slack-összefoglaló (források, fájdalompontok)
+    python main.py --health         # connector-egészség riport (néma hibák felderítése)
+    python main.py --backup         # adatbázis-snapshot most (backups/, 7 napos rotáció)
     python main.py --schedule       # ütemezett futás (APScheduler)
     python main.py --test-rss       # RSS feed elérhetőség tesztelése
 """
@@ -23,7 +25,7 @@ import argparse
 import sys
 import os
 import yaml
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 # A Windows konzol alapertelmezett kodlapja (pl. cp1250) nem tud minden
 # Unicode karaktert abrazolni (pl. forumcimekben elofordulo "²", japan
@@ -36,7 +38,7 @@ for _stream in (sys.stdout, sys.stderr):
 
 sys.path.insert(0, os.path.dirname(__file__))
 
-from storage.db import init_db, get_new_posts, mark_alerted, get_weekly_stats
+from storage.db import init_db, mark_alerted, get_weekly_stats
 from connectors.html_connector import HTMLConnector
 from alerts.notifier import send_alerts, send_weekly_digest, send_content_pipeline_ideas
 from responder.draft_generator import generate_drafts, review_drafts, generate_content_pipeline
@@ -50,10 +52,14 @@ def load_config() -> dict:
 
 def run_reddit(config: dict, db_path: str) -> int:
     try:
-        from connectors.reddit_connector import RedditConnector
-        rc = config.get("reddit", {})
-        if not rc.get("client_id") or rc["client_id"] == "YOUR_REDDIT_CLIENT_ID":
-            print("[reddit] Nincs beállítva API kulcs. Kihagy.")
+        from connectors.reddit_connector import RedditConnector, resolve_credentials
+        client_id, client_secret = resolve_credentials(config)
+        if not client_id or not client_secret:
+            print(
+                "[reddit] Nincs beállítva API kulcs. Kihagy. "
+                "(REDDIT_CLIENT_ID / REDDIT_CLIENT_SECRET a projekt .env-jébe, "
+                "vagy config.yaml -> reddit)"
+            )
             return 0
         connector = RedditConnector(config, db_path)
         n = connector.run()
@@ -128,6 +134,15 @@ def run_github(config: dict, db_path: str) -> int:
         return 0
 
 
+def run_websearch(config: dict, db_path: str) -> int:
+    try:
+        from connectors.web_search_connector import WebSearchConnector
+        return WebSearchConnector(config, db_path).run()
+    except Exception as e:
+        print(f"[websearch] HIBA: {e}")
+        return 0
+
+
 def run_youtube(config: dict, db_path: str) -> int:
     try:
         from connectors.youtube_connector import YouTubeConnector
@@ -145,21 +160,102 @@ def run_classify(config: dict, db_path: str, batch_size: int = None) -> int:
     return classifier.run(batch_size=batch_size)
 
 
-def run_digest(config: dict, db_path: str) -> None:
-    posts = get_new_posts(db_path)
-    min_matches = config.get("alerts", {}).get("min_keyword_matches", 1)
-    relevant = [p for p in posts if p.get("score", 0) >= min_matches]
+def run_health_check(config: dict, db_path: str) -> list[dict]:
+    """
+    Connector-heartbeat: felderiti a nema hibakat (eltort szelektor, halott API,
+    hianyzo kulcs) es riaszt. A `new_posts=0` magaban NEM hiba — csak az, ha a
+    connector 0 NYERS elemet lat, vagy minden futasa kivetellel all le.
+    Ld. docs/02-lead-volume-audit-2026-07.md §3.11.
+    """
+    from storage.db import get_connector_health
+    from alerts.notifier import send_health_alert
 
-    print(f"\nNapi osszefoglalo: {len(relevant)} releváns bejegyzes\n")
+    hc = config.get("health", {})
+    window = hc.get("window", 5)
+    ignore = set(hc.get("ignore", ["classifier"]))
+
+    report = get_connector_health(db_path, window=window,
+                                  active_within_hours=hc.get("active_within_hours", 24))
+    problems = [r for r in report if r["status"] in ("error", "blind") and r["connector"] not in ignore]
+
+    print(f"[health] {len(report)} aktiv connector vizsgalva (ablak: {window} futas).")
+    for r in report:
+        mark = {"ok": "OK   ", "blind": "VAK  ", "error": "HIBA ", "unknown": "?    "}.get(r["status"], "?    ")
+        seen = "n/a" if r["items_seen_in_window"] is None else r["items_seen_in_window"]
+        print(f"  {mark} {r['connector']:16} elem={seen:>5} uj={r['new_posts_in_window']:>4} ({r['runs_considered']} futas)")
+
+    if not problems:
+        return []
+
+    # stderr -> a server.py ezt ERROR szinten naplozza, igy a logban is kiugrik
+    # akkor is, ha egyetlen riasztasi csatorna sincs bekapcsolva.
+    print(
+        f"[health] FIGYELEM: {len(problems)} connector nem termel: "
+        + ", ".join(f"{p['connector']}({p['status']})" for p in problems),
+        file=sys.stderr,
+    )
+    delivered = send_health_alert(problems, config.get("alerts", {}))
+    if delivered:
+        print(f"[health] Riasztas elkuldve: {', '.join(delivered)}")
+    else:
+        print("[health] Nem ment ki riasztas (nincs bekapcsolt csatorna).", file=sys.stderr)
+    return problems
+
+
+def run_backup(config: dict, db_path: str) -> str | None:
+    from storage.backup import backup_db
+    keep = config.get("backup", {}).get("keep", 7)
+    return backup_db(db_path, keep=keep)
+
+
+def run_digest(config: dict, db_path: str) -> None:
+    """
+    Napi osszefoglalo — a Pain Classifier JELEIRE epul, nem a nyers kulcsszo-
+    score-ra.
+
+    Korabban a `min_keyword_matches: 1` kuszob miatt gyakorlatilag MINDEN
+    begyujtott elem "relevansnak" szamitott (pl. "Parametric Wall Art" YouTube-
+    komment), es a `signals` tabla — a rendszer agya — teljesen ki volt hagyva az
+    ertesitesi utbol. Most csak valodi fajdalom-jel (is_pain vagy nodu_mention)
+    kerul be, `alerts.digest_min_severity` kuszob felett, es csak olyan poszt,
+    amit meg nem riasztottunk ki. Ld. docs/02-lead-volume-audit-2026-07.md §3.6c.
+    """
+    from storage.db import get_opportunities
+
+    ac = config.get("alerts", {})
+    min_sev = ac.get("digest_min_severity", 3)
+    opportunities = get_opportunities(db_path, only_pain=True, min_severity=min_sev)
+
+    # Csak amit meg nem kuldtunk ki (a mark_alerted allitja 'alerted'-re).
+    relevant = []
+    for o in opportunities:
+        if o.get("post_status") != "new":
+            continue
+        relevant.append({
+            **o,
+            "id": o["post_id"],
+            "score": o.get("keyword_score", 0),
+            "created_at": o.get("post_created_at", ""),
+        })
+
+    print(f"\nNapi osszefoglalo: {len(relevant)} fajdalom-jel (severity >= {min_sev})\n")
     for p in relevant[:20]:
-        print(f"  [{p['platform']}] {p.get('title', '')[:70]}")
-        print(f"    Score: {p['score']} | Keywords: {p.get('keywords', '')}")
+        print(f"  [{p['platform']}] sev={p.get('severity')} intent={p.get('buying_intent')} {p.get('title', '')[:60]}")
+        print(f"    {p.get('pain_summary') or '(nincs osszefoglalo)'}")
         print(f"    {p.get('url', '')}\n")
 
-    send_alerts(relevant, config.get("alerts", {}))
+    delivered = send_alerts(relevant, config.get("alerts", {}))
 
-    if relevant:
+    # A posztot CSAK akkor "fogyasztjuk el" (status: new -> alerted), ha a
+    # riasztas tenylegesen kiment valahova. Korabban ez feltetel nelkul futott,
+    # igy letiltott csatornak mellett a talalatok csendben eltuntek a 'new'
+    # szurokbol anelkul, hogy barki latta volna oket
+    # (ld. docs/02-lead-volume-audit-2026-07.md §3.6).
+    if relevant and delivered:
         mark_alerted(db_path, [p["id"] for p in relevant])
+        print(f"[digest] {len(relevant)} talalat 'alerted'-re allitva (kikuldve: {', '.join(delivered)}).")
+    elif relevant:
+        print(f"[digest] {len(relevant)} talalat 'new' statuszban MARAD (nem ment ki riasztas).")
 
 
 def run_linkedin_content(config: dict, db_path: str) -> int:
@@ -274,6 +370,25 @@ def register_jobs(scheduler, config: dict, db_path: str) -> None:
         next_run_time=datetime.now(tz=timezone.utc),
     )
 
+    ws = config.get("web_search", {})
+    if ws.get("enabled", True):
+        scheduler.add_job(
+            lambda: run_websearch(config, db_path),
+            "interval",
+            minutes=ws.get("poll_interval_minutes", 720),
+            id="websearch",
+            next_run_time=datetime.now(tz=timezone.utc),
+        )
+
+    classifier_interval = config.get("classifier", {}).get("poll_interval_minutes", 60)
+    scheduler.add_job(
+        lambda: run_classify(config, db_path),
+        "interval",
+        minutes=classifier_interval,
+        id="classifier",
+        next_run_time=datetime.now(tz=timezone.utc),
+    )
+
     digest_hour = config.get("alerts", {}).get("digest_hour", 8)
     scheduler.add_job(
         lambda: run_digest(config, db_path),
@@ -282,6 +397,44 @@ def register_jobs(scheduler, config: dict, db_path: str) -> None:
         minute=0,
         id="digest",
     )
+
+    # Valasz-draftok: a classifier fajdalom-jeleire (severity >= draft_min_severity)
+    # generalunk javaslatot, hogy a dashboardon dontesre KESZ elemek varjanak. Az
+    # emberi kapu tovabbra is a JOVAHAGYASNAL van, nem a generalasnal — korabban
+    # viszont ez a lepes egyaltalan nem volt utemezve, ezert a DB-ben osszesen 1
+    # draft keletkezett (ld. docs/02-lead-volume-audit-2026-07.md §3.12).
+    rc_draft = config.get("responder", {})
+    if rc_draft.get("auto_generate", True):
+        scheduler.add_job(
+            lambda: generate_drafts(config, db_path),
+            "cron",
+            hour=rc_draft.get("hour", 7),
+            minute=30,
+            id="generate_drafts",
+        )
+
+    # Connector-heartbeat: a nema hibak felderitese (§3.11).
+    hc = config.get("health", {})
+    if hc.get("enabled", True):
+        scheduler.add_job(
+            lambda: run_health_check(config, db_path),
+            "interval",
+            hours=hc.get("check_interval_hours", 6),
+            id="health",
+            next_run_time=datetime.now(tz=timezone.utc) + timedelta(minutes=5),
+        )
+
+    # Napi DB-snapshot rotacioval. Kozvetlenul a digest ELOTT fut, hogy a
+    # statuszvaltasok (new -> alerted) elotti allapot is meglegyen.
+    bc = config.get("backup", {})
+    if bc.get("enabled", True):
+        scheduler.add_job(
+            lambda: run_backup(config, db_path),
+            "cron",
+            hour=bc.get("hour", 3),
+            minute=30,
+            id="backup",
+        )
 
     wr = config.get("weekly_report", {})
     if wr.get("enabled", True):
@@ -313,15 +466,26 @@ def describe_schedule(config: dict) -> str:
     dc_interval = config.get("discourse", {}).get("poll_interval_minutes", 240)
     gh_interval = config.get("github", {}).get("poll_interval_minutes", 240)
     yt_interval = config.get("youtube", {}).get("poll_interval_minutes", 180)
+    cl_interval = config.get("classifier", {}).get("poll_interval_minutes", 60)
     digest_hour = config.get("alerts", {}).get("digest_hour", 8)
     wr = config.get("weekly_report", {})
     lines = [
         f"Reddit: {reddit_interval} perc | PW: {pw_interval} perc | SO: {so_interval} perc "
-        f"| Disc: {dc_interval} perc | Git: {gh_interval} perc | YT: {yt_interval} perc",
+        f"| Disc: {dc_interval} perc | Git: {gh_interval} perc | YT: {yt_interval} perc "
+        f"| Class: {cl_interval} perc",
         f"Napi digest: {digest_hour}:00",
     ]
     if wr.get("enabled", True):
         lines.append(f"Heti riport: {wr.get('day_of_week', 'mon')} {wr.get('hour', 8)}:00")
+    rd = config.get("responder", {})
+    if rd.get("auto_generate", True):
+        lines.append(f"Draft-generalas: {rd.get('hour', 7)}:30")
+    hc = config.get("health", {})
+    if hc.get("enabled", True):
+        lines.append(f"Health-check: {hc.get('check_interval_hours', 6)} orankent")
+    bc = config.get("backup", {})
+    if bc.get("enabled", True):
+        lines.append(f"DB-backup: {bc.get('hour', 3)}:30 (megtartva {bc.get('keep', 7)} db)")
     return " | ".join(lines)
 
 
@@ -347,6 +511,7 @@ def main():
     parser.add_argument("--discourse",        action="store_true", help="buildingSMART forum (Discourse API)")
     parser.add_argument("--github",           action="store_true", help="GitHub issues (IfcOpenShell, Speckle, xeokit)")
     parser.add_argument("--youtube",          action="store_true", help="YouTube kommentek lekérése")
+    parser.add_argument("--websearch",        action="store_true", help="Web-kereses (SearchProvider: Brave)")
     parser.add_argument("--classify",         action="store_true", help="Pain Classifier: LLM-osztalyozas a meglevo posztokon")
     parser.add_argument("--review-signals",   action="store_true", help="Osztalyozott jelek kezi kiertekelo riportja")
     parser.add_argument("--digest",           action="store_true", help="Napi összefoglaló + n8n webhook")
@@ -354,6 +519,8 @@ def main():
     parser.add_argument("--review",           action="store_true", help="Pending draft-ok interaktív áttekintése")
     parser.add_argument("--linkedin-content", action="store_true", help="Heti LinkedIn poszt-javaslatok (Slack-re)")
     parser.add_argument("--weekly-report",    action="store_true", help="Heti Slack-összefoglaló")
+    parser.add_argument("--health",           action="store_true", help="Connector-egeszseg riport (nema hibak felderitese)")
+    parser.add_argument("--backup",           action="store_true", help="Adatbazis-snapshot keszitese most")
     parser.add_argument("--schedule",         action="store_true", help="Ütemezett futás")
     parser.add_argument("--test-rss",         action="store_true", help="RSS/URL elérhetőség teszt")
     args = parser.parse_args()
@@ -394,6 +561,15 @@ def main():
         run_weekly_report(config, db_path)
         return
 
+    if args.health:
+        run_health_check(config, db_path)
+        return
+
+    if args.backup:
+        path = run_backup(config, db_path)
+        print(f"[backup] {'Kesz: ' + path if path else 'Nem sikerult.'}")
+        return
+
     if args.schedule:
         run_scheduled(config, db_path)
         return
@@ -404,7 +580,7 @@ def main():
 
     any_flag = (
         args.reddit or args.forums or args.playwright or args.stackoverflow
-        or args.discourse or args.github or args.youtube
+        or args.discourse or args.github or args.youtube or args.websearch
     )
 
     if args.reddit or not any_flag:
@@ -427,6 +603,9 @@ def main():
 
     if args.youtube or not any_flag:
         run_youtube(config, db_path)
+
+    if args.websearch or not any_flag:
+        run_websearch(config, db_path)
 
     run_digest(config, db_path)
 

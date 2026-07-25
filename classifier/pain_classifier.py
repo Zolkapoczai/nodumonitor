@@ -25,6 +25,7 @@ from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types
 
+from env_secrets import get_secret
 from storage.db import get_unclassified_posts, get_signals_for_review, insert_signal, log_run
 
 # A modell + prompt verziojat kodolja — ha a promptot vagy a modellt valtjuk,
@@ -142,8 +143,12 @@ class PainClassifier:
         self.batch_size = cc.get("batch_size", 20)
         self.delay_seconds = cc.get("delay_seconds", 5)
         self.model = sc.get("gemini_model", "gemini-2.5-flash")
-        api_key = sc.get("gemini_api_key", "")
-        self.api_key_ok = bool(api_key) and api_key != "YOUR_GEMINI_API_KEY"
+        # A kulcs env-bol vagy a git-ignoralt .env-bol jon (ld. env_secrets.py); a
+        # config.yaml-beli ertek csak visszafele-kompatibilitasi tartalek. A
+        # GitHub push-protection 2026-07-25-en (joggal) elutasitotta a commitot,
+        # amiben a kulcs a config.yaml-ben volt.
+        api_key = get_secret("GEMINI_API_KEY", sc.get("gemini_api_key"))
+        self.api_key_ok = bool(api_key)
         self.client = genai.Client(api_key=api_key) if self.api_key_ok else None
 
     def _classify_one(self, post: dict) -> dict | None:
@@ -214,7 +219,7 @@ class PainClassifier:
             print("[classifier] Ki van kapcsolva (classifier.enabled: false). Kihagy.")
             return 0
         if not self.api_key_ok:
-            print("[classifier] Nincs Gemini API kulcs beallitva (scoring.gemini_api_key). Kihagy.")
+            print("[classifier] Nincs Gemini API kulcs (GEMINI_API_KEY a .env-ben). Kihagy.")
             return 0
 
         limit = batch_size or self.batch_size
@@ -267,6 +272,7 @@ class PainClassifier:
             finished_at=_now(),
             new_posts=classified,
             error=error_msg,
+            items_seen=len(posts),
         )
         print(f"[classifier] {classified}/{len(posts)} poszt osztalyozva.")
         return classified

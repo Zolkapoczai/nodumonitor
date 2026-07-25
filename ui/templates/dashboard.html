@@ -6,19 +6,25 @@
 <div class="layout">
 
   <nav class="sidebar">
-    <div class="nav-group-label">Sales</div>
+    <div class="nav-group-label">Értékesítés</div>
     <div class="nav-item active" onclick="show('overview', this)">Áttekintő</div>
     <div class="nav-item" onclick="show('opportunities', this)" id="nav-opps">
       Lehetőségek
       {% if opportunities %}<span class="nav-badge">{{ opportunities|length }}</span>{% endif %}
     </div>
-    <div class="nav-item" onclick="show('raw', this)">Nyers leadek</div>
-    <div class="nav-item" onclick="show('adhoc', this)">Ad-hoc keresés</div>
-    <div class="nav-item" onclick="show('linkedin', this)">LinkedIn válasz</div>
     <div class="nav-item" onclick="show('drafts', this)" id="nav-drafts">
       Választervezetek
       {% if drafts %}<span class="nav-badge">{{ drafts|length }}</span>{% endif %}
     </div>
+
+    <div class="nav-group-label">Kutatás & Tartalom</div>
+    <div class="nav-item" onclick="show('raw', this)">Nyers leadek</div>
+    <div class="nav-item" onclick="show('adhoc', this)">Ad-hoc keresés</div>
+    <div class="nav-item" onclick="show('linkedin', this)">LinkedIn posztíró</div>
+
+    <div class="nav-group-label">Rendszer & Működés</div>
+    <div class="nav-item" onclick="show('run', this)">Adatgyűjtés indítása</div>
+    <div class="nav-item" onclick="show('status', this)">Rendszerállapot</div>
   </nav>
 
   <main class="main">
@@ -29,26 +35,20 @@
       <p class="page-desc">A lead-folyamat és a fájdalom-jelek aktuális állapota (utolsó {{ stats.lookback_days }} nap).</p>
 
       <div class="metric-grid">
-        <div class="metric-card accent clickable" onclick="show('opportunities', document.getElementById('nav-opps'))" title="Ugrás a Forró lehetőségekhez">
+        <div class="metric-card accent clickable" onclick="show('opportunities', document.getElementById('nav-opps'))" title="Ugrás a Lehetőségekhez">
           <div class="metric-top">
-            <div class="metric-value accent-v">{{ hot_count }}</div>
-            <div class="metric-arrow">&rarr;</div>
+            <div class="metric-value-row">
+              <span class="metric-value accent-v">{{ opportunities | length }}</span>
+            </div>
+            
           </div>
-          <div class="metric-label">Forró lehetőség (súlyosság 4–5)</div>
-        </div>
-
-        <div class="metric-card blue clickable" onclick="show('opportunities', document.getElementById('nav-opps'))" title="Ugrás a fájdalom-jelekhez">
-          <div class="metric-top">
-            <div class="metric-value blue-v">{{ opportunities | length }}</div>
-            <div class="metric-arrow">&rarr;</div>
+          <div class="metric-label">Összes releváns lehetőség (fájdalom-jelek)</div>
           </div>
-          <div class="metric-label">Valódi fájdalom-jel</div>
-        </div>
 
-        <div class="metric-card green clickable" onclick="show('drafts', document.getElementById('nav-drafts'))" title="Ugrás a választervezetekhez">
+          <div class="metric-card green clickable" onclick="show('drafts', document.getElementById('nav-drafts'))" title="Ugrás a választervezetekhez">
           <div class="metric-top">
             <div class="metric-value green-v">{{ drafts | length }}</div>
-            <div class="metric-arrow">&rarr;</div>
+            
           </div>
           <div class="metric-label">Jóváhagyásra váró válasz</div>
         </div>
@@ -56,7 +56,7 @@
         <div class="metric-card neutral clickable" onclick="show('raw', document.querySelector('.nav-item[onclick*=\'raw\']'))" title="Ugrás a nyers leadekhez">
           <div class="metric-top">
             <div class="metric-value">{{ stats.total_posts }}</div>
-            <div class="metric-arrow">&rarr;</div>
+            
           </div>
           <div class="metric-label">Új nyers lead a héten</div>
         </div>
@@ -69,8 +69,8 @@
             <div class="card-title">Honnan jönnek a leadek</div>
             <div class="card-desc">Leadek eloszlása forrásplatformok szerint.</div>
           </div>
-          <button class="view-toggle-btn" onclick="cycleReportView('platforms')" id="btn-view-platforms" title="Kattints a nézet váltásához (Sáv ➔ Kör ➔ Lista)">
-            <svg class="view-icon" viewBox="0 0 24 24"><path d="M5 9.2h3V19H5zM10.6 5h2.8v14h-2.8zm5.6 8H19v6h-2.8z"/></svg>
+          <button class="view-toggle-btn" onclick="cycleReportView('platforms')" id="btn-view-platforms" title="Kattints a nézet váltásához (Sáv Kör Lista)">
+            
             <span id="lbl-view-platforms">Sáv grafikon</span>
           </button>
         </div>
@@ -104,8 +104,8 @@
             <div class="card-title">Mi foglalkoztatja a közösséget</div>
             <div class="card-desc">A leggyakoribb kulcsszavak az elmúlt időszak leadjeiben.</div>
           </div>
-          <button class="view-toggle-btn" onclick="cycleReportView('keywords')" id="btn-view-keywords" title="Kattints a nézet váltásához (Sáv ➔ Kör ➔ Lista)">
-            <svg class="view-icon" viewBox="0 0 24 24"><path d="M5 9.2h3V19H5zM10.6 5h2.8v14h-2.8zm5.6 8H19v6h-2.8z"/></svg>
+          <button class="view-toggle-btn" onclick="cycleReportView('keywords')" id="btn-view-keywords" title="Kattints a nézet váltásához (Sáv Kör Lista)">
+            
             <span id="lbl-view-keywords">Sáv grafikon</span>
           </button>
         </div>
@@ -132,43 +132,6 @@
         </div>
       </div>
 
-      <!-- Report 3 (ÚJ): Súlyosság & Fájdalom-szint eloszlás -->
-      <div class="card report-card">
-        <div class="card-header-row">
-          <div>
-            <div class="card-title">Fájdalom-súlyosság eloszlás</div>
-            <div class="card-desc">Bejegyzések aránya az AI által elemzett súlyosság szerint.</div>
-          </div>
-          <button class="view-toggle-btn" onclick="cycleReportView('severity')" id="btn-view-severity" title="Kattints a nézet váltásához (Sáv ➔ Kör ➔ Lista)">
-            <svg class="view-icon" viewBox="0 0 24 24"><path d="M5 9.2h3V19H5zM10.6 5h2.8v14h-2.8zm5.6 8H19v6h-2.8z"/></svg>
-            <span id="lbl-view-severity">Sáv grafikon</span>
-          </button>
-        </div>
-
-        <div id="view-list-severity" class="report-view-container">
-          <div class="run-row">
-            <div class="run-info"><div class="r-title">Forró lehetőség (súlyosság 4–5)</div></div>
-            <div class="run-right"><span class="score-pill" style="background:#FFF7F5; color:#F04E23; border-color:#FDBA74">{{ hot_count }}</span></div>
-          </div>
-          <div class="run-row">
-            <div class="run-info"><div class="r-title">Valódi fájdalom-jel (súlyosság 3)</div></div>
-            <div class="run-right"><span class="score-pill" style="background:#F0F6FF; color:#1D4ED8; border-color:#BFDBFE">{{ (opportunities|length - hot_count) if (opportunities|length >= hot_count) else 0 }}</span></div>
-          </div>
-          <div class="run-row">
-            <div class="run-info"><div class="r-title">Általános érdeklődés (súlyosság 1–2)</div></div>
-            <div class="run-right"><span class="score-pill" style="background:#F8FAFC; color:#64748B; border-color:#E2E8F0">{{ (stats.total_posts - opportunities|length) if (stats.total_posts >= opportunities|length) else 0 }}</span></div>
-          </div>
-        </div>
-
-        <div id="view-bar-severity" class="report-view-container active">
-          <div class="chart-wrapper"><canvas id="chart-bar-severity"></canvas></div>
-        </div>
-
-        <div id="view-donut-severity" class="report-view-container">
-          <div class="chart-wrapper donut-wrap"><canvas id="chart-donut-severity"></canvas></div>
-        </div>
-      </div>
-
       <!-- Report 4 (ÚJ): Konkurens & Ökoszisztéma elemzés -->
       <div class="card report-card">
         <div class="card-header-row">
@@ -176,8 +139,8 @@
             <div class="card-title">Konkurens & Ökoszisztéma elemzés</div>
             <div class="card-desc">Szoftveres említések és alternatív megoldások jelenléte.</div>
           </div>
-          <button class="view-toggle-btn" onclick="cycleReportView('ecosystem')" id="btn-view-ecosystem" title="Kattints a nézet váltásához (Sáv ➔ Kör ➔ Lista)">
-            <svg class="view-icon" viewBox="0 0 24 24"><path d="M5 9.2h3V19H5zM10.6 5h2.8v14h-2.8zm5.6 8H19v6h-2.8z"/></svg>
+          <button class="view-toggle-btn" onclick="cycleReportView('ecosystem')" id="btn-view-ecosystem" title="Kattints a nézet váltásához (Sáv Kör Lista)">
+            
             <span id="lbl-view-ecosystem">Sáv grafikon</span>
           </button>
         </div>
@@ -219,13 +182,11 @@
       {% if opportunities %}
         {% for o in opportunities %}
         {% set heat = 'hot' if (o.severity or 0) >= 4 else ('warm' if o.severity == 3 else 'cool') %}
-        <div class="opp-card" id="opp-{{ o.post_id }}">
+        <div class="opp-card {{ 'hot-opp' if heat == 'hot' else '' }}" id="opp-{{ o.post_id }}">
           <div class="opp-head">
-            {% if o.nodu_mention %}<span class="badge-referral"><svg viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg> ORGANIC REFERRAL</span>{% endif %}
-            {% if o.solved_internally %}<span class="badge-hidden-opp"><svg viewBox="0 0 24 24"><path d="M12 2a7 7 0 00-7 7c0 2.38 1.19 4.47 3 5.74V17a1 1 0 001 1h6a1 1 0 001-1v-2.26c1.81-1.27 3-3.36 3-5.74a7 7 0 00-7-7zM9 21a1 1 0 001 1h4a1 1 0 001-1v-1H9v1z"/></svg> HIDDEN OPP</span>{% endif %}
-            {% if o.competitor_mentioned %}<span class="badge-competitor"><svg viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/></svg> COMPETITOR{% if o.competitor_name %}: {{ o.competitor_name | upper }}{% endif %}</span>{% endif %}
-            <span class="sev-badge sev-{{ heat }}">súlyosság {{ o.severity }}</span>
-            {% if o.buying_intent %}<span class="intent-badge">vásárlási szándék</span>{% endif %}
+            {% if o.nodu_mention %}<span class="badge-referral"> ORGANIC REFERRAL</span>{% endif %}
+            {% if o.solved_internally %}<span class="badge-hidden-opp"> HIDDEN OPP</span>{% endif %}
+            {% if o.competitor_mentioned %}<span class="badge-competitor"> COMPETITOR{% if o.competitor_name %}: {{ o.competitor_name | upper }}{% endif %}</span>{% endif %}
             <span class="platform-pill">{{ o.platform }}</span>
             {% if o.ifc_involved %}<span class="issue-chip">IFC</span>{% endif %}
           </div>
@@ -261,7 +222,7 @@
       <div class="card filter-card">
         <div class="filter-search-row">
           <div class="search-input-wrap">
-            <svg class="search-icon" viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+            
             <input type="text" id="raw-query" placeholder="Keresés címben vagy szövegben..."
               onkeydown="if(event.key==='Enter'){event.preventDefault();runRawSearch();}">
           </div>
@@ -293,7 +254,7 @@
 
       <div class="card search-card">
         <div class="search-input-wrapper">
-          <svg class="search-icon" viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+          
           <input type="text" id="adhoc-query" placeholder="Kifejezés keresése élőben (pl. Revit 2026 IFC, Archicad export, Speckle)..."
             onkeydown="if(event.key==='Enter'){event.preventDefault();runAdhoc();}">
           <button class="btn btn-primary" id="adhoc-btn" onclick="runAdhoc()">Élő Keresés</button>
@@ -391,10 +352,71 @@
       {% else %}
         <div class="empty">
           Nincs jóváhagyásra váró válasz.<br>
-          Az ad-hoc keresés találatainál vagy az Admin &rarr; Draft generálással készíthetsz javaslatokat.
+          Az ad-hoc keresés találatainál vagy az Admin Draft generálással készíthetsz javaslatokat.
         </div>
       {% endif %}
     </div>
+
+
+<!-- ===================== Monitor indítása ===================== -->
+<div id="s-run" class="section">
+      <h1 class="page-title">Monitor indítása</h1>
+      <p class="page-desc">A connectorok kézzel futtathatók. Az eredmények az adatbázisba kerülnek; ha a Gemini be van kapcsolva, a dashboardon válaszjavaslat generálható.</p>
+
+      <div class="card">
+        <div class="card-title">Adatgyűjtés <button type="button" class="btn btn-primary btn-sm" onclick="runAllConnectors()" style="float:right;">Összes futtatása</button></div>
+        <div class="card-desc">Releváns bejegyzések összegyűjtése. A futtatás a háttérben zajlik.</div>
+
+        {% set runners = [
+          ('reddit', 'Reddit', 'r/Revit, r/ArchiCAD, r/BIM: legfrissebb posztok és kommentek'),
+          ('playwright', 'JS fórumok (Playwright)', 'Graphisoft és Autodesk Community valós idejű scraping'),
+          ('stackoverflow', 'Stack Overflow', 'Stack Exchange API: revit, archicad, ifc témák'),
+          ('discourse', 'buildingSMART fórum', 'Discourse API: forums.buildingsmart.org'),
+          ('github', 'GitHub issues', 'IfcOpenShell/Bonsai, Speckle, xeokit repók'),
+          ('youtube', 'YouTube kommentek', 'YouTube Data API v3 (tutorialok és webinarok kommentjei)'),
+          ('forums', 'Fórumok (HTML)', 'Khoros és phpBB fórumok közvetlen scraping')
+        ] %}
+        {% for key, title, desc in runners %}
+        <div class="run-row">
+          <div class="run-info">
+            <div class="r-title">{{ title }}</div>
+            <div class="r-desc">{{ desc }}</div>
+          </div>
+          <div class="run-right">
+            <span class="badge badge-idle" id="badge-{{ key }}">Nem futott</span>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="openRunProgressModal('{{ key }}', '{{ title }}')">Futtatás</button>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+
+      <div class="card">
+        <div class="card-title">Feldolgozás és értesítés</div>
+        <div class="card-desc">Válaszjavaslatok, heti riport és tartalom-marketing. Feltétel: a Gemini API be van kapcsolva.</div>
+
+        {% set processors = [
+          ('generate-drafts', 'Válaszjavaslat generálás', 'Minden releváns, feldolgozatlan bejegyzésre 1 javaslat'),
+          ('weekly-report', 'Heti riport', 'Slack-összefoglaló: források, top fájdalompontok'),
+          ('linkedin-content', 'Tartalom Pipeline (Blog + LinkedIn)', 'Heti blog- és poszt-javaslatok a top fájdalompontokból'),
+          ('build-knowledge', 'Tudásbázis frissítése', 'A lokális mappákból (technical, repo) újraépíti a kontextust az AI számára')
+        ] %}
+        {% for key, title, desc in processors %}
+        <div class="run-row">
+          <div class="run-info">
+            <div class="r-title">{{ title }}</div>
+            <div class="r-desc">{{ desc }}</div>
+          </div>
+          <div class="run-right">
+            <span class="badge badge-idle" id="badge-{{ key }}">Nem futott</span>
+            <button type="button" class="btn btn-primary btn-sm" onclick="openRunProgressModal('{{ key }}', '{{ title }}')">Indítás</button>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+
+  
 
   </main>
 </div>
@@ -411,7 +433,7 @@ const reportStates = {
 };
 
 window.addEventListener('DOMContentLoaded', () => {
-  ['platforms', 'keywords', 'severity', 'ecosystem'].forEach(id => renderBarChart(id));
+  ['platforms', 'keywords', 'ecosystem'].forEach(id => renderBarChart(id));
 });
 
 const reportData = {
@@ -422,10 +444,6 @@ const reportData = {
   keywords: {
     labels: {% if stats.top_pain_points %}[{% for kw in stats.top_pain_points[:8] %}'{{ kw.keyword }}',{% endfor %}]{% else %}['Archicad to Revit', 'IFC Export', 'Data Loss', 'Geometry Issue', 'Parametric']{% endif %},
     counts: {% if stats.top_pain_points %}[{% for kw in stats.top_pain_points[:8] %}{{ kw.count }},{% endfor %}]{% else %}[60, 44, 38, 29, 15]{% endif %}
-  },
-  severity: {
-    labels: ['Forró lehetőség (4-5)', 'Valódi fájdalom (3)', 'Érdeklődés (1-2)'],
-    counts: [{{ hot_count }}, {{ (opportunities|length - hot_count) if (opportunities|length >= hot_count) else 0 }}, {{ (stats.total_posts - opportunities|length) if (stats.total_posts >= opportunities|length) else 0 }}]
   },
   ecosystem: {
     labels: ['IFC Panaszok', 'Revit Exporter', 'Archicad Interop', 'OpenBIM (Speckle/Bonsai)'],
@@ -627,11 +645,11 @@ function renderRawLeads(results, activeChan) {
       '<div class="lead-item-body">' + cleanBody + (cleanBody.length >= 240 ? '...' : '') + '</div>' +
       '<div class="lead-item-footer">' +
         '<a class="lead-item-link" href="' + esc(r.url) + '" target="_blank" title="' + esc(r.url) + '">' +
-          '<svg class="link-icon" viewBox="0 0 24 24"><path d="M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg>' +
+          '' +
           '<span>' + esc(cleanLink) + '</span>' +
         '</a>' +
         '<div class="lead-item-actions">' +
-          '<button class="btn btn-secondary btn-sm" onclick="genDraft(' + r.id + ')">Választervezet</button>' +
+          '<button class="btn btn-secondary btn-sm" onclick="genDraft(' + r.id + ', this)">Választervezet</button>' +
           '<button class="btn btn-primary btn-sm" onclick="toSalesOS(' + r.id + ', this)">Sales OS</button>' +
         '</div>' +
       '</div>' +
@@ -643,6 +661,8 @@ function renderRawLeads(results, activeChan) {
 
 // --- Ad-hoc kereses ---
 let adhocPoll = null;
+let windowAdhocOffset = 0;
+let windowAdhocLastQuery = "";
 let activeAdhocChannel = 'all';
 
 function selectAdhocChannel(chan) {
@@ -662,6 +682,21 @@ function runAdhoc() {
   const q = document.getElementById('adhoc-query').value.trim();
   if (!q) { toast('Írj be egy keresési kifejezést.'); return; }
 
+  const btn = document.getElementById('adhoc-btn');
+  btn.disabled = true; btn.textContent = 'Keresés...';
+
+  // Lapozás logika
+  if (q === windowAdhocLastQuery) {
+    windowAdhocOffset += 10;
+    document.getElementById('adhoc-status').textContent = 'Következő 10 találat betöltése...';
+    loadAdhocResults(q);
+    return;
+  }
+
+  // Új keresés
+  windowAdhocLastQuery = q;
+  windowAdhocOffset = 0;
+
   let channels = [];
   if (activeAdhocChannel === 'all') {
     channels = ['youtube', 'github', 'reddit', 'stackoverflow'];
@@ -669,9 +704,7 @@ function runAdhoc() {
     channels = [activeAdhocChannel];
   }
 
-  const btn = document.getElementById('adhoc-btn');
-  btn.disabled = true; btn.textContent = 'Keresés...';
-  document.getElementById('adhoc-status').textContent = 'Élő ad-hoc keresés folyamatban a választott platformokon...';
+  document.getElementById('adhoc-status').textContent = 'Élő ad-hoc keresés folyamatban...';
   document.getElementById('adhoc-results').innerHTML = '';
 
   fetch('/search/adhoc', {
@@ -683,6 +716,7 @@ function runAdhoc() {
     adhocPoll = setInterval(() => checkAdhoc(q), 2500);
   }).catch(() => { resetAdhocBtn(); toast('Nem sikerült elindítani a keresést.'); });
 }
+
 
 function checkAdhoc(query) {
   fetch('/api/status').then(r => r.json()).then(data => {
@@ -700,12 +734,12 @@ function checkAdhoc(query) {
 }
 
 function loadAdhocResults(query) {
-  fetch('/api/adhoc-results?query=' + encodeURIComponent(query)).then(r => r.json()).then(data => {
+  fetch('/api/adhoc-results?query=' + encodeURIComponent(query) + '&offset=' + windowAdhocOffset).then(r => r.json()).then(data => {
     resetAdhocBtn();
     const results = data.results || [];
     const filterName = activeAdhocChannel === 'all' ? 'Összes csatorna' : activeAdhocChannel.toUpperCase();
     document.getElementById('adhoc-status').textContent =
-      results.length + ' élő találat (' + filterName + ') erre: "' + query + '"';
+      results.length + ' friss találat (' + filterName + ') erre: "' + query + '" (Újrakattintva a következőt tölti be)';
     renderAdhoc(results);
   }).catch(() => resetAdhocBtn());
 }
@@ -736,11 +770,11 @@ function renderAdhoc(results) {
       '<div class="lead-item-body">' + cleanBody + (cleanBody.length >= 240 ? '...' : '') + '</div>' +
       '<div class="lead-item-footer">' +
         '<a class="lead-item-link" href="' + esc(r.url) + '" target="_blank" title="' + esc(r.url) + '">' +
-          '<svg class="link-icon" viewBox="0 0 24 24"><path d="M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg>' +
+          '' +
           '<span>' + esc(cleanLink) + '</span>' +
         '</a>' +
         '<div class="lead-item-actions">' +
-          '<button class="btn btn-secondary btn-sm" onclick="genDraft(' + r.id + ')">Választervezet</button>' +
+          '<button class="btn btn-secondary btn-sm" onclick="genDraft(' + r.id + ', this)">Választervezet</button>' +
           '<button class="btn btn-primary btn-sm" onclick="toSalesOS(' + r.id + ', this)">Sales OS</button>' +
         '</div>' +
       '</div>' +
@@ -750,12 +784,31 @@ function renderAdhoc(results) {
   box.innerHTML = html;
 }
 
-function genDraft(id) {
-  toast('Választervezet generálása...');
+function genDraft(id, btn) {
+  if (!id) return;
+  if (btn) { btn.disabled = true; btn.textContent = 'Generálás...'; }
   fetch('/lead/' + id + '/draft', { method: 'POST' }).then(r => r.json()).then(d => {
-    if (d.ok) toast('Választervezet kész — nézd a Választervezetek fülön.');
-    else toast(d.error || 'Nem sikerült. Be van kapcsolva a Gemini API az Adminban?');
-  }).catch(() => toast('Hiba a választervezet generálásakor.'));
+    if (d.ok) {
+      if (btn) { btn.textContent = 'Kész — lásd a Választervezetek fülön'; }
+      toast('Választervezet kész.');
+      if (btn && d.draft_text) {
+        const leadItem = btn.closest('.lead-item') || btn.closest('.opp-card');
+        if (leadItem) {
+          const draftDiv = document.createElement('details');
+          draftDiv.open = true;
+          draftDiv.style.cssText = 'margin-top: 15px; padding: 15px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius); font-size: 0.9rem;';
+          draftDiv.innerHTML = '<summary style="color: var(--accent); font-weight: bold; cursor: pointer; outline: none; margin-bottom: 10px;">Generált választervezet</summary><div style="white-space: pre-wrap;">' + esc(d.draft_text) + '</div><br><button class="btn btn-secondary btn-sm" onclick="navigator.clipboard.writeText(this.previousElementSibling.previousElementSibling.innerText).then(()=>toast(\'Másolva\'))">Másolás</button>';
+          leadItem.appendChild(draftDiv);
+        }
+      }
+    } else {
+      if (btn) { btn.disabled = false; btn.textContent = 'Választervezet'; }
+      toast(d.error || 'Nem sikerült. Be van kapcsolva a Gemini API az Adminban?');
+    }
+  }).catch(() => {
+    if (btn) { btn.disabled = false; btn.textContent = 'Választervezet'; }
+    toast('Hiba a választervezet generálásakor.');
+  });
 }
 
 // --- Valasz generalasa egy Lehetoseg-kartyarol ---
@@ -765,6 +818,16 @@ function genDraftOpp(postId, btn) {
     if (d.ok) {
       if (btn) btn.textContent = 'Kész — lásd a Választervezetek fülön';
       toast('Válasz elkészült a fájdalomra reflektálva.');
+      if (btn && d.draft_text) {
+        const leadItem = btn.closest('.lead-item') || btn.closest('.opp-card');
+        if (leadItem) {
+          const draftDiv = document.createElement('details');
+          draftDiv.open = true;
+          draftDiv.style.cssText = 'margin-top: 15px; padding: 15px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius); font-size: 0.9rem;';
+          draftDiv.innerHTML = '<summary style="color: var(--accent); font-weight: bold; cursor: pointer; outline: none; margin-bottom: 10px;">Generált választervezet</summary><div style="white-space: pre-wrap;">' + esc(d.draft_text) + '</div><br><button class="btn btn-secondary btn-sm" onclick="navigator.clipboard.writeText(this.previousElementSibling.previousElementSibling.innerText).then(()=>toast(\'Másolva\'))">Másolás</button>';
+          leadItem.appendChild(draftDiv);
+        }
+      }
     } else {
       if (btn) { btn.disabled = false; btn.textContent = 'Válasz generálása'; }
       toast(d.error || 'Nem sikerült. Be van kapcsolva a Gemini API az Adminban?');
@@ -870,11 +933,33 @@ function copyLinkedinReply() {
   ta.style.position = 'absolute'; ta.style.left = '-9999px';
 }
 
+// A Sales OS ingest account-centrikus: cég-adat nélkül 422-t ad (SalesOS
+// docs/08-bridge-integracio.md §5). A Monitorban nincs Entity Resolver (az a
+// 3. fázis), ezért a céget itt ember adja meg — ez a tervezett emberi kapu,
+// nem hiányosság. Az átadás közvetlen POST /api/bridge/ingest, n8n nélkül.
 function toSalesOS(id, btn) {
+  const companyName = prompt(
+    'Melyik céghez tartozik ez a lead?\n\n' +
+    'A Sales OS cég-adat nélkül elutasítja (account-centrikus elv).\n\n' +
+    'Cégnév:'
+  );
+  if (companyName === null) return;                     // Mégsem
+  if (!companyName.trim()) { toast('Cégnév nélkül a Sales OS elutasítja.'); return; }
+  const domain = (prompt('Cég domainje (opcionális, pl. iroda.hu):') || '').trim();
+
   if (btn) { btn.disabled = true; btn.textContent = 'Küldés...'; }
-  fetch('/lead/' + id + '/to-sales-os', { method: 'POST' }).then(r => r.json()).then(d => {
-    if (d.ok) { toast('Elküldve a Sales OS-be.'); if (btn) btn.textContent = 'Elküldve'; }
-    else { toast(d.error || 'Nem sikerült. Be van állítva az n8n webhook?'); if (btn) { btn.disabled = false; btn.textContent = 'Sales OS'; } }
+  fetch('/lead/' + id + '/to-sales-os', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ company_name: companyName.trim(), company_domain: domain })
+  }).then(r => r.json()).then(d => {
+    if (d.ok) {
+      toast(d.deduped ? 'Már szerepelt a Sales OS-ben (idempotens, no-op).' : 'Elküldve a Sales OS-be.');
+      if (btn) btn.textContent = 'Elküldve';
+    } else {
+      toast(d.error || 'Nem sikerült.');
+      if (btn) { btn.disabled = false; btn.textContent = 'Sales OS'; }
+    }
   }).catch(() => { toast('Hiba a küldéskor.'); if (btn) { btn.disabled = false; btn.textContent = 'Sales OS'; } });
 }
 
@@ -903,7 +988,15 @@ function confirmApprove(id) {
   fetch('/draft/' + id + '/approve', { method: 'POST' }).then(r => r.json()).then(() => {
     document.getElementById('copy-' + id).style.display = 'none';
     document.getElementById('done-' + id).style.display = 'block';
-    toast('Draft jóváhagyva.');
+    toast('Draft jóváhagyva. Eltávolítás a listából...');
+    setTimeout(() => {
+      const card = document.getElementById('dcard-' + id);
+      if (card) {
+        card.style.transition = 'opacity .3s';
+        card.style.opacity = '0';
+        setTimeout(() => card.remove(), 300);
+      }
+    }, 1000);
   });
 }
 function doReject(id) {
@@ -916,5 +1009,36 @@ function doReject(id) {
     toast('Draft elutasítva.');
   });
 }
+function setBadge(key, state) {
+  const el = document.getElementById('badge-' + key);
+  if (el) {
+    el.className = 'badge badge-' + (state === 'run' ? 'run' : 'idle');
+    el.textContent = state === 'run' ? 'Fut...' : 'Nem futott';
+  }
+}
+// Job-statusz polling
+setInterval(function() {
+  fetch('/api/status').then(r => r.json()).then(data => {
+    const jobs = data.jobs || {};
+    ['reddit','search','playwright','stackoverflow','forums','github','youtube','generate-drafts','weekly-report','linkedin-content','build-knowledge'].forEach(key => {
+      const j = jobs[key]; const el = document.getElementById('badge-' + key);
+      if (!j || !el) return;
+      el.className = 'badge';
+      if (j.status === 'running') { el.className += ' badge-run'; el.textContent = 'Fut...'; }
+      else if (j.status === 'done') { el.className += ' badge-done'; el.textContent = 'Kész' + (j.result ? ' (' + j.result + ')' : ''); }
+      else if (j.status === 'error') { el.className += ' badge-error'; el.textContent = 'Hiba'; }
+    });
+  }).catch(() => {});
+}, 3000);
+
+function runAllConnectors() {
+  const keys = ['reddit','playwright','stackoverflow','discourse','github','youtube','forums'];
+  keys.forEach(k => {
+    fetch('/run/' + k + '?ajax=1', {method: 'POST'}).catch(()=>{});
+    setBadge(k, 'run');
+  });
+  toast('Összes adatgyűjtő indítása...');
+}
+
 </script>
 {% endblock %}

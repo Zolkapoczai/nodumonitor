@@ -5,6 +5,12 @@ Stack Exchange API v2.3 — ingyenes, regisztráció nélkül 300 kérés/nap.
 API kulccsal (stackapps.com): 10 000 kérés/nap.
 
 Dokumentáció: https://api.stackexchange.com/docs
+
+FIGYELEM a `tagged_queries` szintaxisara: a Stack Exchange API tag-szeparatora a
+`;` (ES-kapcsolat), NEM a `+`. A `+` URL-kodolva `%2B` lesz, igy a keres egy nem
+letezo tag-nevre fut, es ORoKRE 0 talalatot ad. Elesben mert pelda:
+`tagged=revit+archicad` -> 0 elem, `tagged=revit;archicad` -> 1 elem,
+`tagged=revit-api` -> 25 elem (ld. docs/02-lead-volume-audit-2026-07.md §3.8).
 """
 import time
 from datetime import datetime, timezone
@@ -12,7 +18,7 @@ from datetime import datetime, timezone
 import requests
 
 from filters.keyword_filter import KeywordFilter
-from storage.db import insert_post
+from storage.db import insert_post, log_run
 
 _BASE = "https://api.stackexchange.com/2.3"
 _DELAY_S = 1.0  # udvarias késleltetés kérések között
@@ -94,23 +100,44 @@ class StackOverflowConnector:
         tagged_queries = self.so_config.get("tagged_queries", [])
         text_queries = self.so_config.get("text_queries", [])
         total = 0
+        total_seen = 0
+        started = datetime.now(tz=timezone.utc).isoformat()
+        error_msg = None
 
-        for site in sites:
-            # Tag-alapú keresés
-            for tags in tagged_queries:
-                items = self._get("search/advanced", {"site": site, "tagged": tags})
-                n = self._save_items(items, f"stackoverflow:{site}")
-                total += n
-                time.sleep(_DELAY_S)
+        try:
+            for site in sites:
+                # Tag-alapú keresés
+                for tags in tagged_queries:
+                    items = self._get("search/advanced", {"site": site, "tagged": tags})
+                    if not items:
+                        print(f"  [stackoverflow] tagged='{tags}' ({site}): 0 elem")
+                    total_seen += len(items)
+                    total += self._save_items(items, f"stackoverflow:{site}")
+                    time.sleep(_DELAY_S)
 
-            # Szöveges keresés
-            for query in text_queries:
-                items = self._get("search/advanced", {"site": site, "q": query})
-                n = self._save_items(items, f"stackoverflow:{site}")
-                total += n
-                time.sleep(_DELAY_S)
+                # Szöveges keresés
+                for query in text_queries:
+                    items = self._get("search/advanced", {"site": site, "q": query})
+                    total_seen += len(items)
+                    total += self._save_items(items, f"stackoverflow:{site}")
+                    time.sleep(_DELAY_S)
+        except Exception as e:
+            error_msg = str(e)
+            print(f"[stackoverflow] HIBA: {e}")
 
-        print(f"[stackoverflow] {total} uj bejegyzes mentve")
+        # Ez a connector korabban EGYALTALAN nem naplozott futast, ezert az
+        # allapota a `runs` tablabol nem volt megallapithato — holott az utemezo
+        # 180 percenkent hivta (ld. docs/02-lead-volume-audit-2026-07.md §3.8b).
+        log_run(
+            self.db_path,
+            connector="stackoverflow",
+            started_at=started,
+            finished_at=datetime.now(tz=timezone.utc).isoformat(),
+            new_posts=total,
+            error=error_msg,
+            items_seen=total_seen,
+        )
+        print(f"[stackoverflow] {total} uj bejegyzes mentve ({total_seen} elem latva)")
         return total
 
     def search(self, query: str, sites: list[str] = None, search_term: str = None) -> int:

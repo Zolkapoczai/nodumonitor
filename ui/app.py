@@ -9,6 +9,7 @@ Két nézet:
                 (opcionálisan jelszóval védve: config.yaml -> ui.admin_password)
 """
 import os
+import sqlite3
 import sys
 import threading
 from datetime import datetime, timezone
@@ -21,7 +22,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from flask import Flask, render_template, request, redirect, url_for, jsonify, Response
 from storage.db import (
     init_db, get_pending_drafts, mark_draft, get_weekly_stats,
-    get_adhoc_results, get_post, get_opportunities,
+    get_adhoc_results, get_post, get_post_with_signal, get_opportunities,
+    get_connector_health,
 )
 
 app = Flask(__name__)
@@ -123,9 +125,12 @@ def save():
     config["reddit"]["subreddits"] = [s.strip() for s in raw_subs.split(",") if s.strip()]
 
     config["scoring"]["gemini_enabled"] = "gemini_enabled" in f
-    key = f.get("gemini_api_key", "").strip()
-    config["scoring"]["gemini_api_key"] = key if key else "YOUR_GEMINI_API_KEY"
     config["scoring"]["gemini_model"] = f.get("gemini_model", "gemini-2.5-flash").strip()
+    # A Gemini- es YouTube-kulcsot SZANDEKOSAN nem irjuk vissza a config.yaml-be:
+    # az git-tracked, es a GitHub push-protection (joggal) blokkolja az ilyen
+    # commitot. A kulcsok a git-ignoralt .env-ben elnek (GEMINI_API_KEY,
+    # YOUTUBE_API_KEY), env_secrets.py olvassa oket. Ha az admin urlapon uj
+    # kulcsot irsz be, azt a .env-be kell atvinni — a mezo csak megjelenit.
 
     config["alerts"]["email"]["enabled"] = "email_enabled" in f
     config["alerts"]["email"]["from_address"] = f.get("email_from", "").strip() or "YOUR_EMAIL@gmail.com"
@@ -152,10 +157,7 @@ def save():
         config.setdefault("weekly_report", {})
         config["weekly_report"]["language"] = f.get("report_language", "hu").strip()
 
-    if "youtube_api_key" in f:
-        config.setdefault("youtube", {})
-        yt_key = f.get("youtube_api_key", "").strip()
-        config["youtube"]["api_key"] = yt_key if yt_key else "YOUR_YOUTUBE_API_KEY"
+    # A youtube_api_key mezot sem irjuk vissza (ld. a Gemini-nel fentebb).
 
     save_config(config)
     return redirect(url_for("admin") + "?saved=1")
@@ -265,8 +267,12 @@ def api_adhoc_results():
     config = load_config()
     db_path = get_db_path(config)
     query = (request.args.get("query") or "").strip()
-    results = get_adhoc_results(db_path, query or None, limit=50)
-    return jsonify({"query": query, "results": results})
+    try:
+        offset = int(request.args.get("offset", 0))
+    except ValueError:
+        offset = 0
+    results = get_adhoc_results(db_path, query or None, limit=10, offset=offset)
+    return jsonify({"query": query, "results": results, "offset": offset})
 
 
 @app.route("/api/posts")
@@ -300,6 +306,8 @@ def linkedin_compose():
     )
     if not result:
         return jsonify({"ok": False, "error": "Nem sikerült. Be van kapcsolva a Gemini API az Adminban?"})
+    if "error" in result:
+        return jsonify({"ok": False, "error": result["error"]})
     return jsonify({"ok": True, **result})
 
 
@@ -312,44 +320,58 @@ def lead_draft(post_id):
     from responder.draft_generator import generate_draft_for_post
     draft_id = generate_draft_for_post(config, db_path, post_id)
     if draft_id:
-        return jsonify({"ok": True, "draft_id": draft_id})
+        import sqlite3
+        with sqlite3.connect(db_path) as conn:
+            c = conn.cursor()
+            c.execute("SELECT draft_text FROM drafts WHERE id = ?", (draft_id,))
+            row = c.fetchone()
+            draft_text = row[0] if row else ""
+        return jsonify({"ok": True, "draft_id": draft_id, "draft_text": draft_text})
     return jsonify({"ok": False, "error": "Nem sikerült. Be van kapcsolva a Gemini API az Adminban?"})
 
 
 @app.route("/lead/<int:post_id>/to-sales-os", methods=["POST"])
 def lead_to_sales_os(post_id):
+    """
+    Lead atadasa a SalesOS-nek: KOZVETLEN `POST /api/bridge/ingest`, n8n nelkul
+    (01-es audit §6/§10 dontese). Korabban ez az `alerts.webhook` n8n-vegpontot
+    hivta, ami letiltva es placeholder URL-lel allt — a gomb minden kattintasra
+    hibat adott (02-es audit §4/9).
+
+    A SalesOS account-centrikus: **ceg-adat nelkul 422**. A Monitorban nincs
+    Entity Resolver (az a 3. fazis), ezert a cegnevet a FELHASZNALO adja meg —
+    ez a tervezett emberi kapu, nem hianyossag.
+    """
     config = load_config()
     db_path = get_db_path(config)
-    post = get_post(db_path, post_id)
+    post = get_post_with_signal(db_path, post_id) or get_post(db_path, post_id)
     if not post:
         return jsonify({"ok": False, "error": "Nincs ilyen lead."}), 404
 
-    wc = config.get("alerts", {}).get("webhook", {})
-    if not wc.get("enabled") or not wc.get("url") or wc.get("url") == "YOUR_N8N_WEBHOOK_URL":
-        return jsonify({"ok": False, "error": "Az n8n webhook nincs beállítva (alerts.webhook)."})
-
-    payload = {
-        "source": "adhoc",
-        "generated_at": datetime.now(tz=timezone.utc).isoformat(),
-        "leads": [{
-            "platform": post.get("platform", ""),
-            "source": post.get("source", ""),
-            "title": post.get("title", ""),
-            "author": post.get("author", ""),
-            "url": post.get("url", ""),
-            "score": post.get("score", 0),
-            "keywords": post.get("keywords", ""),
-            "body_excerpt": (post.get("body") or "")[:500],
-            "created_at": post.get("created_at", ""),
-        }],
+    data = request.get_json(silent=True) or {}
+    company = {
+        "name": (data.get("company_name") or "").strip(),
+        "domain": (data.get("company_domain") or "").strip(),
+        "companiesHouseNumber": (data.get("company_house_no") or "").strip(),
     }
+    contact = {
+        "fullName": (data.get("contact_name") or "").strip(),
+        "email": (data.get("contact_email") or "").strip(),
+    }
+
+    from crm.salesos_client import send_to_salesos, SalesOSError
     try:
-        resp = requests.post(wc["url"], json=payload,
-                             headers={"Content-Type": "application/json"}, timeout=15)
-        resp.raise_for_status()
-        return jsonify({"ok": True})
-    except Exception as e:
+        result = send_to_salesos(config, post, company,
+                                 summary=(data.get("summary") or "").strip(),
+                                 contact=contact)
+    except SalesOSError as e:
         return jsonify({"ok": False, "error": str(e)})
+    except Exception as e:  # varatlan hiba — ne 500-azzon a dashboard
+        return jsonify({"ok": False, "error": f"Varatlan hiba: {e}"})
+
+    with sqlite3.connect(db_path, timeout=30) as conn:
+        conn.execute("UPDATE posts SET status = 'processed' WHERE id = ?", (post_id,))
+    return jsonify({"ok": True, "deduped": bool(result.get("deduped")), "result": result})
 
 
 # --- Draft jóváhagyás (dashboard) ---
@@ -366,6 +388,43 @@ def reject_draft(draft_id):
     config = load_config()
     mark_draft(get_db_path(config), draft_id, "rejected", "webes felületen visszautasítva")
     return jsonify({"ok": True})
+
+
+@app.route("/health")
+def health():
+    """
+    Gep-olvashato allapot-vegpont (01-es audit §10 "Observability", 2. fazis).
+    HTTP 200, ha minden aktiv connector rendben; **503**, ha barmelyik hibas vagy
+    "vak" (0 nyers elemet lat) — igy egy kulso felugyelo (uptime-monitor, tunnel
+    healthcheck, Windows service watchdog) eszreveszi a nema hibakat is.
+
+    Auth nincs: csak aggregalt allapotot ad vissza, nem lead-adatot, es a szerver
+    127.0.0.1-re kot (server.py). Ha kifele nyilik, ez ujragondolando.
+    """
+    config = load_config()
+    db_path = get_db_path(config)
+    hc = config.get("health", {})
+    ignore = set(hc.get("ignore", ["classifier"]))
+
+    try:
+        report = get_connector_health(
+            db_path,
+            window=hc.get("window", 5),
+            active_within_hours=hc.get("active_within_hours", 24),
+        )
+    except Exception as e:
+        return jsonify({"status": "error", "error": f"DB nem olvashato: {e}"}), 503
+
+    problems = [r for r in report
+                if r["status"] in ("error", "blind") and r["connector"] not in ignore]
+    body = {
+        "status": "degraded" if problems else "ok",
+        "checked_at": datetime.now(tz=timezone.utc).isoformat(),
+        "connectors": report,
+        "problems": [p["connector"] for p in problems],
+        "pending_drafts": len(get_pending_drafts(db_path)),
+    }
+    return jsonify(body), (503 if problems else 200)
 
 
 @app.route("/api/status")

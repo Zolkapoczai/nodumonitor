@@ -10,12 +10,19 @@ A valasz ket parhuzamos tombot ad: posts[] (poszt-szintu adat: szerzo, blurb,
 letrehozas ideje) es topics[] (tema-szintu adat: cim, slug — ebbol epul a
 teljes thread-URL: /t/<slug>/<id>).
 """
+import time
 from datetime import datetime, timezone
 
 import requests
 
 from filters.keyword_filter import KeywordFilter
 from storage.db import insert_post, log_run
+
+# A buildingSMART Discourse-a szigoruan rate-limitel: a query x rendezes bovites
+# utan 429-et adott mar ~8 keresnel is, ha azok gyorsan kovetik egymast. 3 s
+# szunet + `search_pages: 1` (config) tartja a kort a limit alatt: ~9 keres/kor,
+# ~27 s, 4 oras poll-intervallum mellett ez elhanyagolhato.
+_DELAY_S = 3.0
 
 _DEFAULT_QUERIES = [
     "revit archicad",
@@ -35,21 +42,29 @@ class DiscourseConnector:
         self.db_path = db_path
         self.dc_config = config.get("discourse", {})
         self.kf = KeywordFilter(config)
+        self._failed_requests: list[str] = []
 
-    def _search(self, base_url: str, query: str) -> list[dict]:
+    def _get_json(self, url: str, params: dict) -> dict | None:
         try:
             resp = requests.get(
-                f"{base_url}/search.json",
-                params={"q": query},
+                url, params=params,
                 headers={"User-Agent": "NODU-Bridge-Monitor/0.1"},
                 timeout=15,
             )
             resp.raise_for_status()
-            data = resp.json()
+            return resp.json()
         except Exception as e:
-            print(f"[discourse] API hiba ({base_url}): {e}")
-            return []
+            # A HTTP-hibat (tipikusan 429) gyujtjuk, hogy a runs.error-ban
+            # latszodjon — enelkul egy vegig rate-limitelt kor "0 elem"-nek,
+            # azaz eltort connectornak tunne.
+            self._failed_requests.append(f"{url.rsplit('/', 1)[-1]}: {e}")
+            print(f"[discourse] API hiba ({url}): {e}")
+            return None
+        finally:
+            time.sleep(_DELAY_S)
 
+    @staticmethod
+    def _rows_from_search(base_url: str, data: dict) -> list[dict]:
         posts = data.get("posts", [])
         topics = {t["id"]: t for t in data.get("topics", [])}
 
@@ -68,6 +83,61 @@ class DiscourseConnector:
                 "author": post.get("username", ""),
                 "external_id": str(post.get("id", url)),
                 "created_at": post.get("created_at", "") or _now(),
+            })
+        return results
+
+    def _search(self, base_url: str, query: str, pages: int = 1,
+                order_latest: bool = False) -> list[dict]:
+        """
+        Discourse `/search.json`. Ket, korabban kihasznalatlan lehetoseggel:
+
+        - `order:latest` a query-ben: a `/search.json` alapbol RELEVANCIA szerint
+          rendez, ezert 53 futason at nagyjabol ugyanazt a statikus top-50-et adta
+          vissza (190 elem/kor, 38 uj OSSZESEN). Igy egy uj tema csak akkor jelent
+          meg, ha berobbant a relevancia-rangsor tetejere.
+        - `page=`: a Discourse lapoz; egy lap ~50 elem.
+        Ld. docs/02-lead-volume-audit-2026-07.md §3.9.
+        """
+        q = f"{query} order:latest" if order_latest else query
+        results: list[dict] = []
+        for page in range(1, max(1, pages) + 1):
+            params = {"q": q}
+            if page > 1:
+                params["page"] = page
+            data = self._get_json(f"{base_url}/search.json", params)
+            if not data:
+                break
+            rows = self._rows_from_search(base_url, data)
+            if not rows:
+                break  # nincs tobb lap
+            results.extend(rows)
+        return results
+
+    def _latest(self, base_url: str) -> list[dict]:
+        """
+        A `/latest.json` a fórum FRISS temait adja (~30 db), fuggetlenul attol,
+        hogy azok bekerulnek-e barmelyik kereses relevancia-rangsoraba. A
+        kulcsszo-szuro utana amugy is szur — ez a "semmi nem csuszik at" halo.
+        """
+        data = self._get_json(f"{base_url}/latest.json", {})
+        if not data:
+            return []
+        results = []
+        for topic in data.get("topic_list", {}).get("topics", []):
+            slug = topic.get("slug", "")
+            topic_id = topic.get("id")
+            if not topic_id:
+                continue
+            url = f"{base_url}/t/{slug}/{topic_id}" if slug else f"{base_url}/t/{topic_id}"
+            results.append({
+                "url": url,
+                "title": topic.get("title", ""),
+                # A latest.json nem ad torzset — a cim + a kulcsszo-szuro dolgozik,
+                # a reszleteket a classifier a cimbol es a linkbol latja.
+                "body": (topic.get("excerpt") or "")[:2000],
+                "author": "",
+                "external_id": f"topic_{topic_id}",
+                "created_at": topic.get("created_at", "") or _now(),
             })
         return results
 
@@ -101,8 +171,12 @@ class DiscourseConnector:
     def run(self) -> int:
         forums = self.dc_config.get("forums", {})
         total = 0
+        total_seen = 0
         started = _now()
         error_msg = None
+
+        pages = self.dc_config.get("search_pages", 2)
+        use_latest = self.dc_config.get("include_latest", True)
 
         try:
             for forum_name, forum_cfg in forums.items():
@@ -111,13 +185,27 @@ class DiscourseConnector:
                     continue
                 queries = forum_cfg.get("queries", _DEFAULT_QUERIES)
                 for query in queries:
-                    items = self._search(base_url, query)
-                    n = self._save(forum_name, base_url, items)
-                    total += n
-                print(f"[discourse] {forum_name}: {total} uj bejegyzes eddig")
+                    # Relevancia-rendezes (a "regi klasszikusok") ES friss-rendezes
+                    # (az uj temak) egyutt — ez a ketto mas halmazt ad.
+                    items = self._search(base_url, query, pages=pages)
+                    items += self._search(base_url, query, pages=pages, order_latest=True)
+                    total_seen += len(items)
+                    total += self._save(forum_name, base_url, items)
+
+                if use_latest:
+                    latest = self._latest(base_url)
+                    total_seen += len(latest)
+                    total += self._save(forum_name, base_url, latest)
+                    print(f"[discourse] {forum_name}: latest.json {len(latest)} friss tema")
+
+                print(f"[discourse] {forum_name}: {total} uj bejegyzes eddig ({total_seen} elem latva)")
         except Exception as e:
             error_msg = str(e)
             print(f"[discourse] HIBA: {e}")
+
+        if error_msg is None and self._failed_requests:
+            error_msg = (f"{len(self._failed_requests)} keres hibara futott "
+                         f"(elso: {self._failed_requests[0][:150]})")
 
         log_run(
             self.db_path,
@@ -126,6 +214,7 @@ class DiscourseConnector:
             finished_at=_now(),
             new_posts=total,
             error=error_msg,
+            items_seen=total_seen,
         )
         return total
 

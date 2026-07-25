@@ -1,4 +1,5 @@
 # Database & runtime
+backups/
 nodu_monitor.db
 nodu_monitor.db-wal
 nodu_monitor.db-shm

@@ -2,14 +2,28 @@ reddit:
   client_id: YOUR_REDDIT_CLIENT_ID
   client_secret: YOUR_REDDIT_CLIENT_SECRET
   user_agent: NODU-Bridge-Monitor/0.1 by NODU
+  # 3 -> 8 subreddit. A briefben megnevezett harom mellé azok a közösségek,
+  # ahol BIM-koordinátorok és építészek tényleges munkafolyamat-problémákat
+  # írnak le (ld. docs/02-lead-volume-audit-2026-07.md P2/15).
   subreddits:
   - Revit
   - ArchiCAD
   - BIM
+  - bimlevel
+  - AutodeskRevit
+  - architecture
+  - BlenderBIM
+  - openBIM
+  # search_queries: ha nincs megadva, a keywords.primary + keywords.pain_points
+  # többszavas kifejezéseiből épül (max_search_queries darab) — így egy új
+  # kulcsszó az Adminban automatikusan új Reddit-keresés is lesz.
+  max_search_queries: 12
   poll_interval_minutes: 60
   post_limit: 25
 youtube:
-  api_key: YOUR_YOUTUBE_API_KEY
+  # A kulcs a git-ignoralt .env-ben van (YOUTUBE_API_KEY) — ez a fajl git-tracked,
+  # ide NEM kerulhet eles kulcs. Ld. env_secrets.py.
+  api_key: ''
   search_queries:
   - Revit Archicad IFC
   - Archicad to Revit tutorial
@@ -17,37 +31,16 @@ youtube:
   max_videos_per_query: 5
   max_comments_per_video: 20
   poll_interval_minutes: 180
-forums:
-  graphisoft:
-    base_url: https://community.graphisoft.com
-    search_urls:
-    - https://community.graphisoft.com/t5/forums/searchpage/tab/message?q=ifc+revit
-    - https://community.graphisoft.com/t5/forums/searchpage/tab/message?q=archicad+revit+interop
-    board_urls:
-    - https://community.graphisoft.com/t5/Collaboration-with-other/bd-p/collaboration
-    poll_interval_minutes: 120
-    user_agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
-      like Gecko) Chrome/125.0.0.0 Safari/537.36
-  autodesk:
-    base_url: https://forums.autodesk.com
-    search_urls:
-    - https://forums.autodesk.com/t5/forums/searchpage/tab/message?q=archicad+ifc+revit
-    - https://forums.autodesk.com/t5/forums/searchpage/tab/message?q=ifc+interoperability+revit
-    board_urls:
-    - https://forums.autodesk.com/t5/revit-architecture-forum/bd-p/160
-    poll_interval_minutes: 120
-    user_agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
-      like Gecko) Chrome/125.0.0.0 Safari/537.36
-  revitforum:
-    base_url: https://www.revitforum.org
-    search_urls:
-    - https://www.revitforum.org/search.php?keywords=archicad+ifc&sr=posts&sf=all
-    - https://www.revitforum.org/search.php?keywords=ifc+conversion&sr=posts&sf=all
-    board_urls:
-    - https://www.revitforum.org/forum/revit-platform/revit-general-discussion
-    poll_interval_minutes: 120
-    user_agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
-      like Gecko) Chrome/125.0.0.0 Safari/537.36
+# Graphisoft Community és Autodesk Forum Khoros SPA — a Playwright connector kezeli.
+# Itt csak a hagyományos HTML-alapú fórumok maradnának.
+#
+# 2026-07-24: KIVEZETVE a revitforum. A revitforum.org phpBB-ről XenForo-ra
+# migrált, Cloudflare + login mögé: a `search.php?...` 302-vel átirányít
+# `/search?...`-ra, és a html_connector phpBB-szelektorai (li.bg1, a.topictitle)
+# soha többé nem illeszkedhetnek. 86 futáson keresztül 0 elemet hozott 0
+# hibajelzéssel. Ha újra kell, akkor a `playwright.forums` alá, saját
+# szelektorokkal — nem ide. Ld. docs/02-lead-volume-audit-2026-07.md §3.4.
+forums: {}
 keywords:
   primary:
   - nodu
@@ -64,17 +57,80 @@ keywords:
   - parametric conversion
   - ac to rvt
   - rvt to ac
+  - archicad ifc
+  - revit ifc
+  - ifc workflow
+  - ifc roundtrip
+  - bim interoperability
+  - bim collaboration
+  - model exchange
+  - cross platform bim
   pain_points:
+  # ELV: a kulcsszót a lehető LEGRÖVIDEBB szótörzsben írd ("missing element",
+  # ne "missing elements") — a szűrő toldalék-toleráns a kulcsszóról a szöveg
+  # felé (3+ karakteres tokenre), tehát a rövidebb alak a hosszabbat is
+  # megfogja, visszafelé viszont NEM. Ld. filters/keyword_filter.py.
   - ifc export problem
-  - missing elements
+  - missing element
   - geometry issue
-  - geometry disappears
-  - lost parameters
+  - geometry disappear
+  - lost parameter
   - duplicate geometry
   - data loss
   - ifc2x3
   - ifc4
   - archicad interop
+  - ifc broken
+  - ifc mess
+  - ifc nightmare
+  - ifc frustrating
+  - wrong geometry
+  - missing data
+  - corrupted ifc
+  - ifc crash
+  - export failure
+  - import failure
+  - lost data
+  - broken model
+  - interop issue
+  - collaboration problem
+  - file conversion
+  # Tünet-megfogalmazások (2026-07-24). Az emberek a TÜNETET írják le, nem a
+  # formátumot: "losing element properties when importing to Revit" korábban
+  # kiesett, mert minden kulcsszó két konkrét tokent (archicad/revit/ifc) kért.
+  # A kulcsszó-szűrő csak elő-szűrő — a valódi fájdalmat a classifier dönti el,
+  # ezért itt megengedőbbnek KELL lennie. Ld. docs/02-lead-volume-audit-2026-07.md §3.10.
+  # Megjegyzés: a -y -> -ies többes szám (property/properties) NEM fedhető le
+  # egy szótörzzsel, ezért ott a többes alak szerepel.
+  - losing parameter
+  - losing properties
+  - losing data
+  - lost properties
+  - properties disappear
+  - parameter disappear
+  - element disappear
+  - walls break
+  - geometry breaks
+  - model breaks
+  - roundtrip problem
+  - roundtrip issue
+  - mapping problem
+  - mapping issue
+  - export broken
+  - import broken
+  - reimport problem
+  - conversion problem
+  - conversion issue
+  - conversion fails
+  - export fails
+  - import fails
+  - not coming through
+  - comes through wrong
+  - manual rework
+  - remodel everything
+  - rebuild manually
+  - retype parameters
+  - copy paste manually
   context:
   - bim coordinator
   - bim manager
@@ -82,6 +138,12 @@ keywords:
   - open bim
   - bim coordination
   - multi-discipline
+  - bim workflow
+  - design coordination
+  - model coordination
+  - building information
+  - ifc standard
+  - openBIM
 alerts:
   email:
     enabled: false
@@ -97,33 +159,66 @@ alerts:
     enabled: false
     url: YOUR_N8N_WEBHOOK_URL
     min_score: 5
+  # min_keyword_matches: MÁR NEM a napi digest szűrője. A digest a Pain
+  # Classifier jeleire épül (alerts.digest_min_severity), nem a nyers
+  # kulcsszó-score-ra — ld. docs/02-lead-volume-audit-2026-07.md §3.6c.
   min_keyword_matches: 1
+  digest_min_severity: 3
   daily_digest: true
   digest_hour: 8
 database:
   path: nodu_monitor.db
+backup:
+  enabled: true
+  hour: 3        # napi snapshot ekkor (UTC-fuggetlen local cron)
+  keep: 7        # ennyi legfrissebb snapshot marad meg a backups/ mappaban
+# Connector-heartbeat: a nema hibak (eltort szelektor, halott API, hianyzo kulcs)
+# felderitese. A "0 uj poszt" MAGABAN nem hiba — csak az, ha a connector 0 NYERS
+# elemet lat, vagy minden futasa kivetellel all le.
+health:
+  enabled: true
+  check_interval_hours: 6
+  window: 5              # ennyi utolso futast ertekel connectoronkent
+  active_within_hours: 24 # csak a 24 oran belul futott connectorokat vizsgalja
+  ignore:                # stage-ek, ahol a 0 elem normalis allapot
+  - classifier
+# Valasz-draftok automatikus generalasa a fajdalom-jelekbol. Az emberi kapu a
+# JOVAHAGYASNAL van (dashboard), nem a generalasnal.
+responder:
+  auto_generate: true
+  hour: 7
 scoring:
   gemini_enabled: true
   gemini_model: gemini-2.5-flash
-  gemini_api_key: ${GEMINI_API_KEY}
+  # A kulcs a git-ignoralt .env-ben van (GEMINI_API_KEY). A GitHub push-protection
+  # 2026-07-25-en elutasitotta azt a commitot, amiben ez a mezo eles kulcsot
+  # tartalmazott — joggal. Ide NEM kerulhet vissza.
+  gemini_api_key: ''
 classifier:
   enabled: true
-  batch_size: 15
+  # 15 -> 25: a P1-javitasok utan egyetlen este 93 uj poszt jott be (a korabbi
+  # napi ~1 helyett), amit a 15-os batch orankent nem gyoz le. 25 x 13 s = ~5,5
+  # perc/futas, orankent futva ez naponta 600 poszt kapacitas.
+  batch_size: 25
   delay_seconds: 13
   draft_min_severity: 3
 stackoverflow:
   api_key: ''
   poll_interval_minutes: 180
+  # A softwareengineering.stackexchange BIM-témában gyakorlatilag üres — kivezetve.
   sites:
   - stackoverflow
-  - softwareengineering.stackexchange
+  # A tag-szeparátor `;` (ÉS-kapcsolat), NEM `+`. A korábbi `revit+archicad`
+  # egy nem létező tag-névre keresett, ezért örökre 0 találatot adott.
+  # Élesben mért találatszám: revit-api=25, revit=25, revit;archicad=1.
   tagged_queries:
-  - revit+archicad
-  - revit+ifc
-  - archicad+bim
+  - revit-api
+  - ifc
   text_queries:
   - archicad revit ifc conversion
   - archicad to revit parametric
+  - ifc export missing parameters
+  - revit ifc import geometry
 github:
   poll_interval_minutes: 240
   token: ''
@@ -131,12 +226,83 @@ github:
   - IfcOpenShell/IfcOpenShell
   - specklesystems/speckle-server
   - xeokit/xeokit-sdk
+  # Élesben mért elérhető issue-szám ugyanezen 3 repóra (2026-07-24):
+  #   "archicad revit" = 30 | "archicad" = 103 | "revit" = 303
+  # A szűk, kétszavas query-k a fejtér ~10%-át látták. A kulcsszó-szűrő
+  # utána amúgy is szűr, ezért itt szélesebb halmazt kérünk le.
+  # A token nélküli limit 10 kérés/perc; a connector 6 s-ot vár hívások közt,
+  # tehát max 10 query fér bele biztonsággal egy körbe.
   queries:
+  - archicad
+  - revit
+  - ifc export
+  - ifc import
   - archicad revit
-  - revit archicad
-  - archicad ifc export
+  - interoperability
+# Web-keresés a kivezetett Google CSE helyett, SearchProvider adapter mögött.
+# A kulcs NEM ide jön: env-változóból vagy a projekt .env fájljából (BRAVE_API_KEY).
+# Kulcs: https://brave.com/search/api/ — self-serve regisztráció.
+#
+# KVÓTA-MATEK (2026-07-24-én az oldalról ellenőrizve): a Brave "Search" csomag
+# $5 / 1000 kérés, ÉS havi $5 ingyenes kredit jár hozzá -> kb. 1000 kérés/hó
+# ingyen. A lenti 11 query naponta EGYSZER = ~330 kérés/hó, azaz a szabad
+# keret harmada. Ha 720 percre (naponta 2x) állítod, ~660/hó — még belefér, de
+# szűkebben. Frissebb adat = kevesebb tartalék; ez a cél (lefedettség, nem
+# volumen) mellett nem éri meg.
+#
+# A cél nem a volumen, hanem a lefedettség: amire nincs saját connector —
+# német/holland/skandináv BIM-közösségek, blogkommentek, publikus LinkedIn- és
+# Reddit-posztok (ld. docs/02-lead-volume-audit-2026-07.md §5a).
+web_search:
+  enabled: true
+  provider: brave
+  api_key_env: BRAVE_API_KEY
+  poll_interval_minutes: 1440  # naponta 1x — az ingyenes kredit ~harmada
+  results_per_query: 20
+  # freshness: py (elmúlt év), NEM pm (elmúlt hónap). Élesben mérve 2026-07-24:
+  #   pm  -> az "archicad revit ifc site:reddit.com" 4 találatot adott, MIND
+  #          mozi-szál (az "IFC" a filmes Independent Film Channel is!), 0 hasznos.
+  #          A szűk időkeretben a Brave részleges egyezésekre esik vissza.
+  #   py  -> 10 találat, 10/10 átmegy a kulcsszó-szűrőn, és MIND 1 éven belüli,
+  #          tehát egyik sem esik ki az insert_post 365 napos szűrőjén.
+  #   ""  -> szintén 10/10, de 2015-es szálak is jönnek, amiket a DB eldob -> kvótapazarlás.
+  freshness: py
+  search_lang: ''
+  queries:
+  - archicad revit ifc problem
+  - archicad to revit parameters lost
+  - ifc export archicad revit forum
+  - archicad revit interoperability help
+  - "archicad revit ifc problem site:linkedin.com"
+  - archicad revit ifc probleme      # DE
+  - archicad revit ifc probleem      # NL
+  # Reddit a keresőindexen keresztül. Ez a LEGÁLIS út a Reddit-tartalomhoz, amíg
+  # nincs jóváhagyott API-kulcsunk: a kereső indexét fogyasztjuk (cím + URL +
+  # kivonat), NEM a redditet crawlerezzük. A reddit.com/robots.txt ugyanis
+  # `User-agent: * / Disallow: /`, és az unauthenticated `.json` végpont 2026
+  # májusa óta 403-at ad (TLS-fingerprint + IP-reputáció) — ld.
+  # docs/02-lead-volume-audit-2026-07.md §5a.
+  # A szálat ember nyitja meg a linkről; automatikus letöltés NINCS.
+  #
+  # Query-forma élesben hangolva (2026-07-24): a PROBLÉMA-orientált szavak
+  # ("export", "import problem", "parameters lost") valódi hibaszálakat hoznak
+  # (10/10 átmegy a szűrőn, score 21-28), míg a puszta "archicad revit"
+  # összehasonlító threadeket ("melyiket tanuljam?") — azokat a classifier
+  # amúgy is is_pain=false-ra teszi, tehát kár rájuk a kvóta.
+  - "archicad revit ifc export site:reddit.com"
+  - "archicad revit ifc import problem site:reddit.com"
+  - "archicad revit parameters lost site:reddit.com"
+  - "archicad revit ifc site:reddit.com"
 discourse:
   poll_interval_minutes: 240
+  # A /search.json relevancia szerint rendez, ezért ugyanazt a statikus top-50-et
+  # adta minden körben (190 elem, 38 új ÖSSZESEN 53 futás alatt). Most minden
+  # query lefut relevancia- ÉS friss-rendezéssel (order:latest), lapozással,
+  # plusz a /latest.json friss témái is bejönnek.
+  # 1 lap/query: a buildingSMART Discourse-a szigorúan rate-limitel (429 már
+  # ~8 gyors kérésnél is). A 2. lap amúgy is a relevancia-rangsor alja.
+  search_pages: 1
+  include_latest: true
   forums:
     buildingsmart:
       base_url: https://forums.buildingsmart.org
@@ -169,10 +335,17 @@ playwright:
       body_selector: .lia-message-body-content
       author_selector: .lia-user-name-link
       cookie_banner_text: Decline
+# SalesOS CRM-integráció: KÖZVETLEN POST /api/bridge/ingest, n8n nélkül.
+# A kulcs env-ből vagy a projekt .env fájljából jön (BRIDGE_API_KEY) — ugyanaz,
+# ami a SalesOS .env-jében van. A SalesOS account-centrikus: cég-adat nélkül 422,
+# ezért a küldés emberi kapun megy (a dashboardon adod meg a céget).
+salesos:
+  base_url: http://localhost:3000
+  api_key_env: BRIDGE_API_KEY
 wishlist:
   url: https://nodu.build/bridge
   utm_campaign: bridge_waitlist
-  cta_in_drafts: true
+  cta_in_drafts: false
 linkedin_content:
   enabled: true
   posts_per_week: 2

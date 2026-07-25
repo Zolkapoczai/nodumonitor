@@ -48,7 +48,9 @@ class PlaywrightConnector:
         except Exception:
             pass
 
-    def _scrape_forum(self, page, forum_name: str, forum_cfg: dict) -> int:
+    def _scrape_forum(self, page, forum_name: str, forum_cfg: dict) -> tuple[int, int]:
+        """Visszaad: (elmentett uj poszt, latott nyers elem). A masodik ertek a
+        nema szelektor-toresek felderiteséhez kell (runs.items_seen)."""
         title_sel = forum_cfg.get("title_selector", ".lia-message-subject a")
         body_sel = forum_cfg.get("body_selector", ".lia-message-body-content")
         author_sel = forum_cfg.get("author_selector", ".lia-user-name-link")
@@ -57,9 +59,16 @@ class PlaywrightConnector:
         timeout = self.pw_config.get("timeout_ms", 15000)
 
         saved = 0
+        seen = 0
         for url in forum_cfg.get("search_urls", []):
             try:
-                page.goto(url, wait_until="networkidle", timeout=timeout)
+                # wait_until="domcontentloaded", NEM "networkidle": a Khoros-SPA
+                # folyamatos telemetria-kereseket kuld, ezert a halozat sosem lesz
+                # "idle" — 2026-07-24-en emiatt futott bele a Graphisoft egyik
+                # keresesi URL-je a 15 s-os limitbe, es maradt ki a korbol.
+                # A tartalomra varunk a lenti wait_for_selector-ral, nem a
+                # halozati csendre (ld. docs/02-lead-volume-audit-2026-07.md §3.1).
+                page.goto(url, wait_until="domcontentloaded", timeout=timeout)
                 self._dismiss_cookie_banner(page, cookie_text)
                 # state="attached": a Khoros-fórumok üzenetlistája gyakran
                 # nem kerül "visible" allapotba (virtualizalt/rejtett konteiner),
@@ -71,6 +80,9 @@ class PlaywrightConnector:
                 continue
 
             items = page.query_selector_all(msg_sel)
+            seen += len(items)
+            if not items:
+                print(f"  [{forum_name}] FIGYELEM: 0 elem a '{msg_sel}' szelektorral: {url[:70]}")
             for item in items:
                 try:
                     title_el = item.query_selector(title_sel)
@@ -94,6 +106,18 @@ class PlaywrightConnector:
                     author_el = item.query_selector(author_sel)
                     author = author_el.inner_text().strip() if author_el else ""
 
+                    # Try to extract real date from the post
+                    date_el = item.query_selector("time, span.local-date, .DateTime, .lia-message-posted-on .local-date")
+                    created_at = _now()
+                    if date_el:
+                        dt_attr = date_el.get_attribute("datetime") or date_el.get_attribute("data-time")
+                        if dt_attr:
+                            created_at = dt_attr
+                        else:
+                            date_text = date_el.inner_text().strip()
+                            if date_text:
+                                created_at = date_text  # fallback: raw text
+
                     combined = f"{title} {body}"
                     keywords, score = self.kf.match(combined)
                     if not keywords:
@@ -107,7 +131,7 @@ class PlaywrightConnector:
                         "author": author,
                         "title": title,
                         "body": body[:2000],
-                        "created_at": datetime.now(tz=timezone.utc).isoformat(),
+                        "created_at": created_at,
                         "fetched_at": datetime.now(tz=timezone.utc).isoformat(),
                         "keywords": ", ".join(keywords),
                         "score": score,
@@ -117,7 +141,7 @@ class PlaywrightConnector:
                 except Exception:
                     continue
 
-        return saved
+        return saved, seen
 
     def run(self) -> int:
         if not self.pw_config.get("enabled", True):
@@ -133,6 +157,7 @@ class PlaywrightConnector:
         headless = self.pw_config.get("headless", True)
         forums = self.pw_config.get("forums", {})
         total = 0
+        total_seen = 0
         started = _now()
         error_msg = None
 
@@ -150,9 +175,10 @@ class PlaywrightConnector:
 
                 for forum_name, forum_cfg in forums.items():
                     print(f"[playwright] Scraping: {forum_name}")
-                    n = self._scrape_forum(page, forum_name, forum_cfg)
-                    print(f"[playwright] {forum_name}: {n} uj bejegyzes")
+                    n, seen = self._scrape_forum(page, forum_name, forum_cfg)
+                    print(f"[playwright] {forum_name}: {n} uj bejegyzes ({seen} elem latva)")
                     total += n
+                    total_seen += seen
 
                 browser.close()
         except Exception as e:
@@ -166,5 +192,6 @@ class PlaywrightConnector:
             finished_at=_now(),
             new_posts=total,
             error=error_msg,
+            items_seen=total_seen,
         )
         return total

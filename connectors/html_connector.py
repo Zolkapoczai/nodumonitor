@@ -230,6 +230,8 @@ class HTMLConnector:
     def run(self) -> int:
         started = _now()
         new_total = 0
+        items_total = 0
+        pages_ok = 0
         error_msg = None
         is_revitforum = "revitforum" in self.name.lower()
 
@@ -238,10 +240,12 @@ class HTMLConnector:
             for url in self.search_urls:
                 soup = _safe_get(self.session, url)
                 if soup:
+                    pages_ok += 1
                     if is_revitforum:
                         items = _parse_phpbb_search(soup, self.base_url)
                     else:
                         items = _parse_khoros_search(soup, self.base_url)
+                    items_total += len(items)
                     new_total += self._process_items(items)
                     print(f"  [{self.name}] search {url[-50:]}: {len(items)} elem")
                 time.sleep(_DELAY_BETWEEN_REQUESTS)
@@ -250,10 +254,12 @@ class HTMLConnector:
             for url in self.board_urls:
                 soup = _safe_get(self.session, url)
                 if soup:
+                    pages_ok += 1
                     if is_revitforum:
                         items = _parse_phpbb_search(soup, self.base_url)
                     else:
                         items = _parse_khoros_board(soup, self.base_url)
+                    items_total += len(items)
                     new_total += self._process_items(items)
                     print(f"  [{self.name}] board {url[-50:]}: {len(items)} elem")
                 time.sleep(_DELAY_BETWEEN_REQUESTS)
@@ -262,6 +268,18 @@ class HTMLConnector:
             error_msg = str(e)
             print(f"[{self.name}] HIBA: {e}")
 
+        # HTTP 200 + 0 parsolt elem = szelektor-toress, nem "nincs uj tartalom".
+        # Korabban ez tokeletesen sikeres futasnak latszott a naploban: a
+        # revitforum 86 futason keresztul 0 elemet hozott 0 hibaval, mert a fórum
+        # kozben phpBB-rol XenForo-ra migralt
+        # (ld. docs/02-lead-volume-audit-2026-07.md §3.4).
+        if error_msg is None and pages_ok > 0 and items_total == 0:
+            error_msg = (
+                f"Parser 0 elemet talalt {pages_ok} sikeresen letoltott oldalon "
+                f"— valoszinu szelektor-toress vagy platformvaltas."
+            )
+            print(f"[{self.name}] FIGYELEM: {error_msg}")
+
         log_run(
             self.db_path,
             connector=self.name,
@@ -269,5 +287,6 @@ class HTMLConnector:
             finished_at=_now(),
             new_posts=new_total,
             error=error_msg,
+            items_seen=items_total,
         )
         return new_total
