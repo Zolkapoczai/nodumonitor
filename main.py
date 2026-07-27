@@ -8,6 +8,8 @@ Futtatás:
     python main.py --playwright     # JS-alapú fórumok (Graphisoft/Autodesk Community)
     python main.py --stackoverflow  # Stack Overflow / Stack Exchange
     python main.py --discourse      # buildingSMART forum (Discourse API)
+    python main.py --vanilla        # OSArch community (Vanilla Forums API)
+    python main.py --zendesk        # Graphisoft support KB (Zendesk Help Center API)
     python main.py --github         # GitHub issues (IfcOpenShell, Speckle, xeokit)
     python main.py --classify       # Pain Classifier: LLM-osztályozás a meglévő posztokon
     python main.py --review-signals # osztályozott jelek kézi kiértékelő riportja
@@ -120,6 +122,28 @@ def run_discourse(config: dict, db_path: str) -> int:
         return n
     except Exception as e:
         print(f"[discourse] HIBA: {e}")
+        return 0
+
+
+def run_vanilla(config: dict, db_path: str) -> int:
+    try:
+        from connectors.vanilla_connector import VanillaConnector
+        connector = VanillaConnector(config, db_path)
+        n = connector.run()
+        return n
+    except Exception as e:
+        print(f"[vanilla] HIBA: {e}")
+        return 0
+
+
+def run_zendesk(config: dict, db_path: str) -> int:
+    try:
+        from connectors.zendesk_connector import ZendeskConnector
+        connector = ZendeskConnector(config, db_path)
+        n = connector.run()
+        return n
+    except Exception as e:
+        print(f"[zendesk] HIBA: {e}")
         return 0
 
 
@@ -352,6 +376,26 @@ def register_jobs(scheduler, config: dict, db_path: str) -> None:
         next_run_time=datetime.now(tz=timezone.utc),
     )
 
+    vn = config.get("vanilla", {})
+    if vn.get("enabled", True):
+        scheduler.add_job(
+            lambda: run_vanilla(config, db_path),
+            "interval",
+            minutes=vn.get("poll_interval_minutes", 240),
+            id="vanilla",
+            next_run_time=datetime.now(tz=timezone.utc),
+        )
+
+    zd = config.get("zendesk", {})
+    if zd.get("enabled", True):
+        scheduler.add_job(
+            lambda: run_zendesk(config, db_path),
+            "interval",
+            minutes=zd.get("poll_interval_minutes", 720),
+            id="zendesk",
+            next_run_time=datetime.now(tz=timezone.utc),
+        )
+
     github_interval = config.get("github", {}).get("poll_interval_minutes", 240)
     scheduler.add_job(
         lambda: run_github(config, db_path),
@@ -464,6 +508,7 @@ def describe_schedule(config: dict) -> str:
     pw_interval = config.get("playwright", {}).get("poll_interval_minutes", 90)
     so_interval = config.get("stackoverflow", {}).get("poll_interval_minutes", 180)
     dc_interval = config.get("discourse", {}).get("poll_interval_minutes", 240)
+    vn_interval = config.get("vanilla", {}).get("poll_interval_minutes", 240)
     gh_interval = config.get("github", {}).get("poll_interval_minutes", 240)
     yt_interval = config.get("youtube", {}).get("poll_interval_minutes", 180)
     cl_interval = config.get("classifier", {}).get("poll_interval_minutes", 60)
@@ -471,7 +516,8 @@ def describe_schedule(config: dict) -> str:
     wr = config.get("weekly_report", {})
     lines = [
         f"Reddit: {reddit_interval} perc | PW: {pw_interval} perc | SO: {so_interval} perc "
-        f"| Disc: {dc_interval} perc | Git: {gh_interval} perc | YT: {yt_interval} perc "
+        f"| Disc: {dc_interval} perc | Van: {vn_interval} perc "
+        f"| Git: {gh_interval} perc | YT: {yt_interval} perc "
         f"| Class: {cl_interval} perc",
         f"Napi digest: {digest_hour}:00",
     ]
@@ -509,6 +555,8 @@ def main():
     parser.add_argument("--playwright",       action="store_true", help="JS-alapú fórumok (Playwright/Chromium)")
     parser.add_argument("--stackoverflow",    action="store_true", help="Stack Overflow / Stack Exchange")
     parser.add_argument("--discourse",        action="store_true", help="buildingSMART forum (Discourse API)")
+    parser.add_argument("--vanilla",          action="store_true", help="OSArch community (Vanilla Forums API)")
+    parser.add_argument("--zendesk",          action="store_true", help="Graphisoft support KB (Zendesk Help Center API)")
     parser.add_argument("--github",           action="store_true", help="GitHub issues (IfcOpenShell, Speckle, xeokit)")
     parser.add_argument("--youtube",          action="store_true", help="YouTube kommentek lekérése")
     parser.add_argument("--websearch",        action="store_true", help="Web-kereses (SearchProvider: Brave)")
@@ -580,7 +628,8 @@ def main():
 
     any_flag = (
         args.reddit or args.forums or args.playwright or args.stackoverflow
-        or args.discourse or args.github or args.youtube or args.websearch
+        or args.discourse or args.vanilla or args.zendesk or args.github
+        or args.youtube or args.websearch
     )
 
     if args.reddit or not any_flag:
@@ -597,6 +646,14 @@ def main():
 
     if args.discourse or not any_flag:
         run_discourse(config, db_path)
+
+    if args.vanilla or not any_flag:
+        if config.get("vanilla", {}).get("enabled", True):
+            run_vanilla(config, db_path)
+
+    if args.zendesk or not any_flag:
+        if config.get("zendesk", {}).get("enabled", True):
+            run_zendesk(config, db_path)
 
     if args.github or not any_flag:
         run_github(config, db_path)

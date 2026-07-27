@@ -124,12 +124,15 @@ Vagy bármely SQLite klienssel (pl. DB Browser for SQLite).
 
 ## Platform státusz
 
-| Platform | Connector | Állapot (2026-07-25) |
+| Platform | Connector | Állapot (2026-07-26) |
 |---|---|---|
 | Graphisoft Community | Playwright (headless Chromium) | ✅ Működik. **Absolute interpreter-úttal indítsd** — a Store-os Python alatt nem találja a böngészőt |
 | Autodesk Community | Playwright (headless Chromium) | ✅ Működik — a legnagyobb volumen |
 | GitHub Issues | Search API | ✅ Működik — **a legjobb jelminőség** (14 jelből 11 fájdalom) |
-| buildingSMART fórum | Discourse JSON API | ✅ Működik (`order:latest` + `latest.json`, 3 s szünet a 429 ellen) |
+| buildingSMART fórum | Discourse JSON API (`/latest.json`, keresés nélkül) | ⚠️ Fut, de **közel null hozam** (2026-07-26 óta): a robots.txt tiltja a `/search`-öt, a `latest.json` pedig 360 témából 3-at ad. 10 poszt összesen |
+| Speckle közösség | Discourse JSON API (`/latest.json`, keresés nélkül) | ✅ Működik (2026-07-26). A robots.txt tiltja a `/search`-öt, ezért 5 lap `latest.json`. **82,9% fájdalom-arány** — a GitHub után a legjobb. Válasz NEM készül rá (versenytárs fóruma) |
+| OSArch közösség | Vanilla Forums API (`/api/v2/discussions` + `/search.json`) | ✅ Működik (2026-07-26). **Nem Discourse** — az `/latest.json` ott 404. Első kör: 212 elem → 71 poszt, 28% fájdalom-arány |
+| Graphisoft support KB | Zendesk Help Center API | ✅ Működik (2026-07-26). **Nem leadforrás** (staff írja, kommentek tiltva) — piaci intelligencia. 32 cikk a két interop-szekcióból, 6,2% fájdalom-arány |
 | Stack Exchange | API v2.3 | ✅ Működik. A tag-szeparátor `;`, **nem** `+` |
 | Web-keresés (Brave) | `SearchProvider` adapter | ✅ Működik — `BRAVE_API_KEY` a `.env`-ben, `freshness: py` |
 | Reddit (r/Revit, r/ArchiCAD, r/BIM +5) | PRAW API | ⏸️ **API-kulcsra vár** (jóváhagyás kell). Áthidalva: a Reddit-tartalom a Brave-keresőn jön (`site:reddit.com`) |

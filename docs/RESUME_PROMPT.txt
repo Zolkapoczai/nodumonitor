@@ -6,16 +6,41 @@ docs/02-lead-volume-audit-2026-07.md. Stratégiai háttér: docs/01-architektura
 
 Mielőtt bármit módosítasz: futtasd le a `python main.py --health`-et (vagy GET
 localhost:5050/health) — ez megmutatja, melyik connector termel és melyik hallgatott el.
-A szervert MINDIG absolute interpreter-úttal indítsd (HANDOFF §4/6), különben a
-Playwright csendben meghal.
+Ha "0 aktív connector"-t ír, az NEM hiba: azt jelenti, hogy 24 órán belül egy connector
+sem futott, azaz a szerver áll. A szervert MINDIG absolute interpreter-úttal indítsd
+(HANDOFF §4/6), különben a Playwright csendben meghal.
 
-KÖVETKEZŐ FELADAT (HANDOFF §7/A): az OSArch bekötése a Discourse-connectorba.
-A community.osarch.org egy openBIM/IfcOpenShell-közösség, Discourse-alapú, tehát a
-meglévő connectors/discourse_connector.py egy config-blokkal lefedi — ugyanaz a
-latest.json + kereső logika futna rá, mint a buildingSMART-on. A Brave-kereső hozta fel
-mint lefedetlen forrást (docs/02-...md §5a). Becslés ~30 perc.
-Ellenőrizd élesben, hogy a /search.json és /latest.json végpont ott is nyitott-e, és
-figyelj a rate limitre (a buildingSMART 429-et adott 8 gyors kérésnél; ezért van 3 s szünet).
+KÖVETKEZŐ FELADAT (HANDOFF §7/C): Slack-webhook bekötése.
+Ez az EGYETLEN dolog, ami miatt a kész riasztási lánc még nem ér el senkit: sem a napi
+digest, sem a connector-heartbeat nem megy ki sehova. A 2026-07-26-i futásnál is 86
+fájdalom-jel maradt 'new' státuszban, mert nincs hova kiküldeni. Felhasználói lépés kell
+hozzá: Zoltánnak létre kell hoznia egy Slack Incoming Webhook URL-t — KÉRDEZD MEG TŐLE,
+ne próbáld magad megoldani. Az URL a .env-be megy (nem a config.yaml-be, HANDOFF §5),
+utána az alerts.slack szekció élesedik. Az alerts/notifier.py már kész, csak csatorna kell.
+
+A §7/I (pill-szűrő), §7/J (valódi totál + lapozás) és a Speckle-bekötés 2026-07-26-án
+elkészült, mind élesben verifikálva. A §7/K és §7/L is eldőlt: a Speckle tiszta
+intelligence-forrás (nem készül rá válasz), és MINDKÉT Discourse-fórumon ki van
+kapcsolva a keresés a robots.txt miatt. A support.graphisoft.com is bekötve (§7/M,
+Zendesk KB — szintén intelligencia, nem lead: staff írja, kommentek tiltva).
+Nyitott döntés nincs, és a P3-as lefedetlen források listája elfogyott.
+
+FIGYELD: a buildingSMART a keresés kikapcsolása óta közel null forrás (360 témából 3
+menthető, összesen 10 posztja van). Ez tudatos csere: robots-megfelelés a volumen
+helyett. Ha kell mélység, a robots-barát út a /c/<kategoria>/l/latest.json.
+
+FONTOS ÚJ LECKÉK — új forrás bekötése ELŐTT mind a hármat mérd meg:
+- §4/13: a fórummotort ne feltételezd. Az OSArch "Discourse"-nak volt dokumentálva,
+  valójában Vanilla Forums. A válasz SÉMÁJÁT nézd, ne a HTTP-státuszt.
+- §4/14: a rate limit forrásonként más (buildingSMART 429 nyolc kérésnél, Speckle/OSArch
+  semmi).
+- §4/15: a robots.txt-t olvasd el, és a ZÁRÓ PERJEL számít. `Disallow: /search` illik a
+  /search.json-ra, `Disallow: /search/` nem. Ezért van per-fórum `use_search` kapcsoló.
+- §7/M: kérdezd meg, van-e ott EMBER. A Graphisoft KB-t a support írja, a kommentek
+  tiltva — jó intelligencia-forrás, de leadnek értéktelen. Az ilyet tedd rögtön a
+  responder.exclude_platforms listára, különben a válaszgenerátor gyártói doksira ír
+  választ. Nézd meg a dátummezőt is: KB-cikknél az updated_at a releváns, nem a
+  created_at (különben a kor-szűrő pont a jó cikkeket dobja el).
 
 Legyél alapos, de token-takarékos. Ne módosíts kódot mérés nélkül: ebben a projektben
 minden fontos állítás élesben verifikált (runs.items_seen, /health, DB-lekérdezések).

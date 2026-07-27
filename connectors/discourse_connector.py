@@ -113,32 +113,43 @@ class DiscourseConnector:
             results.extend(rows)
         return results
 
-    def _latest(self, base_url: str) -> list[dict]:
+    def _latest(self, base_url: str, pages: int = 1) -> list[dict]:
         """
-        A `/latest.json` a fórum FRISS temait adja (~30 db), fuggetlenul attol,
-        hogy azok bekerulnek-e barmelyik kereses relevancia-rangsoraba. A
-        kulcsszo-szuro utana amugy is szur — ez a "semmi nem csuszik at" halo.
+        A `/latest.json` a fórum FRISS temait adja (~30 db/lap), fuggetlenul
+        attol, hogy azok bekerulnek-e barmelyik kereses relevancia-rangsoraba.
+        A kulcsszo-szuro utana amugy is szur — ez a "semmi nem csuszik at" halo.
+
+        `pages`: a Discourse a `/latest.json`-t is lapozza (`?page=N`, 0-tol).
+        Ez ott fontos, ahol a kereses NEM hasznalhato (robots.txt, ld. a
+        `use_search` kapcsolot a run()-ban): a lapozott latest adja a melyseget
+        a kereses helyett. Elesben merve a speckle.community-n: 6 lap = 180
+        egyedi tema, mindegyik excerpt-tel.
         """
-        data = self._get_json(f"{base_url}/latest.json", {})
-        if not data:
-            return []
         results = []
-        for topic in data.get("topic_list", {}).get("topics", []):
-            slug = topic.get("slug", "")
-            topic_id = topic.get("id")
-            if not topic_id:
-                continue
-            url = f"{base_url}/t/{slug}/{topic_id}" if slug else f"{base_url}/t/{topic_id}"
-            results.append({
-                "url": url,
-                "title": topic.get("title", ""),
-                # A latest.json nem ad torzset — a cim + a kulcsszo-szuro dolgozik,
-                # a reszleteket a classifier a cimbol es a linkbol latja.
-                "body": (topic.get("excerpt") or "")[:2000],
-                "author": "",
-                "external_id": f"topic_{topic_id}",
-                "created_at": topic.get("created_at", "") or _now(),
-            })
+        for page in range(0, max(1, pages)):
+            params = {} if page == 0 else {"page": page}
+            data = self._get_json(f"{base_url}/latest.json", params)
+            if not data:
+                break
+            topics = data.get("topic_list", {}).get("topics", [])
+            if not topics:
+                break  # nincs tobb lap
+            for topic in topics:
+                slug = topic.get("slug", "")
+                topic_id = topic.get("id")
+                if not topic_id:
+                    continue
+                url = f"{base_url}/t/{slug}/{topic_id}" if slug else f"{base_url}/t/{topic_id}"
+                results.append({
+                    "url": url,
+                    "title": topic.get("title", ""),
+                    # Ahol nincs excerpt, ott a cim + a kulcsszo-szuro dolgozik,
+                    # a reszleteket a classifier a cimbol es a linkbol latja.
+                    "body": (topic.get("excerpt") or "")[:2000],
+                    "author": "",
+                    "external_id": f"topic_{topic_id}",
+                    "created_at": topic.get("created_at", "") or _now(),
+                })
         return results
 
     def _save(self, forum_name: str, base_url: str, items: list[dict],
@@ -183,17 +194,29 @@ class DiscourseConnector:
                 base_url = forum_cfg.get("base_url", "").rstrip("/")
                 if not base_url:
                     continue
-                queries = forum_cfg.get("queries", _DEFAULT_QUERIES)
-                for query in queries:
-                    # Relevancia-rendezes (a "regi klasszikusok") ES friss-rendezes
-                    # (az uj temak) egyutt — ez a ketto mas halmazt ad.
-                    items = self._search(base_url, query, pages=pages)
-                    items += self._search(base_url, query, pages=pages, order_latest=True)
-                    total_seen += len(items)
-                    total += self._save(forum_name, base_url, items)
 
-                if use_latest:
-                    latest = self._latest(base_url)
+                # Per-forum kapcsolok. A `use_search` azert kell, mert a
+                # robots.txt forumonkent MAS: a speckle.community-n
+                # `Disallow: /search` szerepel (ez a /search.json-ra is illik,
+                # prefix-egyezes), ezert ott csak a lapozott /latest.json fut.
+                # Ld. HANDOFF §4/15.
+                if not forum_cfg.get("use_search", True):
+                    print(f"[discourse] {forum_name}: kereses kihagyva (use_search: false)")
+                else:
+                    queries = forum_cfg.get("queries", _DEFAULT_QUERIES)
+                    for query in queries:
+                        # Relevancia-rendezes (a "regi klasszikusok") ES friss-rendezes
+                        # (az uj temak) egyutt — ez a ketto mas halmazt ad.
+                        items = self._search(base_url, query,
+                                             pages=forum_cfg.get("search_pages", pages))
+                        items += self._search(base_url, query,
+                                              pages=forum_cfg.get("search_pages", pages),
+                                              order_latest=True)
+                        total_seen += len(items)
+                        total += self._save(forum_name, base_url, items)
+
+                if forum_cfg.get("include_latest", use_latest):
+                    latest = self._latest(base_url, pages=forum_cfg.get("latest_pages", 1))
                     total_seen += len(latest)
                     total += self._save(forum_name, base_url, latest)
                     print(f"[discourse] {forum_name}: latest.json {len(latest)} friss tema")
@@ -226,6 +249,9 @@ class DiscourseConnector:
         for forum_name, forum_cfg in forums.items():
             base_url = forum_cfg.get("base_url", "").rstrip("/")
             if not base_url:
+                continue
+            # Ahol a robots.txt tiltja a keresest, ott az ad-hoc kereses sem fut.
+            if not forum_cfg.get("use_search", True):
                 continue
             items = self._search(base_url, query)
             total += self._save(forum_name, base_url, items, search_term=term, require_keywords=False)

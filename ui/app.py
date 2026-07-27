@@ -23,7 +23,7 @@ from flask import Flask, render_template, request, redirect, url_for, jsonify, R
 from storage.db import (
     init_db, get_pending_drafts, mark_draft, get_weekly_stats,
     get_adhoc_results, get_post, get_post_with_signal, get_opportunities,
-    get_connector_health,
+    get_connector_health, count_opportunities, get_opportunity_platform_counts,
 )
 
 app = Flask(__name__)
@@ -93,10 +93,23 @@ def dashboard():
     db_path = get_db_path(config)
     init_db(db_path)
     drafts = get_pending_drafts(db_path)
-    opportunities = get_opportunities(db_path, only_pain=True)
-    hot_count = sum(1 for o in opportunities if (o.get("severity") or 0) >= 4)
+
+    # A korabbi limit=100 csendben csonkolta a nezetet (305 lehetoseg volt), es a
+    # badge a LISTA hosszat irta ki totalkent — ugyanaz a hiba, mint a Nyers
+    # leadeknel (HANDOFF §7/J). Most: nagyobb keret + VALODI totalok SQL-bol, es
+    # ha megis csonkolunk, azt a nezet kiirja.
+    opp_limit = (config.get("ui") or {}).get("opportunities_limit", 400)
+    opportunities = get_opportunities(db_path, only_pain=True, limit=opp_limit)
+    opp_total = count_opportunities(db_path, only_pain=True)
+    hot_count = count_opportunities(db_path, only_pain=True, min_severity=4)
+    # A csatorna-szuro pilljei: a TELJES halmaz platformonkenti darabszama, hogy
+    # egy uj forras automatikusan megjelenjen (ne beegetett lista legyen).
+    opp_channels = get_opportunity_platform_counts(db_path, only_pain=True)
+
     return render_template("dashboard.html", config=config, drafts=drafts,
                            opportunities=opportunities, hot_count=hot_count,
+                           opp_total=opp_total, opp_channels=opp_channels,
+                           opp_limit=opp_limit,
                            stats=_stats(config), active_view="dashboard")
 
 
@@ -185,6 +198,14 @@ def run_action(action):
     elif action == "discourse":
         from connectors.discourse_connector import DiscourseConnector
         _run_in_bg("discourse", lambda: DiscourseConnector(config, db_path).run())
+
+    elif action == "vanilla":
+        from connectors.vanilla_connector import VanillaConnector
+        _run_in_bg("vanilla", lambda: VanillaConnector(config, db_path).run())
+
+    elif action == "zendesk":
+        from connectors.zendesk_connector import ZendeskConnector
+        _run_in_bg("zendesk", lambda: ZendeskConnector(config, db_path).run())
 
     elif action == "github":
         from connectors.github_connector import GitHubConnector
@@ -282,10 +303,27 @@ def api_posts():
     query = (request.args.get("q") or "").strip()
     platforms_raw = request.args.get("platforms")
     platforms = [p.strip() for p in platforms_raw.split(",")] if platforms_raw else None
-    
-    from storage.db import search_posts
-    results = search_posts(db_path, query, platforms, limit=100)
-    return jsonify({"query": query, "platforms": platforms, "results": results})
+
+    # A `total` a szures OSSZES talalata, a `results` csak az aktualis lap. A
+    # dashboard enelkul a lap meretet irta ki totalkent ("100 talalat", holott
+    # 591 volt) — ld. HANDOFF §7/J.
+    try:
+        offset = max(0, int(request.args.get("offset", 0)))
+    except ValueError:
+        offset = 0
+    limit = 100
+
+    from storage.db import count_posts, search_posts
+    results = search_posts(db_path, query, platforms, limit=limit, offset=offset)
+    total = count_posts(db_path, query, platforms)
+    return jsonify({
+        "query": query,
+        "platforms": platforms,
+        "results": results,
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+    })
 
 
 # --- LinkedIn valaszgeneralas (dashboard) ---
@@ -317,7 +355,21 @@ def linkedin_compose():
 def lead_draft(post_id):
     config = load_config()
     db_path = get_db_path(config)
-    from responder.draft_generator import generate_draft_for_post
+    from responder.draft_generator import generate_draft_for_post, is_platform_excluded
+
+    # A kizart platformokra (responder.exclude_platforms) itt is nemet mondunk,
+    # de KONKRET indoklassal — kulonben a gomb csak a general "nem sikerult"
+    # uzenetet adna, es ugy tunne, elromlott valami.
+    from storage.db import get_post_with_signal
+    post = get_post_with_signal(db_path, post_id)
+    if post and is_platform_excluded(config, post.get("platform", "")):
+        return jsonify({
+            "ok": False,
+            "error": f"A(z) „{post.get('platform')}” platformra szándékosan nem "
+                     f"készül válasz (config: responder.exclude_platforms). "
+                     f"Ez a forrás csak jelfigyelésre szolgál.",
+        })
+
     draft_id = generate_draft_for_post(config, db_path, post_id)
     if draft_id:
         import sqlite3

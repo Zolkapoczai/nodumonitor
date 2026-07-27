@@ -251,26 +251,29 @@ def get_signals_for_review(db_path: str, min_severity: int = 0, limit: int = 100
 
 
 def get_opportunities(db_path: str, only_pain: bool = True, min_severity: int = 1,
-                      limit: int = 100) -> list[dict]:
+                      limit: int = 100, platform: str = None) -> list[dict]:
     """
     A dashboard "Lehetosegek" nezet forrasa: osztalyozott jelek a poszt
     adataival, fajdalom-fokuszban. Rendezes (prezentacios rangsor, NEM
     perzisztalt pontszam — a verziozott scoring-motor a Phase 2):
     nodu_mention elsodleges (referralok), severity masodlagos, buying_intent tiebreaker, confidence.
     Az ad-hoc keresesi zajt kizarjuk (search_term IS NULL).
+
+    platform: opcionalis csatorna-szures (`posts.platform` exakt egyezes). A
+    dashboard ma kliens-oldalon szur a mar kirenderelt kartyakon, de a
+    szerver-oldali szures igy is elerheto (pl. API/CLI).
+    A valodi darabszamokhoz ld. `count_opportunities` /
+    `get_opportunity_platform_counts` — a lista hossza NEM total.
     """
     conn = get_connection(db_path)
-    where = ["p.search_term IS NULL", "s.severity >= ?"]
-    params: list = [min_severity]
-    if only_pain:
-        where.append("(s.is_pain = 1 OR s.nodu_mention = 1)")
+    clause, params = _opportunity_where(only_pain, min_severity, platform)
     rows = conn.execute(
         f"""
         SELECT s.*, p.title, p.url, p.platform, p.source, p.author,
                p.body, p.keywords, p.score AS keyword_score, p.created_at AS post_created_at,
                p.status AS post_status
         FROM signals s JOIN posts p ON s.post_id = p.id
-        WHERE {' AND '.join(where)}
+        WHERE {clause}
         ORDER BY s.nodu_mention DESC, s.is_pain DESC, s.severity DESC, s.buying_intent DESC,
                  s.confidence DESC, s.classified_at DESC
         LIMIT ?
@@ -279,6 +282,66 @@ def get_opportunities(db_path: str, only_pain: bool = True, min_severity: int = 
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def _opportunity_where(only_pain: bool, min_severity: int,
+                       platform: str = None) -> tuple[str, list]:
+    """A `get_opportunities` szuro-feltetelei egy helyen — hogy a darabszamok
+    ugyanazt a halmazt szamoljak, mint amit a nezet megjelenit."""
+    where = ["p.search_term IS NULL", "s.severity >= ?"]
+    params: list = [min_severity]
+    if only_pain:
+        where.append("(s.is_pain = 1 OR s.nodu_mention = 1)")
+    if platform:
+        where.append("p.platform = ?")
+        params.append(platform)
+    return " AND ".join(where), params
+
+
+def count_opportunities(db_path: str, only_pain: bool = True, min_severity: int = 1,
+                        platform: str = None) -> int:
+    """
+    A lehetosegek VALODI szama — nem a megjelenitett lapmeret.
+
+    Miert kulon fuggveny: a dashboard `limit=100`-cal kerte le a lehetosegeket, es
+    a badge/metrika a lekert LISTA hosszat irta ki totalkent — 305 lehetoseg
+    mellett is "100"-at. Ugyanaz a hiba, mint a Nyers leadeknel (HANDOFF §7/J).
+    """
+    clause, params = _opportunity_where(only_pain, min_severity, platform)
+    conn = get_connection(db_path)
+    n = conn.execute(
+        f"SELECT COUNT(*) AS cnt FROM signals s JOIN posts p ON s.post_id = p.id WHERE {clause}",
+        params,
+    ).fetchone()["cnt"]
+    conn.close()
+    return n
+
+
+def get_opportunity_platform_counts(db_path: str, only_pain: bool = True,
+                                    min_severity: int = 1) -> list[dict]:
+    """
+    Platformonkenti lehetoseg-darabszam, csokkeno sorrendben — a "Lehetosegek"
+    ful csatorna-szuro pilljeihez.
+
+    A pilleket SZANDEKOSAN ebbol epitjuk, nem beegetett listabol: igy egy uj
+    forras (osarch, speckle, graphisoft-support…) bekotese utan automatikusan
+    megjelenik, es nem marad ott pill olyan csatornara, aminek nincs jele.
+    A darabszam a TELJES halmazbol jon, nem a megjelenitett lapbol.
+    """
+    clause, params = _opportunity_where(only_pain, min_severity)
+    conn = get_connection(db_path)
+    rows = conn.execute(
+        f"""
+        SELECT p.platform, COUNT(*) AS cnt
+        FROM signals s JOIN posts p ON s.post_id = p.id
+        WHERE {clause}
+        GROUP BY p.platform
+        ORDER BY cnt DESC, p.platform
+        """,
+        params,
+    ).fetchall()
+    conn.close()
+    return [{"platform": r["platform"], "count": r["cnt"]} for r in rows]
 
 
 def get_recent_pain_signals(db_path: str, lookback_days: int = 7, limit: int = 8) -> list[dict]:
@@ -337,15 +400,28 @@ def get_post_with_signal(db_path: str, post_id: int) -> dict | None:
 
 
 def get_pain_posts_without_draft(db_path: str, min_severity: int = 3,
-                                 limit: int = 10) -> list[dict]:
+                                 limit: int = 10,
+                                 exclude_platforms: list[str] = None) -> list[dict]:
     """
     A signal-vezerelt batch-valaszgenerator forrasa: valodi fajdalom-jelek
     (is_pain=1, severity>=min), amelyekhez MEG NINCS draft. Az ad-hoc zajt
     kizarjuk. Legsulyosabb/buying-intentes elol.
+
+    exclude_platforms: platformok, amikre NEM keszul valasz (config:
+    `responder.exclude_platforms`). A szures MAR ITT tortenik, nem a hivoban:
+    igy a `limit` a tenylegesen draftolhato posztokra vonatkozik — kulonben egy
+    csupa kizart platformot tartalmazo batch ures kezzel terne vissza, holott
+    van meg draftolhato jel motte.
     """
+    exclude_sql = ""
+    exclude_params: list = []
+    if exclude_platforms:
+        exclude_sql = f" AND p.platform NOT IN ({','.join('?' * len(exclude_platforms))})"
+        exclude_params = list(exclude_platforms)
+
     conn = get_connection(db_path)
     rows = conn.execute(
-        """
+        f"""
         SELECT p.*,
                s.pain_summary     AS sig_pain_summary,
                s.tech_summary     AS sig_tech_summary,
@@ -360,25 +436,27 @@ def get_pain_posts_without_draft(db_path: str, min_severity: int = 3,
         FROM signals s JOIN posts p ON s.post_id = p.id
         LEFT JOIN drafts d ON d.post_id = p.id
         WHERE (s.is_pain = 1 OR s.nodu_mention = 1) AND s.severity >= ? AND p.search_term IS NULL
-              AND d.id IS NULL
+              AND d.id IS NULL{exclude_sql}
         ORDER BY s.nodu_mention DESC, s.severity DESC, s.buying_intent DESC, s.confidence DESC
         LIMIT ?
         """,
-        (min_severity, limit),
+        (min_severity, *exclude_params, limit),
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
 
-def search_posts(db_path: str, query: str = "", platforms: list[str] = None, limit: int = 50) -> list[dict]:
+def _posts_where(query: str = "", platforms: list[str] = None) -> tuple[str, list]:
     """
-    Kereses a nyers, osszes begyujtott poszt kozott.
-    query: reszleges egyezes a title vagy body mezoben (ha adott)
-    platforms: szures adott platformokra (ha adott)
+    A `search_posts` es a `count_posts` KOZOS szurofeltetele.
+
+    Szandekosan egy helyen: amig a ket lekerdezes kulon epitette a WHERE-t,
+    barmelyik modositasa eseten szetcsuszhattak volna, es a felhasznalo egy
+    olyan darabszamot latna ("X / Y talalat"), ami mas halmazra vonatkozik,
+    mint a listazott elemek.
     """
-    conn = get_connection(db_path)
     where_clauses = ["search_term IS NULL"]
-    params = []
+    params: list = []
 
     if query:
         where_clauses.append("(title LIKE ? OR body LIKE ?)")
@@ -387,22 +465,66 @@ def search_posts(db_path: str, query: str = "", platforms: list[str] = None, lim
 
     if platforms:
         placeholders = ",".join("?" * len(platforms))
-        where_clauses.append(f"platform IN ({placeholders})")
+        where_clauses.append(
+            f"(platform IN ({placeholders}) OR source IN ({placeholders}))"
+        )
+        params.extend(platforms)
         params.extend(platforms)
 
-    where_str = " AND ".join(where_clauses)
-    
+    return " AND ".join(where_clauses), params
+
+
+def count_posts(db_path: str, query: str = "", platforms: list[str] = None) -> int:
+    """
+    A `search_posts` szurofeltetelenek megfelelo osszes poszt szama — lapozas
+    nelkul. A dashboard ebbol tudja kiirni a VALODI totalt ("100 / 591"), nem
+    csak a visszaadott lap meretet (HANDOFF §7/J).
+    """
+    where_str, params = _posts_where(query, platforms)
+    conn = get_connection(db_path)
+    total = conn.execute(f"SELECT count(*) FROM posts WHERE {where_str}", params).fetchone()[0]
+    conn.close()
+    return total
+
+
+def search_posts(db_path: str, query: str = "", platforms: list[str] = None,
+                 limit: int = 50, offset: int = 0) -> list[dict]:
+    """
+    Kereses a nyers, osszes begyujtott poszt kozott.
+    query: reszleges egyezes a title vagy body mezoben (ha adott)
+    platforms: szures csatornakra (ha adott) — a `platform` ES a `source` mezot
+               is nezi, ld. lentebb
+    offset: lapozas; a teljes darabszamot a `count_posts` adja
+
+    MIERT platform OR source?
+    A dashboard "Csatornak" pill-jei egy vegyes fogalmat kuldenek: nemelyik
+    `platform`-ertek (`autodesk`, `graphisoft`, `youtube`, `osarch`), nemelyik
+    viszont `source`-ertek (`discourse`, `github`, `stackoverflow`). A connectorok
+    ugyanis nem egysegesen toltik a ket mezot:
+
+      connector      source           platform
+      discourse      discourse        buildingsmart
+      github         github           IfcOpenShell/IfcOpenShell
+      stackoverflow  stackoverflow    stackoverflow:stackoverflow
+      playwright     playwright       graphisoft / autodesk
+      vanilla        vanilla          osarch
+
+    Amig ez a fuggveny csak `platform`-ra szurt, a `discourse`/`github`/
+    `stackoverflow` pill **0 talalatot** adott (elesben merve 2026-07-26:
+    83 poszt volt igy elerhetetlen, ebbol 70 GitHub). Ld. HANDOFF §7/I.
+    """
+    where_str, params = _posts_where(query, platforms)
+    conn = get_connection(db_path)
     rows = conn.execute(
         f"""
         SELECT *
         FROM posts
         WHERE {where_str}
         ORDER BY fetched_at DESC
-        LIMIT ?
+        LIMIT ? OFFSET ?
         """,
-        (*params, limit),
+        (*params, limit, offset),
     ).fetchall()
-    
     conn.close()
     return [dict(r) for r in rows]
 

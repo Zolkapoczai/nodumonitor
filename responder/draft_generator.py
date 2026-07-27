@@ -147,10 +147,26 @@ def _build_system_prompt(config: dict) -> str:
     return base
 
 
+def is_platform_excluded(config: dict, platform: str) -> bool:
+    """
+    Kizart-e a platform a valaszgeneralasbol (`responder.exclude_platforms`)?
+
+    A poszt tovabbra is bejon, jelkent latszik es szamit a riportokban — csak
+    valasz nem megy ra. Ma egyetlen ilyen van: a `speckle`, mert a versenytars
+    SAJAT foruma (Zoltan dontese 2026-07-26, HANDOFF §7/K).
+
+    A kapu KET helyen zar: a batch-generator SQL-jeben
+    (`get_pain_posts_without_draft`) es itt, az egyedi gombnal — kulonben a
+    dashboardrol kezzel megis lehetne ra valaszt gyartani.
+    """
+    excluded = config.get("responder", {}).get("exclude_platforms", []) or []
+    return platform in excluded
+
+
 def generate_draft_for_post(config: dict, db_path: str, post_id: int):
     """
     Egyetlen posztra general valasztervezetet (a dashboard 'Valasztervezet' gombja).
-    Visszaadja a draft_id-t, vagy None ha nem sikerult.
+    Visszaadja a draft_id-t, vagy None ha nem sikerult / a platform kizart.
     """
     sc = config.get("scoring", {})
     api_key = get_secret("GEMINI_API_KEY", sc.get("gemini_api_key"))
@@ -161,6 +177,11 @@ def generate_draft_for_post(config: dict, db_path: str, post_id: int):
     post = get_post_with_signal(db_path, post_id)
     if not post:
         print(f"[responder] Nincs ilyen poszt: {post_id}")
+        return None
+
+    if is_platform_excluded(config, post.get("platform", "")):
+        print(f"[responder] A '{post.get('platform')}' platform ki van zarva "
+              f"a valaszgeneralasbol (responder.exclude_platforms). Kihagy.")
         return None
 
     model = sc.get("gemini_model", "gemini-2.5-flash")
@@ -225,7 +246,11 @@ def generate_drafts(config: dict, db_path: str, batch_size: int = 10) -> int:
     # generalunk valaszt (nem a nyers kulcsszo-score-ra), amelyekhez meg
     # nincs draft. Kuszob: classifier.draft_min_severity (default 3).
     min_sev = config.get("classifier", {}).get("draft_min_severity", 3)
-    posts = get_pain_posts_without_draft(db_path, min_severity=min_sev, limit=batch_size)
+    excluded = config.get("responder", {}).get("exclude_platforms", []) or []
+    posts = get_pain_posts_without_draft(db_path, min_severity=min_sev, limit=batch_size,
+                                         exclude_platforms=excluded)
+    if excluded:
+        print(f"[responder] Kizart platformok (nem keszul rajuk valasz): {', '.join(excluded)}")
     if not posts:
         print("[responder] Nincs draft nelkuli fajdalom-jel (futtasd eloszor: --classify).")
         return 0

@@ -10,7 +10,8 @@
     <div class="nav-item active" onclick="show('overview', this)">Áttekintő</div>
     <div class="nav-item" onclick="show('opportunities', this)" id="nav-opps">
       Lehetőségek
-      {% if opportunities %}<span class="nav-badge">{{ opportunities|length }}</span>{% endif %}
+      {# opp_total a VALODI szam (SQL), nem a kirenderelt lista hossza #}
+      {% if opp_total %}<span class="nav-badge">{{ opp_total }}</span>{% endif %}
     </div>
     <div class="nav-item" onclick="show('drafts', this)" id="nav-drafts">
       Választervezetek
@@ -38,7 +39,7 @@
         <div class="metric-card accent clickable" onclick="show('opportunities', document.getElementById('nav-opps'))" title="Ugrás a Lehetőségekhez">
           <div class="metric-top">
             <div class="metric-value-row">
-              <span class="metric-value accent-v">{{ opportunities | length }}</span>
+              <span class="metric-value accent-v">{{ opp_total }}</span>
             </div>
             
           </div>
@@ -180,9 +181,27 @@
       <p class="page-desc">Az AI-osztályozó által valódi fájdalomként felismert bejegyzések, súlyosság szerint rendezve. A puszta kulcsszó-egyezés (pl. semleges kérdés, funkció-bejelentés) ide nem kerül be.</p>
 
       {% if opportunities %}
+        <div class="card filter-card">
+          <div class="filter-pills-row">
+            <span class="filter-label">Csatorna</span>
+            <button type="button" class="filter-pill on" id="opp-pill-all"
+                    onclick="selectOppChannel('all')">Összes <span class="score-pill">{{ opp_total }}</span></button>
+            {% for c in opp_channels %}
+            <button type="button" class="filter-pill" data-opp-chan="{{ c.platform }}"
+                    onclick="selectOppChannel('{{ c.platform }}')">{{ c.platform }} <span class="score-pill">{{ c.count }}</span></button>
+            {% endfor %}
+          </div>
+          <div class="filter-status-row" id="opp-filter-status">
+            {{ opportunities | length }} megjelenítve
+            {%- if opp_total > (opportunities | length) %}, összesen <strong>{{ opp_total }}</strong>
+            — a nézet {{ opp_limit }} elemre van korlátozva (<code>ui.opportunities_limit</code>){% endif %}.
+          </div>
+        </div>
+
         {% for o in opportunities %}
         {% set heat = 'hot' if (o.severity or 0) >= 4 else ('warm' if o.severity == 3 else 'cool') %}
-        <div class="opp-card {{ 'hot-opp' if heat == 'hot' else '' }}" id="opp-{{ o.post_id }}">
+        <div class="opp-card {{ 'hot-opp' if heat == 'hot' else '' }}" id="opp-{{ o.post_id }}"
+             data-opp-chan="{{ o.platform }}">
           <div class="opp-head">
             {% if o.nodu_mention %}<span class="badge-referral"> ORGANIC REFERRAL</span>{% endif %}
             {% if o.solved_internally %}<span class="badge-hidden-opp"> HIDDEN OPP</span>{% endif %}
@@ -206,6 +225,10 @@
           </div>
         </div>
         {% endfor %}
+
+        <div class="empty" id="opp-empty-filter" style="display:none">
+          Ezen a csatornán nincs megjelenített lehetőség.
+        </div>
       {% else %}
         <div class="empty">
           Még nincs osztályozott fájdalom-jel.<br>
@@ -235,16 +258,21 @@
           <button type="button" class="filter-pill" data-chan="youtube" onclick="selectChannelFilter('youtube')">YouTube</button>
           <button type="button" class="filter-pill" data-chan="reddit" onclick="selectChannelFilter('reddit')">Reddit</button>
           <button type="button" class="filter-pill" data-chan="stackoverflow" onclick="selectChannelFilter('stackoverflow')">Stack Overflow</button>
-          <button type="button" class="filter-pill" data-chan="discourse" onclick="selectChannelFilter('discourse')">Discourse</label>
+          <button type="button" class="filter-pill" data-chan="discourse" onclick="selectChannelFilter('discourse')">Discourse</button>
+          <button type="button" class="filter-pill" data-chan="osarch" onclick="selectChannelFilter('osarch')">OSArch</button>
+          <button type="button" class="filter-pill" data-chan="speckle" onclick="selectChannelFilter('speckle')">Speckle</button>
+          <button type="button" class="filter-pill" data-chan="graphisoft-support" onclick="selectChannelFilter('graphisoft-support')">GS support</button>
           <button type="button" class="filter-pill" data-chan="github" onclick="selectChannelFilter('github')">GitHub</button>
           <button type="button" class="filter-pill" data-chan="graphisoft" onclick="selectChannelFilter('graphisoft')">Graphisoft</button>
           <button type="button" class="filter-pill" data-chan="autodesk" onclick="selectChannelFilter('autodesk')">Autodesk</button>
+          <button type="button" class="filter-pill" data-chan="websearch" onclick="selectChannelFilter('websearch')">Web-keresés</button>
           <button type="button" class="filter-pill" data-chan="revitforum" onclick="selectChannelFilter('revitforum')">RevitForum</button>
         </div>
         <div class="filter-status-row" id="raw-status"></div>
       </div>
 
       <div id="raw-results"></div>
+      <div id="raw-more"></div>
     </div>
 
     <!-- ===================== Ad-hoc keresés ===================== -->
@@ -371,7 +399,9 @@
           ('reddit', 'Reddit', 'r/Revit, r/ArchiCAD, r/BIM: legfrissebb posztok és kommentek'),
           ('playwright', 'JS fórumok (Playwright)', 'Graphisoft és Autodesk Community valós idejű scraping'),
           ('stackoverflow', 'Stack Overflow', 'Stack Exchange API: revit, archicad, ifc témák'),
-          ('discourse', 'buildingSMART fórum', 'Discourse API: forums.buildingsmart.org'),
+          ('discourse', 'Discourse fórumok', 'buildingSMART + Speckle közösség (speckle.community: csak /latest.json, robots)'),
+          ('vanilla', 'OSArch közösség', 'Vanilla Forums API: community.osarch.org (openBIM/IfcOpenShell)'),
+          ('zendesk', 'Graphisoft support KB', 'Zendesk API: support.graphisoft.com interop-cikkei — intelligencia, nem lead'),
           ('github', 'GitHub issues', 'IfcOpenShell/Bonsai, Speckle, xeokit repók'),
           ('youtube', 'YouTube kommentek', 'YouTube Data API v3 (tutorialok és webinarok kommentjei)'),
           ('forums', 'Fórumok (HTML)', 'Khoros és phpBB fórumok közvetlen scraping')
@@ -562,49 +592,126 @@ function esc(s) {
   return d.innerHTML;
 }
 
+// --- Lehetőségek: csatorna-szűrő ---
+// A kártyák már ki vannak renderelve (data-opp-chan), ezért a szűrés kliens-oldali
+// és azonnali, mint a többi fülön. A pill-eken látszó darabszám viszont SQL-ből jön
+// (get_opportunity_platform_counts), nem a DOM-ból — így akkor sem hazudik, ha a
+// nézet egyszer csonkolva lenne (ld. ui.opportunities_limit + a status-sor).
+let activeOppChannel = 'all';
+
+function selectOppChannel(chan) {
+  activeOppChannel = chan;
+  // FIGYELEM: a szelektor a szekcióra szűkítve — különben a többi fül pilljeit is
+  // átállítaná (ugyanaz a .filter-pill osztály van mindhárom sorban).
+  document.querySelectorAll('#s-opportunities .filter-pill').forEach(b => b.classList.remove('on'));
+  if (chan === 'all') {
+    const all = document.getElementById('opp-pill-all');
+    if (all) all.classList.add('on');
+  } else {
+    const btn = document.querySelector(`#s-opportunities .filter-pill[data-opp-chan="${CSS.escape(chan)}"]`);
+    if (btn) btn.classList.add('on');
+  }
+
+  let shown = 0;
+  document.querySelectorAll('#s-opportunities .opp-card').forEach(card => {
+    const match = (chan === 'all') || (card.dataset.oppChan === chan);
+    card.style.display = match ? '' : 'none';
+    if (match) shown++;
+  });
+
+  const empty = document.getElementById('opp-empty-filter');
+  if (empty) empty.style.display = shown === 0 ? '' : 'none';
+
+  const status = document.getElementById('opp-filter-status');
+  if (status) {
+    status.textContent = (chan === 'all')
+      ? `${shown} megjelenítve.`
+      : `${shown} megjelenítve — szűrő: ${chan}.`;
+  }
+}
+
 let activeChannelFilter = 'all';
 
 function selectChannelFilter(chan) {
   activeChannelFilter = chan;
-  document.querySelectorAll('.filter-pills-row .filter-pill').forEach(btn => btn.classList.remove('on'));
+  // A szekcióra szűkítve (korábban globális volt, és a másik két fül aktív
+  // pilljét is levette).
+  document.querySelectorAll('#s-raw .filter-pill').forEach(btn => btn.classList.remove('on'));
 
   if (chan === 'all') {
     const pillAll = document.getElementById('pill-all');
     if (pillAll) pillAll.classList.add('on');
   } else {
-    const targetBtn = document.querySelector(`.filter-pill[data-chan="${chan}"]`);
+    const targetBtn = document.querySelector(`#s-raw .filter-pill[data-chan="${chan}"]`);
     if (targetBtn) targetBtn.classList.add('on');
   }
 
   runRawSearch();
 }
 
-function runRawSearch() {
+// Lapozas allapota. A szerver lapmerete 100 (ui/app.py), a `total` a szures
+// OSSZES talalata — a statuszsor ezt a kettot kulon mutatja, mert korabban a
+// lap merete szerepelt totalkent ("100 talalat", holott 591 volt). §7/J.
+let rawOffset = 0;
+let rawTotal = 0;
+
+function runRawSearch(append) {
   const q = document.getElementById('raw-query').value.trim();
-  let channels = [];
-  if (activeChannelFilter === 'all') {
-    channels = ['youtube', 'reddit', 'stackoverflow', 'discourse', 'github', 'graphisoft', 'autodesk', 'revitforum'];
-  } else {
-    channels = [activeChannelFilter];
+  // Az "Összes" NEM egy felsorolás: szűrő nélkül kérünk, így a jövőbeli
+  // connectorok is automatikusan látszanak. Korábban fix lista volt, és ami
+  // kimaradt belőle (pl. a websearch 113 posztja), az láthatatlan maradt.
+  const channels = activeChannelFilter === 'all' ? null : [activeChannelFilter];
+
+  if (!append) {
+    rawOffset = 0;
+    document.getElementById('raw-results').innerHTML = '';
   }
+  document.getElementById('raw-more').innerHTML = '';
 
   const btn = document.getElementById('raw-btn');
   btn.disabled = true; btn.textContent = 'Keresés...';
-  document.getElementById('raw-status').textContent = 'Keresés folyamatban...';
-  document.getElementById('raw-results').innerHTML = '';
+  if (!append) document.getElementById('raw-status').textContent = 'Keresés folyamatban...';
 
-  const url = '/api/posts?q=' + encodeURIComponent(q) + '&platforms=' + encodeURIComponent(channels.join(','));
+  let url = '/api/posts?q=' + encodeURIComponent(q) + '&offset=' + rawOffset;
+  if (channels) url += '&platforms=' + encodeURIComponent(channels.join(','));
 
   fetch(url).then(r => r.json()).then(data => {
     btn.disabled = false; btn.textContent = 'Keresés';
     const results = data.results || [];
+    rawTotal = data.total || 0;
+    const betoltve = rawOffset + results.length;
     const filterName = activeChannelFilter === 'all' ? 'Összes csatorna' : activeChannelFilter.toUpperCase();
-    document.getElementById('raw-status').textContent = results.length + ' találat (' + filterName + ')' + (q ? ' erre: "' + q + '"' : '');
-    renderRawLeads(results, activeChannelFilter);
+    // Csak akkor irunk ki "X / Y"-t, ha tenyleg van mit lapozni.
+    const szamlalo = betoltve < rawTotal ? betoltve + ' / ' + rawTotal : String(rawTotal);
+    document.getElementById('raw-status').textContent =
+      szamlalo + ' találat (' + filterName + ')' + (q ? ' erre: "' + q + '"' : '');
+    renderRawLeads(results, activeChannelFilter, append);
+    renderRawMore(betoltve);
   }).catch(() => {
     btn.disabled = false; btn.textContent = 'Keresés';
+    // Sikertelen lapozasnal visszaallitjuk az offsetet es a gombot, kulonben
+    // az ujraprobalas atugrana egy lapot.
+    if (append) {
+      rawOffset = Math.max(0, rawOffset - 100);
+      renderRawMore(rawOffset);
+    }
     toast('Hiba a keresés során.');
   });
+}
+
+function renderRawMore(betoltve) {
+  const box = document.getElementById('raw-more');
+  if (betoltve >= rawTotal) { box.innerHTML = ''; return; }
+  const hatra = rawTotal - betoltve;
+  box.innerHTML = '<button type="button" class="btn btn-secondary" id="raw-more-btn" onclick="loadMoreRawLeads()">' +
+    'Továbbiak betöltése (' + hatra + ' hátra)</button>';
+}
+
+function loadMoreRawLeads() {
+  const btn = document.getElementById('raw-more-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Betöltés...'; }
+  rawOffset += 100;
+  runRawSearch(true);
 }
 
 function formatCleanUrl(rawUrl) {
@@ -620,9 +727,10 @@ function formatCleanUrl(rawUrl) {
   }
 }
 
-function renderRawLeads(results, activeChan) {
+function renderRawLeads(results, activeChan, append) {
   const box = document.getElementById('raw-results');
   if (!results.length) {
+    if (append) return;  // lapozas vegen nincs mit hozzafuzni
     if (activeChan === 'youtube') {
       box.innerHTML = '<div class="empty">Még nincs letöltött YouTube komment az adatbázisban.<br><br><a href="/admin" class="btn btn-primary btn-sm">1. Adj meg YouTube API kulcsot az Admin felületen</a> &nbsp; <a href="/admin" class="btn btn-secondary btn-sm">2. Indítsd el a YouTube kommentek gyűjtését</a></div>';
     } else {
@@ -630,7 +738,7 @@ function renderRawLeads(results, activeChan) {
     }
     return;
   }
-  let html = '<div class="raw-leads-list">';
+  let html = '';
   results.forEach(r => {
     const cleanLink = formatCleanUrl(r.url);
     const cleanBody = esc((r.body || '').replace(/&nbsp;/g, ' ').replace(/&[a-z]+;/g, '').trim().slice(0, 240));
@@ -655,8 +763,13 @@ function renderRawLeads(results, activeChan) {
       '</div>' +
     '</div>';
   });
-  html += '</div>';
-  box.innerHTML = html;
+
+  const lista = box.querySelector('.raw-leads-list');
+  if (append && lista) {
+    lista.insertAdjacentHTML('beforeend', html);
+  } else {
+    box.innerHTML = '<div class="raw-leads-list">' + html + '</div>';
+  }
 }
 
 // --- Ad-hoc kereses ---
@@ -1032,7 +1145,7 @@ setInterval(function() {
 }, 3000);
 
 function runAllConnectors() {
-  const keys = ['reddit','playwright','stackoverflow','discourse','github','youtube','forums'];
+  const keys = ['reddit','playwright','stackoverflow','discourse','vanilla','zendesk','github','youtube','forums'];
   keys.forEach(k => {
     fetch('/run/' + k + '?ajax=1', {method: 'POST'}).catch(()=>{});
     setBadge(k, 'run');

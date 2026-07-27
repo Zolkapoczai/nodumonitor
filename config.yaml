@@ -187,6 +187,21 @@ health:
 responder:
   auto_generate: true
   hour: 7
+  # Platformok, amikre NEM készül válaszjavaslat — se a napi 07:30-as batch-ben,
+  # se a dashboard "Választervezet" gombjával. A poszt továbbra is BEJÖN, jelként
+  # látszik és számít a riportokban: csak válasz nem megy rá.
+  #
+  # speckle: Zoltán döntése (2026-07-26, HANDOFF §7/K). A speckle.community a
+  # versenytárs SAJÁT fóruma, és a második legjobb jelforrásunk (82,9% fájdalom-
+  # arány) — de a saját termékünket pozicionáló válasz a versenytárs fórumán
+  # reputációs kockázat. Marad tiszta intelligence-forrásnak.
+  #
+  # graphisoft-support: nem döntés kérdése, hanem tényállítás — a Zendesk-cikkek
+  # szerzője a Graphisoft supportja, a kommentek le vannak tiltva. Nincs kinek
+  # válaszolni. Ez a forrás piaci intelligencia, nem lead (HANDOFF §7/M).
+  exclude_platforms:
+  - speckle
+  - graphisoft-support
 scoring:
   gemini_enabled: true
   gemini_model: gemini-2.5-flash
@@ -311,6 +326,82 @@ discourse:
       - archicad revit
       - ifc export revit
       - archicad ifc
+      # KERESÉS KIKAPCSOLVA (Zoltán döntése, 2026-07-26, HANDOFF §7/L): a
+      # buildingSMART robots.txt-jében is szerepel a `Disallow: /search`, ami a
+      # /search.json-ra is illik (§4/15). Innentől csak a /latest.json fut.
+      #
+      # MIÉRT CSAK 3 LAP? Élesben mérve 12 lap = 360 téma, és abból ÖSSZESEN 3
+      # menthető: 37 megy át a kulcsszó-szűrőn, de 34 régebbi 1 évnél (az
+      # insert_post eldobja), a 2. laptól pedig már nulla az új hozam. Ez egy
+      # lassan mozgó fórum, ahol ráadásul csak 2/30 témának van excerpt-je —
+      # a szűrő itt gyakorlatilag csak a címet látja. A mélyebb lapozás tehát
+      # nem hozna semmit, csak kéréseket. A 3 lap tartalék a kimaradt körökre.
+      use_search: false
+      include_latest: true
+      latest_pages: 3
+    # Speckle — a versenytárs fóruma, DE a legjobban célzott tartalom: a keresés
+    # csupa "Archicad to Revit workflow", "Archicad Wall not coming to Revit"
+    # típusú találatot ad. Discourse (élesben verifikálva: /about.json,
+    # /latest.json, /search.json mind Discourse-séma; /api/v2/discussions 404).
+    #
+    # A KERESÉS ITT KI VAN KAPCSOLVA: a robots.txt `Disallow: /search` szabálya
+    # a /search.json-ra is illik (prefix-egyezés, nincs záró perjel — az OSArch-on
+    # `/search/` van, ami NEM illik rá). Helyette a lapozott /latest.json adja a
+    # mélységet, ami itt bőven elég: rate limit nincs (8 gyors kérés mind 200).
+    #
+    # MIÉRT 5 LAP? A 20 lapos mély lapozás EGYSZERI backfill volt (2026-07-26,
+    # 600 téma → 35 poszt). Élesben mérve a szűk keresztmetszet nem a kor, hanem
+    # a keyword_filter: 600 témából 42 megy át rajta, abból 35 esik 1 éven belülre.
+    # A hozam laponként közel egyenletes (~1,75), tehát nincs éles vágási pont —
+    # üzemben viszont a mély lapok csak ugyanazt olvassák újra 4 óránként. Az új
+    # tartalom a 0-2. lapon jelenik meg (a Discourse bumpolja az aktív témákat),
+    # 5 lap = 150 téma bőven fedi a kimaradt ciklusokat is. Ha egyszer hosszabb
+    # kiesés volt, állítsd ideiglenesen 20-ra egy körre.
+    speckle:
+      base_url: https://speckle.community
+      use_search: false
+      include_latest: true
+      latest_pages: 5
+# Vanilla Forums — OSArch (community.osarch.org), openBIM/IfcOpenShell közösség.
+# NEM Discourse (élesben mérve 2026-07-26: /latest.json 404, /search.json Vanilla-
+# sémát ad) — ezért külön connector, nem discourse-config. Két nyitott végpont:
+# /api/v2/discussions (friss témák TELJES törzzsel) + /search.json?Search= (lapoz,
+# komment-szintű találatot is ad). Rate limit nem mért: 8 gyors kérés mind 200,
+# ezért itt 2 lap/query is belefér (a buildingSMART-tal ellentétben).
+vanilla:
+  enabled: true
+  poll_interval_minutes: 240
+  search_pages: 2
+  include_recent: true
+  recent_limit: 50
+  forums:
+    osarch:
+      base_url: https://community.osarch.org
+      queries:
+      - revit archicad
+      - archicad revit
+      - ifc export revit
+      - archicad ifc
+# Zendesk Help Center — Graphisoft support (support.graphisoft.com).
+# NEM leadforrás: a cikkeket a Graphisoft supportja írja, a kommentek le vannak
+# tiltva, nincs kit megszólítani. Ezért a `graphisoft-support` rajta van a
+# `responder.exclude_platforms` listán. Piaci intelligencia: azt mutatja, melyik
+# interop-probléma fordul elő elégszer ahhoz, hogy KB-cikk szülessen róla.
+# Ld. HANDOFF §7/M. A community halott (5 db 2020-as Zendesk-demo poszt).
+zendesk:
+  enabled: true
+  poll_interval_minutes: 720
+  sites:
+    graphisoft-support:
+      base_url: https://support.graphisoft.com
+      locale: en-us
+      # Csak a két interop-szekció. A teljes KB 234 kulcsszó-találatából a
+      # maradék ~200 licencelési/BIMcloud/BIMx/renderelési zaj — a magas
+      # score-ú interop-cikkek MIND ebben a kettőben vannak. Névvel adjuk meg,
+      # a connector futásidőben oldja fel id-re.
+      sections:
+      - Collaboration with Other Software
+      - Project Data & BIM
 playwright:
   enabled: true
   headless: true
@@ -364,6 +455,12 @@ adhoc:
   result_limit: 10
 ui:
   admin_password: ''
+  # Hány lehetőség-kártya renderelődjön a "Lehetőségek" fülön. A csatorna-szűrő
+  # kliens-oldali, tehát ami nincs kirenderelve, azt nem is tudja megmutatni —
+  # ezért legyen a keret a valódi totál FÖLÖTT. Ha csonkol, a fül status-sora
+  # kiírja ("X megjelenítve, összesen Y"). A pillek darabszáma mindig SQL-ből
+  # jön, tehát az akkor sem hazudik. Ma 305 lehetőség van.
+  opportunities_limit: 400
 knowledge_base:
   folders:
   - c:\NODU\NODU technical
