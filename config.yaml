@@ -437,6 +437,22 @@ wishlist:
   url: https://nodu.build/bridge
   utm_campaign: bridge_waitlist
   cta_in_drafts: false
+# LinkedIn Thought Leadership Engine (responder/linkedin_engine.py) — a
+# "LinkedIn válasz" fül kommentgenerálása.
+linkedin:
+  # brand_positioning — a márkaemlítés a POSZT tulajdonsága, nem globális kapcsoló:
+  #   on_request — (ALAPÉRTELMEZÉS) csak akkor említhető a NODU Bridge, ha a poszt
+  #                KIFEJEZETTEN eszközt kér ("mivel oldjátok meg?"), az idézett
+  #                kérdés ellenőrizhetően szerepel a posztban, ÉS a téma
+  #                Bridge-relevans (archicad/revit/interoperability/ifc).
+  #                Ha valaki megkérdezi, a válasz nem spam; ha nem kérdezi, az.
+  #   off        — soha, kifejezett kérdésre sem (szigorú mód).
+  #   auto       — a docs/03-linkedin-composer-spec.md §14 három-ágú márkadöntése,
+  #                a poszt kérdésétől függetlenül.
+  # A döntés indoka minden válaszban ott van: `brand_gate_reason`.
+  # IDÉZŐJEL KELL: a YAML az off/on/yes/no szavakat booleanná alakítja, és akkor
+  # a string-összehasonlítás csendben mindig hamis lenne.
+  brand_positioning: 'on_request'
 linkedin_content:
   enabled: true
   posts_per_week: 2

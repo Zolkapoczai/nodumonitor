@@ -517,7 +517,23 @@ def generate_trend_analysis(config: dict, db_path: str) -> str:
         print(f"[trend-analysis] HIBA: {e}")
         return f"Hiba az elemzés során: {e}"
 
-_LINKEDIN_REPLY_SYSTEM_PROMPT = """
+# ============================================================================
+# ELAVULT (2026-07-27) — a lenti _LINKEDIN_REPLY_* prompt es sema kikerult a
+# hasznalatbol. A LinkedIn-kommenteket a Thought Leadership Engine keszíti
+# (responder/linkedin_engine.py): dontes es szovegezes kulon lepesben,
+# determinisztikus minosegkapuval.
+#
+# Miert nem toroltem ki azonnal: a regi 5-agu dontes (topic / post_type /
+# engagement_intent / reply_style / brand_mode) enumjai TOVABBRA IS elnek — az uj
+# motor ezekre kepezi le a strategiat, hogy a dashboard 8 mezos szerzodese ne
+# torjon (linkedin_engine._STRATEGY_TO_LEGACY). Az enumok forrasa itt lathato
+# egy helyen, es a docs/03-linkedin-composer-spec.md harom-agu markadontese is
+# ehhez a szoveghez tartozik — az `linkedin.brand_positioning: auto` kapcsolo
+# ezt eleszti fel.
+#
+# Ha a markadontes veglegesen kikerul, EZ A KET KONSTANS is torolheto.
+# ============================================================================
+_LEGACY_LINKEDIN_REPLY_SYSTEM_PROMPT = """
 Te a nodu.build BIM/IFC tanacsado cegcsoport LinkedIn-kozossegi jelenlete vagy.
 A nodu.build BIM/IFC tanacsadassal foglalkozik, es egyik konkret terméke a
 NODU Bridge: parametrikus adatcsere Archicad es Revit kozott (az elemek
@@ -579,7 +595,7 @@ VALASZ-STILUS (LinkedIn kommenthez, NEM forum-valaszhoz igazitva):
 - Soha ne hazudj, ne tuligerd a Bridge-et vagy a nodu.build-et
 """.strip()
 
-_LINKEDIN_REPLY_SCHEMA = {
+_LEGACY_LINKEDIN_REPLY_SCHEMA = {
     "type": "OBJECT",
     "properties": {
         "topic": {
@@ -629,57 +645,17 @@ _LINKEDIN_REPLY_SCHEMA = {
 def generate_linkedin_reply(config: dict, post_text: str, author_name: str = "",
                             author_role: str = "") -> dict | None:
     """
-    Egy beillesztett LinkedIn-poszthoz ir valaszt, egyetlen strukturalt Gemini-
-    hivassal. A modell 5 lepeses dontest hoz (topic, post_type, engagement_intent,
-    reply_style, brand_mode), majd ezek alapjan irja a valaszt. Visszaadja a
-    strukturalt eredmenyt (8 mezo), vagy None-t hiba/hianyzo kulcs eseten.
-    Nincs DB-perzisztencia — szinkron, egyszeri hasznalatra.
+    LinkedIn-komment generalasa. **Vekony delegalo** a Thought Leadership Engine
+    fele (`responder/linkedin_engine.py`).
+
+    A korabbi implementacio egyetlen prompttal kerte a dontest ES a szoveget
+    egyben, ezert a tipikus LLM-viselkedest adta: osszefoglalta a posztot,
+    egyetertett, dicsert. A dontes es a szovegezes most kulon lepes; a
+    minosegkapu determinisztikus. Reszletek: a linkedin_engine modul-docstringje.
+
+    A visszateresi formatum VALTOZATLAN a dashboard szempontjabol (ugyanaz a 8
+    mezo), plusz additiv reasoning-mezok. Ez a wrapper azert marad, mert a
+    `ui/app.py` innen importal — a hivo oldalt nem kell atirni.
     """
-    sc = config.get("scoring", {})
-    api_key = get_secret("GEMINI_API_KEY", sc.get("gemini_api_key"))
-    if not sc.get("gemini_enabled", False) or not api_key or api_key == "YOUR_GEMINI_API_KEY":
-        print("[linkedin-reply] Gemini API nincs beallitva. Kihagy.")
-        return None
-
-    post_text = (post_text or "").strip()
-    if not post_text:
-        return None
-
-    author_line = ""
-    if author_name or author_role:
-        author_line = f"Szerzo: {author_name or 'ismeretlen'}{' — ' + author_role if author_role else ''}\n"
-
-    # A rendszerprompt (magyar nyelvu) nyelvi "sodrasa" ellen kulon, a
-    # feladat-uzenetben megismetelt utasitas kell — elo tesztben (2026-07-20)
-    # a modell a system-prompt-beli szabaly ellenere is magyarra valtott
-    # angol nyelvu posztnal, amig ez a kozvetlen, ismetelt utasitas nem kerult be.
-    user_msg = (
-        f"{author_line}LinkedIn poszt:\n{post_text[:2000]}\n\n"
-        "IMPORTANT: Write reply_text in the SAME language as the LinkedIn post "
-        "above. If the post is in English, reply_text must be in English. "
-        "Do NOT translate to Hungarian unless the post itself is Hungarian."
-    )
-
-    sys_prompt = _LINKEDIN_REPLY_SYSTEM_PROMPT + _load_knowledge_base(config)
-
-    model = sc.get("gemini_model", "gemini-2.5-flash")
-    client = genai.Client(api_key=api_key)
-    try:
-        resp = client.models.generate_content(
-            model=model,
-            contents=user_msg,
-            config=types.GenerateContentConfig(
-                system_instruction=sys_prompt,
-                response_mime_type="application/json",
-                response_schema=_LINKEDIN_REPLY_SCHEMA,
-                max_output_tokens=1000,
-                thinking_config=types.ThinkingConfig(thinking_budget=0),
-            ),
-        )
-        if not resp.text:
-            print("[linkedin-reply] Ures valasz.")
-            return {"error": "A Gemini API üres választ adott."}
-        return json.loads(resp.text)
-    except Exception as e:
-        print(f"[linkedin-reply] HIBA: {e}")
-        return {"error": f"Gemini API Hiba: {e}"}
+    from responder.linkedin_engine import generate_comment
+    return generate_comment(config, post_text, author_name, author_role)

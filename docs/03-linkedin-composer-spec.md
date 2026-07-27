@@ -2,6 +2,33 @@
 
 **Dátum:** 2026-07-20 · **Előzmény:** felhasználói terv-jóváhagyás (chat), a 02-opportunities-ui-spec mintáját követi.
 
+> ## ⚠️ FELÜLÍRVA (2026-07-27) — Thought Leadership Engine
+> A v1 „egyetlen Gemini-hívás dönt és ír egyben" architektúráját felváltotta a
+> **döntés-vezérelt motor**: `responder/linkedin_engine.py`. Indok: a v1 a tipikus
+> LLM-viselkedést adta (összefoglalta a posztot, egyetértett, dicsért), mert
+> ugyanabban a hívásban kérte a gondolatmenetet és a szövegezést.
+>
+> **Ami ebből a dokumentumból ÉRVÉNYES marad:** a hatókör-fegyelem (§Hatókör),
+> a route-szerződés (§2) és az UI (§3) — mindhárom változatlan.
+>
+> **Ami MEGVÁLTOZOTT:** a §14 három-ágú márkadöntés (`bridge`/`nodu`/`none`) már
+> **nem globális beállítás, hanem a POSZT tulajdonsága.** A 2026-07-27-i
+> munkaparancs követelménye („Never mention NODU unless explicitly instructed")
+> úgy teljesül, hogy a megnevezés ahhoz kötött, hogy a poszt **kifejezetten
+> eszközt kér-e**. `linkedin.brand_positioning`:
+> - `'on_request'` (**default**) — csak igazolt eszköz-kérdésre, Bridge-relevans
+>   témában. Három kapu: `explicit_tool_request` → az idézet **ellenőrizve** a
+>   posztban (zero-hallucination) → téma ∈ {archicad, revit, interoperability, ifc}.
+> - `'off'` — soha, kifejezett kérdésre sem.
+> - `'auto'` — a lenti §14 viselkedés, a poszt kérdésétől függetlenül.
+>
+> A `brand_mode` mező megmarad az API-ban (`bridge`/`nodu`/`none`), és minden
+> válasz tartalmazza a döntés indokát (`brand_gate_reason`) — utólag is
+> megmagyarázható, miért említette vagy nem említette.
+>
+> Az architektúra leírása és a döntések indoklása a
+> `responder/linkedin_engine.py` modul-docstringjében van, a kód mellett.
+
 ## Cél
 Egy dashboard-fül, ahova egy LinkedIn-poszt szövege bemásolható, és a rendszer egyetlen Gemini-hívással eldönti, melyik válasz-mód illik rá, majd megírja a választ.
 
