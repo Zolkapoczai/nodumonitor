@@ -24,6 +24,7 @@ from storage.db import (
     init_db, get_pending_drafts, mark_draft, get_weekly_stats,
     get_adhoc_results, get_post, get_post_with_signal, get_opportunities,
     get_connector_health, count_opportunities, get_opportunity_platform_counts,
+    get_decision_log,
 )
 
 app = Flask(__name__)
@@ -55,7 +56,19 @@ def _stats(config: dict) -> dict:
     return s
 
 
-def _run_in_bg(job_id: str, fn):
+def _run_in_bg(job_id: str, fn) -> bool:
+    """
+    Hatterszal egy connector-futashoz. False, ha MAR FUT — nem indit masodikat.
+
+    Miert: a `/run/<action>` korabban minden kattintasra uj szalat inditott es a
+    `_jobs[job_id]`-t felulirta, tehat ket kattintasra ugyanaz a connector ket
+    peldanyban futott, UGYANABBAN a processzben — az APScheduler `max_instances=1`
+    vedelmen KIVUL (docs/04-rendszer-audit-2026-07-28.md §2.6/6). A Playwrightnal
+    ez ket parhuzamos Chromiumot es versenyzo DB-irast jelent.
+    """
+    if (_jobs.get(job_id) or {}).get("status") == "running":
+        return False
+
     def _worker():
         _jobs[job_id] = {"status": "running"}
         try:
@@ -64,10 +77,25 @@ def _run_in_bg(job_id: str, fn):
         except Exception as e:
             _jobs[job_id] = {"status": "error", "error": str(e)}
     threading.Thread(target=_worker, daemon=True).start()
+    return True
 
 
 def _admin_gate(config: dict):
-    """Opcionalis jelszovedelem az /admin nezetre. None ha szabad az atjaras."""
+    """
+    Opcionalis jelszovedelem. None, ha szabad az atjaras.
+
+    FONTOS: ezt MINDEN mutalo vegpont hivja (`/save`, `/run/<action>`,
+    `/draft/*/approve|reject`, `/lead/*/to-sales-os`), nem csak az `/admin` HTML-
+    nezet. Korabban egyetlen hivasi helye volt (`/admin` GET), tehat egy beallitott
+    jelszo HAMIS BIZTONSAGERZETET adott: az admin oldal kerdezett, a
+    `POST /save` (config.yaml felulirasa) es a `POST /run/playwright` nem
+    (docs/04-rendszer-audit-2026-07-28.md §2.7). A reszleges kapu rosszabb, mint a
+    nyilvanvaloan nyitott.
+
+    A `ui.admin_password` ma URES, tehat a kapu nem zar — a szerver 127.0.0.1-re
+    kot (server.py). Ha a HOST kifele nyilik, a jelszo beallitasa mostantol
+    tenylegesen VEDI az irasi utakat is.
+    """
     pw = (config.get("ui", {}) or {}).get("admin_password", "") or ""
     if not pw:
         return None
@@ -121,7 +149,14 @@ def admin():
         return gate
     db_path = get_db_path(config)
     init_db(db_path)
+    # A Slack-csatorna allapota: az URL a .env-ben van, tehat a sablon a
+    # config.yaml-bol NEM tudja megallapitani, hogy el-e a csatorna.
+    from alerts.notifier import slack_status, slack_webhook_url
+    slack_ready, slack_reason = slack_status(config.get("alerts", {}))
+    slack_url = slack_webhook_url(config.get("alerts", {}))
     return render_template("admin.html", config=config,
+                           slack_ready=slack_ready, slack_reason=slack_reason,
+                           slack_url_masked=(slack_url[:30] + "..." if slack_url else ""),
                            stats=_stats(config), active_view="admin")
 
 
@@ -130,6 +165,9 @@ def admin():
 @app.route("/save", methods=["POST"])
 def save():
     config = load_config()
+    gate = _admin_gate(config)   # §2.7: az irasi ut is vedve
+    if gate:
+        return gate
     f = request.form
 
     config["reddit"]["client_id"] = f.get("reddit_client_id", "").strip() or "YOUR_REDDIT_CLIENT_ID"
@@ -152,8 +190,10 @@ def save():
     config["alerts"]["email"]["app_password"] = pw if pw else "YOUR_APP_PASSWORD"
 
     config["alerts"]["slack"]["enabled"] = "slack_enabled" in f
-    wh = f.get("slack_webhook", "").strip()
-    config["alerts"]["slack"]["webhook_url"] = wh if wh else "YOUR_SLACK_WEBHOOK_URL"
+    # A Slack webhook-URL-t SZANDEKOSAN nem irjuk vissza a config.yaml-be (ld. a
+    # Gemini-kulcsnal fentebb): az URL onmagaban titok, a config.yaml pedig
+    # git-tracked. A .env `SLACK_WEBHOOK_URL` sora a forras, env_secrets olvassa.
+    # Az admin urlapon a mezo csak allapotot jelez, nem szerkesztheto.
 
     # Kulcsszavak (admin Kulcsszavak szekcio) — soronkent egy kifejezes
     if "kw_primary" in f:
@@ -181,6 +221,9 @@ def save():
 @app.route("/run/<action>", methods=["POST"])
 def run_action(action):
     config = load_config()
+    gate = _admin_gate(config)   # §2.7: connector-inditas is vedve
+    if gate:
+        return gate
     db_path = get_db_path(config)
 
     if action == "reddit":
@@ -261,9 +304,15 @@ def run_action(action):
             return f"{kb_size // 1024} KB frissítve"
         _run_in_bg("build-knowledge", _build_kb)
 
+    # Ha ugyanaz a job mar fut, a _run_in_bg NEM inditott masodikat (§2.7):
+    # adjunk erre egyertelmu valaszt 409-cel, ne "ok"-ot.
+    already_running = (_jobs.get(action) or {}).get("status") == "running"
     if request.args.get("ajax") == "1" or request.is_json:
+        if already_running:
+            return jsonify({"ok": False, "action": action,
+                            "error": "Ez a futas mar folyamatban van."}), 409
         return jsonify({"ok": True, "action": action})
-    return redirect(url_for("admin") + "?started=1")
+    return redirect(url_for("admin") + ("?running=1" if already_running else "?started=1"))
 
 
 # --- Ad-hoc keresés (dashboard) ---
@@ -271,6 +320,9 @@ def run_action(action):
 @app.route("/search/adhoc", methods=["POST"])
 def search_adhoc():
     config = load_config()
+    gate = _admin_gate(config)   # §2.7: kulso API-t hiv
+    if gate:
+        return gate
     db_path = get_db_path(config)
     data = request.get_json(silent=True) or {}
     query = (data.get("query") or "").strip()
@@ -331,6 +383,9 @@ def api_posts():
 @app.route("/linkedin/compose", methods=["POST"])
 def linkedin_compose():
     config = load_config()
+    gate = _admin_gate(config)   # §2.7: fizetos LLM-hivast indit
+    if gate:
+        return gate
     data = request.get_json(silent=True) or {}
     post_text = (data.get("post_text") or "").strip()
     if not post_text:
@@ -354,6 +409,9 @@ def linkedin_compose():
 @app.route("/lead/<int:post_id>/draft", methods=["POST"])
 def lead_draft(post_id):
     config = load_config()
+    gate = _admin_gate(config)   # §2.7: fizetos LLM-hivast indit
+    if gate:
+        return gate
     db_path = get_db_path(config)
     from responder.draft_generator import generate_draft_for_post, is_platform_excluded
 
@@ -395,6 +453,9 @@ def lead_to_sales_os(post_id):
     ez a tervezett emberi kapu, nem hianyossag.
     """
     config = load_config()
+    gate = _admin_gate(config)   # §2.7: kulso rendszerbe (SalesOS) ir
+    if gate:
+        return gate
     db_path = get_db_path(config)
     post = get_post_with_signal(db_path, post_id) or get_post(db_path, post_id)
     if not post:
@@ -428,18 +489,68 @@ def lead_to_sales_os(post_id):
 
 # --- Draft jóváhagyás (dashboard) ---
 
+def _decider() -> tuple[str, str]:
+    """
+    Ki hozza a dontest, es mennyire hiheto ez a nev.
+
+    Ma NINCS felhasznalo-azonositas a dashboardon (a `ui.admin_password` egyetlen
+    kozos jelszo, a basic-auth username-t senki nem ellenorzi), ezert a nev
+    ONBEVALLAS — a source ezt `'form'`-kent jeloli, nem `'auth'`-kent. Ez tudatos:
+    a naplo ne alliton tobbet, mint amit tud. Sorrend:
+      1. urlap/JSON `decided_by` mezo (a dashboard ezt kuldi)
+      2. HTTP basic-auth username (ha be van kapcsolva a jelszo)
+      3. `ui.default_decider` a config.yaml-bol (egyszemelyes uzem)
+    Ha egyik sincs, ures nev megy vissza -> a mark_draft nem ir naplot.
+    """
+    name = (request.form.get("decided_by") or "").strip()
+    if not name and request.is_json:
+        name = str((request.get_json(silent=True) or {}).get("decided_by") or "").strip()
+    if not name and request.authorization and request.authorization.username:
+        name = request.authorization.username.strip()
+    if not name:
+        name = str((load_config().get("ui", {}) or {}).get("default_decider", "") or "").strip()
+    return name, "form"
+
+
 @app.route("/draft/<int:draft_id>/approve", methods=["POST"])
 def approve_draft(draft_id):
     config = load_config()
-    mark_draft(get_db_path(config), draft_id, "approved")
-    return jsonify({"ok": True})
+    gate = _admin_gate(config)   # §2.7: jovahagyas = naplozott dontes
+    if gate:
+        return gate
+    who, src = _decider()
+    mark_draft(get_db_path(config), draft_id, "approved",
+               decided_by=who, decided_by_source=src)
+    return jsonify({"ok": True, "decided_by": who or None})
 
 
 @app.route("/draft/<int:draft_id>/reject", methods=["POST"])
 def reject_draft(draft_id):
     config = load_config()
-    mark_draft(get_db_path(config), draft_id, "rejected", "webes felületen visszautasítva")
-    return jsonify({"ok": True})
+    gate = _admin_gate(config)   # §2.7
+    if gate:
+        return gate
+    who, src = _decider()
+    mark_draft(get_db_path(config), draft_id, "rejected", "webes felületen visszautasítva",
+               decided_by=who, decided_by_source=src)
+    return jsonify({"ok": True, "decided_by": who or None})
+
+
+@app.route("/api/decisions")
+def api_decisions():
+    """
+    Draft-dontesek naploja: ki hagyta jova / vetette el, es mikor.
+
+    A `source` mezo a naplo sulya: 'cli' = a gepen bejelentkezett OS-felhasznalo,
+    'form' = a webes felhasznalo onbevallasa (ma nincs auth, ld. _decider).
+    """
+    config = load_config()
+    try:
+        limit = max(1, min(int(request.args.get("limit", 50)), 500))
+    except ValueError:
+        limit = 50
+    rows = get_decision_log(get_db_path(config), limit=limit)
+    return jsonify({"decisions": rows, "count": len(rows)})
 
 
 @app.route("/health")
@@ -459,16 +570,24 @@ def health():
     ignore = set(hc.get("ignore", ["classifier"]))
 
     try:
+        # Az utemezett connectorok listaja ugyanabbol a tablabol, amibol a
+        # register_jobs dolgozik — igy a HIANYZO futas is 503-at ad, nem csak a
+        # hibas (docs/04-rendszer-audit-2026-07-28.md §2.2).
+        from main import connector_schedule
+        expected = {e["name"]: e["interval"] for e in connector_schedule(config)
+                    if e.get("expect_runs", True)}
         report = get_connector_health(
             db_path,
             window=hc.get("window", 5),
             active_within_hours=hc.get("active_within_hours", 24),
+            expected=expected,
+            stale_factor=hc.get("stale_factor", 3.0),
         )
     except Exception as e:
         return jsonify({"status": "error", "error": f"DB nem olvashato: {e}"}), 503
 
     problems = [r for r in report
-                if r["status"] in ("error", "blind") and r["connector"] not in ignore]
+                if r["status"] in ("error", "blind", "stale") and r["connector"] not in ignore]
     body = {
         "status": "degraded" if problems else "ok",
         "checked_at": datetime.now(tz=timezone.utc).isoformat(),

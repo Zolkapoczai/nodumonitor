@@ -14,6 +14,7 @@ nyers fajl-kopia WAL-modban toredezett/serult snapshotot adhat.
 import glob
 import os
 import sqlite3
+import sys
 from datetime import datetime, timezone
 
 DEFAULT_KEEP = 7
@@ -41,6 +42,43 @@ def prune_backups(backup_dir: str, base_name: str, keep: int = DEFAULT_KEEP) -> 
         except OSError as e:
             print(f"[backup] Nem sikerult torolni: {old} — {e}")
     return removed
+
+
+def verify_snapshot(path: str, min_posts: int = 1) -> bool:
+    """
+    Egy snapshot ELLENORZESE: `PRAGMA integrity_check` + a fo tablak olvashatosaga.
+
+    Miert kell: 2026-07-28-ig SEMMI nem ellenorizte a mentest, es visszaallitast
+    sem probalt soha senki — a mentes csak akkor mentes, ha visszaolvashato. Az
+    ellenorzes READ-ONLY modban (`mode=ro`) fut, tehat a snapshotot nem modositja
+    (docs/04-rendszer-audit-2026-07-28.md §5/#12).
+
+    A `min_posts` az ures/csonka snapshot ellen ved: egy 0 posztos mentes technikailag
+    ep lehet, de nem az, amit menteni akartunk.
+    """
+    try:
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    except sqlite3.Error as e:
+        print(f"[backup] A snapshot nem nyithato meg: {e}")
+        return False
+    try:
+        status = conn.execute("PRAGMA integrity_check").fetchone()[0]
+        if status != "ok":
+            print(f"[backup] INTEGRITAS-HIBA a snapshotban: {status}")
+            return False
+        counts = {}
+        for table in ("posts", "signals", "drafts", "runs"):
+            counts[table] = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+        if counts["posts"] < min_posts:
+            print(f"[backup] A snapshot GYANUSAN URES: {counts}")
+            return False
+        print(f"[backup] Snapshot ellenorizve: integrity_check=ok, {counts}")
+        return True
+    except sqlite3.Error as e:
+        print(f"[backup] A snapshot nem olvashato vissza: {e}")
+        return False
+    finally:
+        conn.close()
 
 
 def backup_db(db_path: str, keep: int = DEFAULT_KEEP) -> str | None:
@@ -74,6 +112,12 @@ def backup_db(db_path: str, keep: int = DEFAULT_KEEP) -> str | None:
         return None
     finally:
         conn.close()
+
+    if not verify_snapshot(target):
+        # A rotacio ELOTT allunk meg: egy serult snapshot ne szoritson ki egy jot.
+        print(f"[backup] A snapshot NEM ellenorizheto — a rotacio kihagyva: {target}",
+              file=sys.stderr)
+        return None
 
     removed = prune_backups(out_dir, base_name, keep=keep)
     if removed:

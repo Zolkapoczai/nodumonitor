@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 
 from env_secrets import get_secret
 from storage.db import (
-    save_draft, get_pending_drafts, mark_draft, mark_alerted,
+    save_draft, get_pending_drafts, mark_draft,
     get_post_with_signal, get_pain_posts_without_draft,
     get_recent_pain_signals,
 )
@@ -116,17 +116,40 @@ def _append_cta(draft_text: str, config: dict, source: str) -> str:
     return f"{draft_text}\n\nKorai hozzaferes: {link}"
 
 
-def _load_knowledge_base(config: dict) -> str:
-    """Opcionális NODU tudásbázis beolvasása, ami a _build_system_prompt végére kerül."""
+def _load_knowledge_base(config: dict, max_chars: int = None) -> str:
+    """
+    Opcionalis NODU tudasbazis beolvasasa promptba, LEVAGVA.
+
+    MIERT VAN MAX_CHARS: a fajl 2026-07-28-i merese **280 403 bajt (~70k token)**,
+    es korabban TELJESEN bekerult minden forum-draft es heti riport promptjaba. Ket
+    baj volt vele, es a masodik a sulyosabb:
+      1. koltseg/latencia — 260 126 karakteres prompt egy 70-80 szavas valaszhoz,
+         aminek 99,1%-a a tudasbazis volt;
+      2. TARTALOM — a fajl 22 belso dokumentumbol all (sprint-tervek, licenc-
+         kalkulator, vezetoi osszefoglalo, piac-elemzes), es ezt kapta a modell,
+         amikor NYILVANOS forumkommentet irt. A linkedin_engine ezt mar korabban
+         kivezette (HANDOFF §7/O), a forum-draft utrol viszont bent maradt.
+    Ld. docs/04-rendszer-audit-2026-07-28.md §2.4.
+
+    A forum-draft ut MOST EGYALTALAN NEM hasznalja (a _SYSTEM_PROMPT tartalmazza a
+    szukseges ertekajanlatot). A heti tartalom-/trend-generalasnal a termek-kontextus
+    indokolt, de nem a teljes mennyisegben: ott `knowledge_base.prompt_max_chars`
+    (default 8000) a keret.
+    """
     kb_path = config.get("knowledge_base", {}).get("output_file", "storage/nodu_knowledge_base.md")
     import os
-    if os.path.exists(kb_path):
-        try:
-            with open(kb_path, "r", encoding="utf-8") as f:
-                return f"\n\n--- NODU TECHNICAL & PRODUCT CONTEXT ---\n{f.read()}\n"
-        except Exception as e:
-            print(f"[responder] Tudásbázis beolvasási hiba: {e}")
-    return ""
+    if not os.path.exists(kb_path):
+        return ""
+    limit = max_chars or config.get("knowledge_base", {}).get("prompt_max_chars", 8000)
+    try:
+        with open(kb_path, "r", encoding="utf-8") as f:
+            text = f.read()
+    except Exception as e:
+        print(f"[responder] Tudásbázis beolvasási hiba: {e}")
+        return ""
+    if len(text) > limit:
+        text = text[:limit].rstrip() + "\n[... a tudasbazis tovabbi resze levagva ...]"
+    return f"\n\n--- NODU TECHNICAL & PRODUCT CONTEXT ---\n{text}\n"
 
 
 def _build_system_prompt(config: dict) -> str:
@@ -141,9 +164,11 @@ def _build_system_prompt(config: dict) -> str:
             "hozzaadodik, ha a Bridge-et emlited. Ha a problema nem illik a termekhez, "
             "egyaltalan ne emlitsd. Soha ne legyen tolakodo."
         )
-    
-    # Tudásbázis hozzáfűzése
-    base += _load_knowledge_base(config)
+    # A TUDASBAZIS SZANDEKOSAN NEM KERUL IDE. Egy 70-80 szavas fórum-válaszhoz a
+    # _SYSTEM_PROMPT ertekajanlata elegendo; a 274 KB-os belso anyag (sprint-tervek,
+    # licenc-kalkulator) egy NYILVANOS komment irasakor koltseg es kockazat is
+    # (docs/04-rendszer-audit-2026-07-28.md §2.4). Ha ide visszateszed, olvasd el
+    # eloszor a _load_knowledge_base docstringjet.
     return base
 
 
@@ -209,7 +234,13 @@ def generate_draft_for_post(config: dict, db_path: str, post_id: int):
                 # kenyszerit. A linket NEM a modell irja, hanem a kod fuzi
                 # hozza (_append_cta) — igy a link sosem csonkul, es a szoros
                 # prozai limit tarthato (2026-07-21 architektura-valtas).
-                max_output_tokens=200,
+                # 320, nem 200: a meglevo 23 draft merese szerint a leghosszabb
+                # 644 karakter (~160-184 token) = a regi keret 92%-a, tehat egy
+                # ugyanolyan szohosszu magyar/nemet valasz mar CSONKOLT volna
+                # (§4/3 esete). A fel nem hasznalt keret nem kerul semmibe: a
+                # szamlazas a tenyleges output-tokenre megy
+                # (docs/04-rendszer-audit-2026-07-28.md §5/#11).
+                max_output_tokens=320,
                 # thinking_budget=0: a gemini-2.5-flash kulonben a keret nagy
                 # reszet "gondolkodasra" kolti, es a valasz csonka lesz
                 # (2026-07-20-i eles hiba). A classifier ugyanezt igenyelte.
@@ -223,7 +254,13 @@ def generate_draft_for_post(config: dict, db_path: str, post_id: int):
 
     draft_text = _append_cta(draft_text, config, post.get("platform") or "nodu")
     draft_id = save_draft(db_path, post["id"], draft_text)
-    mark_alerted(db_path, [post["id"]])
+    # NINCS mark_alerted: a draft elkeszitese NEM riasztas. Korabban ez a sor
+    # 'alerted'-re allitotta a posztot, tehat a 07:30-as draft-job elvette a
+    # jeleket a 08:00-as digest elol — a talalat sosem ert el senkihez, es a
+    # `draft_ready` statusz de facto nem letezett (1692 posztbol 0 volt benne).
+    # Ez a §3.6-os hibaosztaly (kikuldes nelkuli "elfogyasztas"), amit a
+    # digestben mar javitottunk; itt visszaepult
+    # (docs/04-rendszer-audit-2026-07-28.md §2.1).
     return draft_id
 
 
@@ -244,8 +281,13 @@ def generate_drafts(config: dict, db_path: str, batch_size: int = 10) -> int:
 
     # Signal-vezerelt szelekcio: a Pain Classifier valodi fajdalom-jeleire
     # generalunk valaszt (nem a nyers kulcsszo-score-ra), amelyekhez meg
-    # nincs draft. Kuszob: classifier.draft_min_severity (default 3).
-    min_sev = config.get("classifier", {}).get("draft_min_severity", 3)
+    # nincs draft. Kuszob: classifier.draft_min_severity, ami HA NINCS MEGADVA, az
+    # alerts.digest_min_severity-t koveti — igy a ket kuszob nem csuszhat szet
+    # veletlenul, de KULON allithato, mert ket kulon dontes: mire generaljunk
+    # valasz-javaslatot vs. mirol ertesitsunk. (Az audit joggal jelezte, hogy
+    # ugyanaz a szam ket helyen szag; a 3-as egyezes eddig veletlen volt.)
+    min_sev = (config.get("classifier", {}).get("draft_min_severity")
+               or config.get("alerts", {}).get("digest_min_severity", 3))
     excluded = config.get("responder", {}).get("exclude_platforms", []) or []
     posts = get_pain_posts_without_draft(db_path, min_severity=min_sev, limit=batch_size,
                                          exclude_platforms=excluded)
@@ -272,14 +314,21 @@ def generate_drafts(config: dict, db_path: str, batch_size: int = 10) -> int:
                 contents=user_msg,
                 config=types.GenerateContentConfig(
                     system_instruction=system_prompt,
-                    max_output_tokens=200,
+                    # 320, nem 200: a meglevo 23 draft merese szerint a leghosszabb
+                # 644 karakter (~160-184 token) = a regi keret 92%-a, tehat egy
+                # ugyanolyan szohosszu magyar/nemet valasz mar CSONKOLT volna
+                # (§4/3 esete). A fel nem hasznalt keret nem kerul semmibe: a
+                # szamlazas a tenyleges output-tokenre megy
+                # (docs/04-rendszer-audit-2026-07-28.md §5/#11).
+                max_output_tokens=320,
                     thinking_config=types.ThinkingConfig(thinking_budget=0),
                 ),
             )
             draft_text = (resp.text or "").strip()
             draft_text = _append_cta(draft_text, config, post.get("platform") or "nodu")
             save_draft(db_path, post["id"], draft_text)
-            mark_alerted(db_path, [post["id"]])
+            # NINCS mark_alerted — ld. a generate_draft_for_post-nal az indoklast
+            # (a draft nem riasztas; ez vette el a jeleket a digest elol).
             generated += 1
             print(f"  [draft] '{post['title'][:60]}' -> draft mentve")
         except Exception as e:
@@ -298,7 +347,20 @@ def review_drafts(db_path: str) -> None:
         print("Nincs feldolgozásra váró draft.")
         return
 
-    print(f"\n{len(drafts)} draft vár jóváhagyásra.\n")
+    # A dontes naplozasahoz (drafts.decided_by): a CLI-ban az OS-felhasznalo a
+    # legjobb rendelkezesre allo azonosito — nem hitelesites, de a gepen
+    # bejelentkezett szemely, ezert sajat source-t kap ('cli'), nem 'form'-ot.
+    import getpass
+    try:
+        decider = getpass.getuser()
+    except Exception:
+        decider = ""
+
+    print(f"\n{len(drafts)} draft vár jóváhagyásra.")
+    if decider:
+        print(f"A döntéseket ezen a néven naplózom: {decider} (cli)\n")
+    else:
+        print()
 
     for i, d in enumerate(drafts, 1):
         print("=" * 70)
@@ -315,7 +377,8 @@ def review_drafts(db_path: str) -> None:
         while True:
             choice = input("[a]ccept  [s]kip  [d]elete  [q]uit > ").strip().lower()
             if choice in ("a", "accept"):
-                mark_draft(db_path, d["draft_id"], "approved")
+                mark_draft(db_path, d["draft_id"], "approved",
+                           decided_by=decider, decided_by_source="cli")
                 print("Jóváhagyva. Másold ki a szoveget és postold kézzel.")
                 print("\n--- MASOLAS ---")
                 print(d["draft_text"])
@@ -325,7 +388,8 @@ def review_drafts(db_path: str) -> None:
                 print("Kihagyva (marad 'pending').")
                 break
             elif choice in ("d", "delete"):
-                mark_draft(db_path, d["draft_id"], "rejected", "manuálisan visszautasítva")
+                mark_draft(db_path, d["draft_id"], "rejected", "manuálisan visszautasítva",
+                           decided_by=decider, decided_by_source="cli")
                 print("Törölve.")
                 break
             elif choice in ("q", "quit"):

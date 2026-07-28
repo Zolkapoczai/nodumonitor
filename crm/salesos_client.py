@@ -36,23 +36,43 @@ class SalesOSError(Exception):
     """Uzleti hiba (422/401/…) — a hivo ezt jeleniti meg a felhasznalonak."""
 
 
-def severity_to_score(severity: int | None) -> int:
+def severity_to_score(severity: int | None, buying_intent: bool = None,
+                      solved_internally: bool = None) -> int:
     """
-    Monitor severity (1-5) -> SalesOS score (0-10).
+    Monitor-jel -> SalesOS score (0-10).
 
-    A 01-es audit §6 a jovobeli `score_total` (0-100) / 10 lekepezest irja elo; a
-    verziozott scoring-motor viszont a 2. fazis, ma csak a classifier severitye
-    van. A x2 lekepezes a SalesOS kuszobeire ul ra ertelmesen:
-        severity 5 -> 10  (Qualified)
-        severity 4 ->  8  (Qualified, >= 7)
-        severity 3 ->  6  (Lead, 5-6)
-        severity 2 ->  4  (nincs Deal, csak jelzes-naplo)
-        severity 1 ->  2  (nincs Deal)
-    Amikor a scoring-motor elkeszul, ez a fuggveny cserelheto — egy helyen van.
+    MIERT NEM CSAK severity x 2: mert az a lekepezes 2026-07-28-ig **ket erteket
+    tudott eloallitani**. Meres: a fajdalom-jelek 99,6%-a severity 3 vagy 4, tehat
+    a score kizarolag 6 vagy 8 lett — a 0-10-es sav 8 erteke sosem fordult elo, es
+    a stage-lekepezes (>=7 Qualified, 5-6 Lead) egy bináris ermefeldobasra
+    redukalodott (docs/04-rendszer-audit-2026-07-28.md §3.3).
+
+    A `buying_intent` viszont VALODI variancia: a jelek ~9%-a jeloli, es pont azt
+    jelenti, amit egy sales-score-nak jelezni kell — a szerzo AKTIVAN keres
+    megoldast. Ezert:
+
+        alap = severity x 2                      (2, 4, 6, 8, 10)
+        + 1   ha buying_intent                   (aktiv megoldas-kereses)
+        - 1   ha solved_internally               (mar van sajat workaroundja)
+        vegul 0-10 kozott vagva
+
+    Igy a mai jelkeszlet a 5..9 savot hasznalja, es a Qualified-kuszob (>=7) valodi
+    dontest jelent: sev4 + intent = 9 (Qualified), sev4 intent nelkul = 8 — de sev3
+    + intent = 7 (Qualified), sev3 intent nelkul = 6 (Lead). A `solved_internally`
+    levonas azert van, mert aki mar megoldotta belso scripttel, kevesbe surgos lead.
+
+    A parameterek OPCIONALISAK: hivas nelkul a regi viselkedes marad (severity x 2),
+    igy a fuggveny visszafele kompatibilis. Amikor a verziozott scoring-motor
+    elkeszul (2. fazis), ez a fuggveny cserelheto — egy helyen van.
     """
     if not severity:
         return 0
-    return max(0, min(10, int(severity) * 2))
+    score = int(severity) * 2
+    if buying_intent:
+        score += 1
+    if solved_internally:
+        score -= 1
+    return max(0, min(10, score))
 
 
 def build_payload(post: dict, company: dict, summary: str = "",
@@ -65,7 +85,16 @@ def build_payload(post: dict, company: dict, summary: str = "",
         "externalId": f"nodu-monitor-post-{post['id']}",
         "channel": "scraper",
         "sourceUrl": post.get("url", ""),
-        "score": severity_to_score(post.get("sig_severity") or post.get("severity")),
+        # A score-ba a buying_intent es a solved_internally is beszamit — enelkul a
+        # 0-10-es savbol csak 6 es 8 fordult elo (§3.3). A `get_post_with_signal`
+        # `sig_`-prefixszel adja a signal-mezoket, a `get_opportunities` prefix nelkul.
+        "score": severity_to_score(
+            post.get("sig_severity") or post.get("severity"),
+            buying_intent=post.get("sig_buying_intent") if post.get("sig_buying_intent") is not None
+            else post.get("buying_intent"),
+            solved_internally=post.get("sig_solved_internally")
+            if post.get("sig_solved_internally") is not None else post.get("solved_internally"),
+        ),
         "summary": summary or _default_summary(post),
         "occurredAt": post.get("created_at") or None,
     }

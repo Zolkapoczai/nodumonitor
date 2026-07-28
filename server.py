@@ -16,6 +16,7 @@ futtatva sem veszik el semmi.
 import atexit
 import logging
 import os
+import re
 import sys
 from logging.handlers import RotatingFileHandler
 
@@ -41,20 +42,71 @@ class _StreamToLogger:
         pass
 
 
+class _SecretRedactingFilter(logging.Filter):
+    """
+    Titok-maszkolas MINDEN naplosorban, mielott fajlba/konzolra kerul.
+
+    Miert kell: a `logs/monitor.log`-ban 2026-07-28-an **60 db** eles formatumu
+    Google API-kulcs volt plain textben (`...customsearch/v1?key=AIzaSy...`), mert
+    a `requests` HTTPError a TELJES URL-t naplozza. A kulcs a mar kivezetett CSE-hez
+    tartozott, es a `logs/` git-ignoralt — de barmely log-masolat, screenshot vagy
+    hibajelentes viszi magaval (docs/04-rendszer-audit-2026-07-28.md §2.6).
+
+    A szuro a MINTAT maszkolja, nem konkret erteket: igy egy jovoben bekerulo uj
+    kulcs is le van fedve. A meglevo sorokat NEM javitja (azt a kulcs visszavonasa
+    zarja le).
+    """
+
+    _PATTERNS = [
+        re.compile(r"AIza[0-9A-Za-z_\-]{20,}"),                      # Google API-kulcs
+        re.compile(r"(hooks\.slack\.com/services/)[^\s\"']+"),       # Slack webhook
+        re.compile(r"((?:api[_-]?)?key=)[^\s&\"']+", re.IGNORECASE),  # ?key=... / api_key=...
+        re.compile(r"(Bearer\s+)[A-Za-z0-9._\-]{12,}"),              # Bearer token
+        re.compile(r"(BSA[A-Za-z0-9_\-]{20,})"),                     # Brave Search kulcs
+    ]
+
+    @classmethod
+    def redact(cls, text: str) -> str:
+        for pat in cls._PATTERNS:
+            if pat.groups:
+                text = pat.sub(lambda m: m.group(1) + "***REDACTED***", text)
+            else:
+                text = pat.sub("***REDACTED***", text)
+        return text
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            if isinstance(record.msg, str):
+                record.msg = self.redact(record.msg)
+            if record.args:
+                if isinstance(record.args, dict):
+                    record.args = {k: self.redact(v) if isinstance(v, str) else v
+                                   for k, v in record.args.items()}
+                else:
+                    record.args = tuple(self.redact(a) if isinstance(a, str) else a
+                                        for a in record.args)
+        except Exception:
+            pass   # a naplozas soha ne dontse el a futast
+        return True
+
+
 def setup_logging() -> None:
     os.makedirs(LOG_DIR, exist_ok=True)
     fmt = logging.Formatter("%(asctime)s %(levelname)-7s [%(name)s] %(message)s")
+    redactor = _SecretRedactingFilter()
 
     file_handler = RotatingFileHandler(
         os.path.join(LOG_DIR, "monitor.log"),
         maxBytes=2_000_000, backupCount=5, encoding="utf-8",
     )
     file_handler.setFormatter(fmt)
+    file_handler.addFilter(redactor)
 
     # A konzol-handler az eredeti stderr-re ír, mert a sys.stdout/stderr
     # lentebb átirányításra kerül a loggerbe (különben végtelen kör lenne).
     console = logging.StreamHandler(sys.__stderr__)
     console.setFormatter(fmt)
+    console.addFilter(redactor)
 
     root = logging.getLogger()
     root.setLevel(logging.INFO)

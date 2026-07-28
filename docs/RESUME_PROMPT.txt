@@ -10,34 +10,86 @@ Ha "0 aktív connector"-t ír, az NEM hiba: azt jelenti, hogy 24 órán belül e
 sem futott, azaz a szerver áll. A szervert MINDIG absolute interpreter-úttal indítsd
 (HANDOFF §4/6), különben a Playwright csendben meghal.
 
-KÖVETKEZŐ FELADAT (HANDOFF §7/C): Slack-webhook bekötése.
-Ez az EGYETLEN dolog, ami miatt a kész riasztási lánc még nem ér el senkit: sem a napi
-digest, sem a connector-heartbeat nem megy ki sehova. A fájdalom-jelek 'new' státuszban
-gyűlnek, mert nincs hova kiküldeni. Felhasználói lépés kell hozzá: Zoltánnak létre kell
-hoznia egy Slack Incoming Webhook URL-t — KÉRDEZD MEG TŐLE, ne próbáld magad megoldani.
-Az URL a .env-be megy (nem a config.yaml-be, HANDOFF §5), utána az alerts.slack szekció
-élesedik. Az alerts/notifier.py már kész, csak csatorna kell.
+A SLACK MÁR ÉL (§7/C ✅, 2026-07-27) — ne kezdd újra. Ellenőrzés egy paranccsal:
+`python main.py --test-slack` (HTTP 200 = a lánc rendben). Az URL a .env-ben van
+(SLACK_WEBHOOK_URL), egy csatorna kap mindent (digest + heartbeat + heti riport).
+
+A 90 felgyűlt jel MÁR KIMENT (§7/Q): a digest mostantól minden jelet kiküld, több
+üzenetre lapozva (posts_per_message: 20; a Block Kit 50 blokk/üzenet és 3000
+karakter/section korlátja miatt), 1,2 s szünettel. Részleges hiba esetén NEM
+állít 'alerted'-re semmit — inkább ismétlés, mint jelvesztés.
 
 2026-07-27-én ELKÉSZÜLT (mind élesben verifikálva, ne kezdd újra):
-- §7/N: "Lehetőségek" fül csatorna-szűrője + valódi totálok. A route limit=100-cal kérte
-  a 305 lehetőséget, és a badge a lista hosszát írta ki totálként — javítva
-  (count_opportunities + get_opportunity_platform_counts a közös _opportunity_where-re).
+- §7/C: a Slack-lánc kódja. `alerts.slack.enabled: true`, a webhook-URL a .env-ből
+  oldódik fel (alerts/notifier.slack_webhook_url), URL nélkül minden Slack-út
+  csendben kihagyja magát ÉS a digest nem állítja 'alerted'-re a posztokat
+  (send_slack mostantól bool-t ad vissza). Új: `--test-slack`, admin-kártya
+  állapotjelző, test_slack_alerts.py (24 teszt).
+- §7/N: "Lehetőségek" fül csatorna-szűrője + valódi totálok.
 - §7/O: a LinkedIn kommentgenerálás újratervezve Thought Leadership Engine-né
   (responder/linkedin_engine.py). REASON -> COMPOSE -> determinisztikus kapu.
-  A draft_generator.generate_linkedin_reply már csak vékony delegáló.
-- §7/P: a márkaemlítés a POSZT tulajdonsága (explicit_tool_request + ellenőrzött idézet
-  + téma-relevancia), nem globális beállítás. config: linkedin.brand_positioning.
+- §7/P: a márkaemlítés a POSZT tulajdonsága (explicit_tool_request + ellenőrzött
+  idézet + téma-relevancia), nem globális beállítás.
 
-HÁROM ÚJ LECKE, amit érdemes átvinni más feladatra is:
+NÉGY LECKE, amit érdemes átvinni más feladatra is:
 - §4/16: az LLM enum-választása POZÍCIÓ szerint torzít. Ha döntés kell, pontoztasd
   minden opciót 0-10-re, és a győztest a kód vegye ki. Az LLM a szenzor, ne a bíró.
 - §4/17: a YAML az off/on/yes/no szavakat booleanná alakítja. Idézőjel + normalizálás.
 - §4/18: ha a modell "bizonyítékot" ad (idézet, hivatkozás), ellenőrizd kódban, hogy
   tényleg ott van-e a forrásban. Enélkül a mező hallucinációra hívás.
+- §4/19: az admin "Mentés" gombja LETÖRLI a config.yaml kommentjeit (yaml.dump).
+  A config.yaml-ben működési szabályok élnek kommentként — kézzel szerkeszd,
+  admin-mentés után nézd meg a diffet.
+- §4/20: a .env-ben csak `KULCS=ertek` forma működik. A webhook-URL először
+  `SLACK WEBHOOK: https://...` formában került be — a titok fizikailag ott volt,
+  a rendszer mégis "nincs beállítva"-t mutatott. Az env_secrets most már kiírja
+  az ilyen sorokat. Új titok bevezetésénél legyen hozzá "küldj egy tesztet" út.
 
-A LinkedIn-motor kapu-paraméterei (MAX_NGRAM_OVERLAP=0.22, 60-175 szó, _STRATEGY_BIAS)
-az ELSŐ hangolás értékei, 5 poszton mérve. 20-30 valódi komment után érdemes finomítani —
-a quality_issues és a rewrites mező minden válaszban ott van, tehát mérhető, mi bukik el.
+A DRAFT-DÖNTÉSEK NAPLÓZVA (§7/S, 2026-07-27): drafts.decided_by / decided_at /
+decided_by_source. A source a napló SÚLYA: 'form' = önbevallás (ma nincs auth),
+'cli' = OS-felhasználó, 'auth' = a jövendő hitelesített út. Ha auth-ot építesz,
+az írja a 'auth' értéket — NE írd át visszamenőleg a régi 'form' sorokat.
+Olvasás: GET /api/decisions?limit=N. A név a kért `approved_by` helyett
+`decided_by`, mert az elutasítást ugyanaz az út kezeli.
+
+2026-07-28: RENDSZER-AUDIT (docs/04-rendszer-audit-2026-07-28.md, megismételhető:
+/nodu-audit). A két P0 (§7/T) és a hét P1 (§7/U) MIND JAVÍTVA — a régi arányokra
+ne hivatkozz, a Khoros-duplikáció miatt minden korábbi szám 39,7x zajt tartalmazott.
+Tesztek: test_p1_fixes.py (38), test_dedup_and_digest.py (20), test_draft_decisions.py
+(30), test_slack_alerts.py (37), test_db.py. Mind zöld, futtasd le változtatás után.
+
+EGY FELHASZNÁLÓI LÉPÉS VÁR: a logs/monitor.log-ban 60 db régi Google CSE API-kulcs
+van plain textben. Az új sorokat a naplószűrő maszkolja, a meglévőket nem — a kulcsot
+a GCP-n vissza kell vonni. Kérdezd meg Zoltánt, ha még nem történt meg.
+
+A P2-ES TÉTELEK IS KÉSZ (§7/V). AMIT EBBŐL TUDNI KELL, MERT DÖNTÉST BEFOLYÁSOL:
+   - A severity NEM prioritási kapcsoló. A v4-es prompt-kalibrálás után a páros
+     mérés (`--calibrate 25`) szerint a skála teteje használható lett (sev5 0,07%
+     → ~8%), de a szórás nem nőtt: 25-ből 18 a 4-esen ül. A `digest_min_severity: 4`
+     ma a fájdalom-jelek ~80%-át átengedné. HA SZŰKÍTENI AKARSZ, `buying_intent`-re
+     szűrj (a jelek ~9%-a), ne severityre. A rendezés és a SalesOS-score már így
+     működik.
+   - `delay_seconds: 2` MÉRT érték (15-18 RPM, 0 db 429). Ha 429 jelenik meg a
+     runs.error-ban, emeld 5-re.
+   - A classifier-sor FIFO, és 3 sikertelen kísérlet után a poszt kiesik
+     (`posts.classify_attempts`). A hátralékot a `--classify` futás végén kiírja.
+   - Üres DB-n a backup szándékosan None-t ad (a snapshot-ellenőrzés elutasítja a
+     0 posztos mentést). Teszt-fixture-be kell egy poszt.
+
+Szabadon választható következő munka:
+   - A `signals` régi (v3-as) sorai a régi prompttal készültek. Ha egységes
+     adatra van szükség, a `--calibrate` mintájára írható egy visszamenőleges
+     újraosztályozó — de a v3/v4 kohorsz a `classifier_version`-ből szétválasztható,
+     tehát ez NEM sürgős.
+   - A LinkedIn-motor kapu-paramétereinek hangolása 20-30 valódi komment után.
+   - Új forrás felderítése (a websearch domain-megoszlása szerint nincs bekötetlen
+     fórum-jellegű forrás; a Brave ma a halott Reddit-connectort pótolja).
+- A LinkedIn-motor kapu-paraméterei (MAX_NGRAM_OVERLAP=0.22, 60-175 szó,
+  _STRATEGY_BIAS) az ELSŐ hangolás értékei, 5 poszton mérve. 20-30 valódi komment
+  után érdemes finomítani — a quality_issues és a rewrites mező minden válaszban
+  ott van, tehát mérhető, mi bukik el.
+- §4/19 rendes javítása (kommentőrző config-író, pl. ruamel.yaml — új függőség).
+- Reddit-kulcs (§7/B), ha megjött a jóváhagyás.
 
 Legyél alapos, de token-takarékos. Ne módosíts kódot mérés nélkül: ebben a projektben
 minden fontos állítás élesben verifikált (runs.items_seen, /health, DB-lekérdezések).

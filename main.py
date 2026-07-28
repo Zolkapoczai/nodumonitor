@@ -40,6 +40,7 @@ for _stream in (sys.stdout, sys.stderr):
 
 sys.path.insert(0, os.path.dirname(__file__))
 
+from env_secrets import get_secret
 from storage.db import init_db, mark_alerted, get_weekly_stats
 from connectors.html_connector import HTMLConnector
 from alerts.notifier import send_alerts, send_weekly_digest, send_content_pipeline_ideas
@@ -198,13 +199,24 @@ def run_health_check(config: dict, db_path: str) -> list[dict]:
     window = hc.get("window", 5)
     ignore = set(hc.get("ignore", ["classifier"]))
 
-    report = get_connector_health(db_path, window=window,
-                                  active_within_hours=hc.get("active_within_hours", 24))
-    problems = [r for r in report if r["status"] in ("error", "blind") and r["connector"] not in ignore]
+    # Az ELVART connectorok (mikor kellett volna futniuk) ugyanabbol a tablabol
+    # jonnek, amibol az utemezo dolgozik — igy a HIANYZO futas is latszik, nem
+    # csak a rossz (docs/04-rendszer-audit-2026-07-28.md §2.2).
+    expected = {e["name"]: e["interval"] for e in connector_schedule(config)
+                if e.get("expect_runs", True)}
 
-    print(f"[health] {len(report)} aktiv connector vizsgalva (ablak: {window} futas).")
+    report = get_connector_health(db_path, window=window,
+                                  active_within_hours=hc.get("active_within_hours", 24),
+                                  expected=expected,
+                                  stale_factor=hc.get("stale_factor", 3.0))
+    problems = [r for r in report
+                if r["status"] in ("error", "blind", "stale") and r["connector"] not in ignore]
+
+    print(f"[health] {len(report)} connector vizsgalva (ablak: {window} futas, "
+          f"{len(expected)} utemezett).")
     for r in report:
-        mark = {"ok": "OK   ", "blind": "VAK  ", "error": "HIBA ", "unknown": "?    "}.get(r["status"], "?    ")
+        mark = {"ok": "OK   ", "blind": "VAK  ", "error": "HIBA ", "stale": "NEM FUT",
+                "unknown": "?    "}.get(r["status"], "?    ")
         seen = "n/a" if r["items_seen_in_window"] is None else r["items_seen_in_window"]
         print(f"  {mark} {r['connector']:16} elem={seen:>5} uj={r['new_posts_in_window']:>4} ({r['runs_considered']} futas)")
 
@@ -227,9 +239,37 @@ def run_health_check(config: dict, db_path: str) -> list[dict]:
 
 
 def run_backup(config: dict, db_path: str) -> str | None:
+    """
+    DB-snapshot, `runs`-bejegyzessel.
+
+    Miert naplozzuk: a napi backup 2026-07-25/26/27-en NEM futott (a szerver allt a
+    03:30-as cron idejen, a memorias jobstore pedig nem potolja), es EZ SEHOL NEM
+    TUNT FEL — se `runs`-sor, se health-ag nem volt ra. `keep: 7` rotacio igy soha
+    nem is aktivalodott (docs/04-rendszer-audit-2026-07-28.md §2.3). A `runs`-sorral
+    a heartbeat 'stale'-kent latja a kimaradast, es a `--health` kiirja.
+    """
     from storage.backup import backup_db
+    from storage.db import log_run
     keep = config.get("backup", {}).get("keep", 7)
-    return backup_db(db_path, keep=keep)
+    started = datetime.now(tz=timezone.utc).isoformat()
+    path = None
+    error = None
+    try:
+        path = backup_db(db_path, keep=keep)
+        if not path:
+            error = "a backup_db nem adott vissza utvonalat"
+    except Exception as e:
+        error = str(e)[:300]
+    try:
+        # items_seen=1: "latott munkat" — igy a heartbeat nem minositi 'blind'-nak
+        # (a 0 nyers elem ott a szelektor-toresek jele).
+        log_run(db_path, "backup", started, datetime.now(tz=timezone.utc).isoformat(),
+                new_posts=1 if path else 0, error=error, items_seen=1)
+    except Exception as e:
+        print(f"[backup] A futas naplozasa nem sikerult: {e}")
+    if error:
+        print(f"[backup] HIBA: {error}", file=sys.stderr)
+    return path
 
 
 def run_digest(config: dict, db_path: str) -> None:
@@ -246,21 +286,37 @@ def run_digest(config: dict, db_path: str) -> None:
     """
     from storage.db import get_opportunities
 
+    from storage.db import count_opportunities
+
+    digest_started = datetime.now(tz=timezone.utc).isoformat()
     ac = config.get("alerts", {})
     min_sev = ac.get("digest_min_severity", 3)
-    opportunities = get_opportunities(db_path, only_pain=True, min_severity=min_sev)
 
-    # Csak amit meg nem kuldtunk ki (a mark_alerted allitja 'alerted'-re).
-    relevant = []
-    for o in opportunities:
-        if o.get("post_status") != "new":
-            continue
-        relevant.append({
-            **o,
-            "id": o["post_id"],
-            "score": o.get("keyword_score", 0),
-            "created_at": o.get("post_created_at", ""),
-        })
+    # A statusz-szures az SQL-BEN van (post_status='new'), es a limitet a VALODI
+    # darabszambol szamoljuk. Korabban a hivas limit nelkul ment (default 100), a
+    # 'new' szurés pedig Pythonban futott a mar levagott listan — es mivel a
+    # rendezes severity szerinti, nem ido szerinti, a mar 'alerted' sorok sosem
+    # estek ki a halmazbol, tehat a 100-as hatar monoton lejjebb tolodott.
+    # Meres (2026-07-28): 35 varakozo jelbol a digest 3-at latott, 32 STRANDOLT —
+    # es strukturalisan sosem kerult volna sorra
+    # (docs/04-rendszer-audit-2026-07-28.md §1.2).
+    pending = count_opportunities(db_path, only_pain=True, min_severity=min_sev,
+                                  post_status="new")
+    opportunities = get_opportunities(db_path, only_pain=True, min_severity=min_sev,
+                                      post_status="new", limit=max(pending, 1))
+
+    if len(opportunities) < pending:
+        # Ez ma nem fordulhat elo (a limit a szamlalobol jon), de ha egy jovobeli
+        # valtozas megis csonkol, azt NE csendben tegye.
+        print(f"[digest] FIGYELEM: {pending} varakozo jel kozul csak "
+              f"{len(opportunities)} kerult a listaba.", file=sys.stderr)
+
+    relevant = [{
+        **o,
+        "id": o["post_id"],
+        "score": o.get("keyword_score", 0),
+        "created_at": o.get("post_created_at", ""),
+    } for o in opportunities]
 
     print(f"\nNapi osszefoglalo: {len(relevant)} fajdalom-jel (severity >= {min_sev})\n")
     for p in relevant[:20]:
@@ -280,6 +336,24 @@ def run_digest(config: dict, db_path: str) -> None:
         print(f"[digest] {len(relevant)} talalat 'alerted'-re allitva (kikuldve: {', '.join(delivered)}).")
     elif relevant:
         print(f"[digest] {len(relevant)} talalat 'new' statuszban MARAD (nem ment ki riasztas).")
+
+    # A digest futasa is bekerul a `runs`-ba, hogy a heartbeat eszrevegye, ha egy
+    # napon EL SEM INDULT (ugyanaz az ok, mint a backupnal — §2.3). A 0 kikuldott
+    # jel NEM hiba: lehet, hogy nem volt mit kuldeni.
+    try:
+        from storage.db import log_run
+        # items_seen=1 = "a job lefutott", NEM a varakozo jelek szama. A 0 nyers
+        # elem a connectoroknal szelektor-torest jelent ('blind'), egy napi
+        # cron-jobnal viszont teljesen normalis allapot, hogy nincs mit kuldeni —
+        # ha ide `pending`-et irnank, 5 csendes nap utan a heartbeat HAMIS
+        # 'blind' riasztast adna. A varakozo jelek szama a `new_posts`-ban van.
+        log_run(db_path, "digest", digest_started,
+                datetime.now(tz=timezone.utc).isoformat(),
+                new_posts=len(relevant),
+                error=None if (delivered or not relevant) else "nem ment ki riasztas",
+                items_seen=1)
+    except Exception as e:
+        print(f"[digest] A futas naplozasa nem sikerult: {e}")
 
 
 def run_linkedin_content(config: dict, db_path: str) -> int:
@@ -324,114 +398,159 @@ def test_rss_feeds(config: dict) -> None:
 # Egy job csak egyszer fusson egyszerre; kimaradt futásokat összevonjuk.
 JOB_DEFAULTS = {"coalesce": True, "max_instances": 1, "misfire_grace_time": 300}
 
+# Az elso futasok szetteritese ujraindulas utan: az i-edik job legalabb
+# i * 20 masodperccel kesobb indul, hogy ne toduljon egyszerre 11 connector.
+_STARTUP_STAGGER_SECONDS = 20
+
+
+class _FirstRunPlanner:
+    """
+    Mikor fusson egy interval-job ELSO alkalommal a szerver indulasa utan?
+
+    A valasz NEM "azonnal". Korabban mind a 11 job `next_run_time=now`-val
+    regisztralt, ezert MINDEN szerver-ujrainditas teljes kimeno rajtaütest jelentett:
+    meres 2026-07-27 19:00-22:00 kozott **71 futas** a varhato ~9 helyett; a napi
+    egyszeri websearch aznap 12-szer futott (132 Brave-query), a 720 perces zendesk
+    8-szor. A `poll_interval_minutes` igy latszolag hatott, valojaban csak a futasok
+    kozti minimumot adta (docs/04-rendszer-audit-2026-07-28.md §2.5).
+
+    Most a `runs` tabla utolso futasabol szamolunk: a kovetkezo esedekesseg
+    `utolso_futas + interval`. Ha az mar elmult (vagy soha nem futott), akkor
+    indulunk hamar — de szettertve, hogy ne egyszerre.
+    """
+
+    def __init__(self, db_path: str):
+        from storage.db import get_last_run_times
+        try:
+            self._last = get_last_run_times(db_path)
+        except Exception as e:
+            print(f"[utemezo] Az utolso futasok nem olvashatok ({e}) — azonnali inditas.")
+            self._last = {}
+        self._n = 0
+
+    def next_run(self, run_name: str, interval_minutes: int) -> datetime:
+        now = datetime.now(tz=timezone.utc)
+        self._n += 1
+        soon = now + timedelta(seconds=self._n * _STARTUP_STAGGER_SECONDS)
+
+        raw = self._last.get(run_name)
+        if not raw:
+            return soon
+        try:
+            last = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+            if last.tzinfo is None:
+                last = last.replace(tzinfo=timezone.utc)
+        except ValueError:
+            return soon
+
+        due = last + timedelta(minutes=max(interval_minutes, 1))
+        return due if due > soon else soon
+
+
+def connector_schedule(config: dict) -> list[dict]:
+    """
+    Melyik connector fut, milyen periodussal — EGY IGAZSAG.
+
+    Ezt olvassa (a) a `register_jobs`, amikor jobot regisztral, es (b) a
+    `run_health_check`, amikor azt vizsgalja, hogy egy connector EGYALTALAN
+    futott-e. Korabban a heartbeat csak a `runs` tablabol epitette a listat, ezert
+    ami nem futott, az nem is szerepelt a riportban → `problems=[]` → HTTP 200.
+    Meres (2026-07-28): 5 connector (reddit, revitforum, autodesk, graphisoft,
+    search) igy volt lathatatlan, nulla riasztassal — a §4/6-os hibaosztaly
+    visszatert, csak most a heartbeaten belulrol
+    (docs/04-rendszer-audit-2026-07-28.md §2.2).
+
+    A `name` a `runs.connector` ertekevel egyezik (a forumoknal a forum neve),
+    kulonben a heartbeat nem talalna meg a futasokat.
+    """
+    # A reddit kulcs nelkul KIHAGYJA magat, es igy `runs`-sort sem ir — ezert
+    # `expect_runs: False`, kulonben orokre 'stale' lenne, es a /health tartos
+    # hamis 503-at adna. (§7/B: a kulcs jovahagyasra var; a tartalmat addig a
+    # Brave-kereso potolja.) Ha a kulcs bekerul a .env-be, ez automatikusan
+    # atvalt True-ra, es a heartbeat elvarja a futasokat.
+    reddit_ready = bool(get_secret("REDDIT_CLIENT_ID",
+                                   config.get("reddit", {}).get("client_id"))
+                        and get_secret("REDDIT_CLIENT_SECRET",
+                                       config.get("reddit", {}).get("client_secret")))
+    entries: list[dict] = [
+        {"name": "reddit", "interval": config.get("reddit", {}).get("poll_interval_minutes", 60),
+         "expect_runs": reddit_ready},
+        {"name": "playwright", "interval": config.get("playwright", {}).get("poll_interval_minutes", 90)},
+        {"name": "discourse", "interval": config.get("discourse", {}).get("poll_interval_minutes", 240)},
+        {"name": "github", "interval": config.get("github", {}).get("poll_interval_minutes", 240)},
+        {"name": "youtube", "interval": config.get("youtube", {}).get("poll_interval_minutes", 180)},
+        {"name": "classifier", "interval": config.get("classifier", {}).get("poll_interval_minutes", 60)},
+    ]
+    # `enabled` kapcsolos connectorok. A stackoverflow 2026-07-28-tol itt van, mert
+    # `enabled: false`-ra allt (audit §3.6: 1887 nyers elem -> 5 poszt -> 0 jel).
+    for key, name, default in (("vanilla", "vanilla", 240),
+                               ("zendesk", "zendesk", 720),
+                               ("stackoverflow", "stackoverflow", 180),
+                               ("web_search", "websearch", 720)):
+        section = config.get(key, {}) or {}
+        if section.get("enabled", True):
+            entries.append({"name": name,
+                            "interval": section.get("poll_interval_minutes", default)})
+    # HTML-forumok: a `forums` szekcio ma ures ({}), de ha visszakerul egy forum,
+    # automatikusan bekerul az utemezobe ES a heartbeat latokorebe is.
+    for fname, fcfg in (config.get("forums", {}) or {}).items():
+        entries.append({"name": fname,
+                        "interval": (fcfg or {}).get("poll_interval_minutes", 120),
+                        "forum_config": fcfg})
+
+    # NEM connectorok, de utemezett munkak, amiknek a KIMARADASA is hiba: a napi
+    # backup 2026-07-25/26/27-en elmaradt, es semmi nem jelezte (§2.3). `cron_only`:
+    # a register_jobs sajat cron-jobkent regisztralja oket, itt csak a heartbeat
+    # szamara szerepelnek.
+    if (config.get("backup", {}) or {}).get("enabled", True):
+        entries.append({"name": "backup", "interval": 1440, "cron_only": True})
+    if (config.get("alerts", {}) or {}).get("daily_digest", True):
+        entries.append({"name": "digest", "interval": 1440, "cron_only": True})
+    return entries
+
 
 def register_jobs(scheduler, config: dict, db_path: str) -> None:
     """Job-regisztráció közösen a CLI (--schedule) és a server.py számára."""
-    reddit_interval = config.get("reddit", {}).get("poll_interval_minutes", 60)
-    scheduler.add_job(
-        lambda: run_reddit(config, db_path),
-        "interval",
-        minutes=reddit_interval,
-        id="reddit",
-        next_run_time=datetime.now(tz=timezone.utc),
-    )
+    planner = _FirstRunPlanner(db_path)
 
-    forums = config.get("forums", {})
-    for name, forum_cfg in forums.items():
-        interval = forum_cfg.get("poll_interval_minutes", 120)
-        _name = name
-        _cfg = forum_cfg
+    # A connector-jobok EGY tablabol regisztralodnak (connector_schedule), amit a
+    # heartbeat is olvas — igy nem lehet olyan connector, ami fut, de a
+    # heartbeat nem szamit ra (vagy forditva). Ld. §2.2 az auditban.
+    runners = {
+        "reddit": run_reddit,
+        "playwright": run_playwright,
+        "stackoverflow": run_stackoverflow,
+        "discourse": run_discourse,
+        "vanilla": run_vanilla,
+        "zendesk": run_zendesk,
+        "github": run_github,
+        "youtube": run_youtube,
+        "websearch": run_websearch,
+        "classifier": run_classify,
+    }
+
+    for entry in connector_schedule(config):
+        name, interval = entry["name"], entry["interval"]
+        if entry.get("cron_only"):
+            continue   # backup/digest: lentebb, sajat cron-jobkent
+        if entry.get("forum_config") is not None:
+            fn = (lambda n=name, c=entry["forum_config"]:
+                  HTMLConnector(n, c, config, db_path).run())
+            job_id = f"forum_{name}"
+        else:
+            runner = runners.get(name)
+            if runner is None:
+                print(f"[utemezo] Nincs futtato a '{name}' connectorhoz — kihagyva.")
+                continue
+            fn = (lambda r=runner: r(config, db_path))
+            job_id = name
         scheduler.add_job(
-            lambda n=_name, c=_cfg: HTMLConnector(n, c, config, db_path).run(),
+            fn,
             "interval",
             minutes=interval,
-            id=f"forum_{name}",
-            next_run_time=datetime.now(tz=timezone.utc),
+            id=job_id,
+            next_run_time=planner.next_run(name, interval),
         )
-
-    pw_interval = config.get("playwright", {}).get("poll_interval_minutes", 90)
-    scheduler.add_job(
-        lambda: run_playwright(config, db_path),
-        "interval",
-        minutes=pw_interval,
-        id="playwright",
-        next_run_time=datetime.now(tz=timezone.utc),
-    )
-
-    so_interval = config.get("stackoverflow", {}).get("poll_interval_minutes", 180)
-    scheduler.add_job(
-        lambda: run_stackoverflow(config, db_path),
-        "interval",
-        minutes=so_interval,
-        id="stackoverflow",
-        next_run_time=datetime.now(tz=timezone.utc),
-    )
-
-    discourse_interval = config.get("discourse", {}).get("poll_interval_minutes", 240)
-    scheduler.add_job(
-        lambda: run_discourse(config, db_path),
-        "interval",
-        minutes=discourse_interval,
-        id="discourse",
-        next_run_time=datetime.now(tz=timezone.utc),
-    )
-
-    vn = config.get("vanilla", {})
-    if vn.get("enabled", True):
-        scheduler.add_job(
-            lambda: run_vanilla(config, db_path),
-            "interval",
-            minutes=vn.get("poll_interval_minutes", 240),
-            id="vanilla",
-            next_run_time=datetime.now(tz=timezone.utc),
-        )
-
-    zd = config.get("zendesk", {})
-    if zd.get("enabled", True):
-        scheduler.add_job(
-            lambda: run_zendesk(config, db_path),
-            "interval",
-            minutes=zd.get("poll_interval_minutes", 720),
-            id="zendesk",
-            next_run_time=datetime.now(tz=timezone.utc),
-        )
-
-    github_interval = config.get("github", {}).get("poll_interval_minutes", 240)
-    scheduler.add_job(
-        lambda: run_github(config, db_path),
-        "interval",
-        minutes=github_interval,
-        id="github",
-        next_run_time=datetime.now(tz=timezone.utc),
-    )
-
-    youtube_interval = config.get("youtube", {}).get("poll_interval_minutes", 180)
-    scheduler.add_job(
-        lambda: run_youtube(config, db_path),
-        "interval",
-        minutes=youtube_interval,
-        id="youtube",
-        next_run_time=datetime.now(tz=timezone.utc),
-    )
-
-    ws = config.get("web_search", {})
-    if ws.get("enabled", True):
-        scheduler.add_job(
-            lambda: run_websearch(config, db_path),
-            "interval",
-            minutes=ws.get("poll_interval_minutes", 720),
-            id="websearch",
-            next_run_time=datetime.now(tz=timezone.utc),
-        )
-
-    classifier_interval = config.get("classifier", {}).get("poll_interval_minutes", 60)
-    scheduler.add_job(
-        lambda: run_classify(config, db_path),
-        "interval",
-        minutes=classifier_interval,
-        id="classifier",
-        next_run_time=datetime.now(tz=timezone.utc),
-    )
 
     digest_hour = config.get("alerts", {}).get("digest_hour", 8)
     scheduler.add_job(
@@ -571,6 +690,9 @@ def main():
     parser.add_argument("--backup",           action="store_true", help="Adatbazis-snapshot keszitese most")
     parser.add_argument("--schedule",         action="store_true", help="Ütemezett futás")
     parser.add_argument("--test-rss",         action="store_true", help="RSS/URL elérhetőség teszt")
+    parser.add_argument("--test-slack",       action="store_true", help="Slack-webhook teszt (a valodi riasztasi uton)")
+    parser.add_argument("--calibrate",        type=int, metavar="N", default=None,
+                        help="N mar osztalyozott poszt UJRAERTEKELESE a mai prompttal, paros osszevetes (a DB nem valtozik)")
     args = parser.parse_args()
 
     config = load_config()
@@ -580,6 +702,15 @@ def main():
 
     if args.test_rss:
         test_rss_feeds(config)
+        return
+
+    if args.test_slack:
+        from alerts.notifier import send_slack_test
+        sys.exit(0 if send_slack_test(config.get("alerts", {})) else 1)
+
+    if args.calibrate:
+        from classifier.pain_classifier import calibrate
+        calibrate(config, db_path, limit=args.calibrate)
         return
 
     if args.generate_drafts:
