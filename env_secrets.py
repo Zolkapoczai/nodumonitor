@@ -26,9 +26,17 @@ def _load_env_file() -> dict[str, str]:
     if os.path.exists(_ENV_FILE):
         try:
             with open(_ENV_FILE, encoding="utf-8") as f:
-                for raw in f:
+                for lineno, raw in enumerate(f, 1):
                     line = raw.strip()
-                    if not line or line.startswith("#") or "=" not in line:
+                    if not line or line.startswith("#"):
+                        continue
+                    if "=" not in line:
+                        # NEM csendben dobjuk el: a SLACK_WEBHOOK_URL eloszor
+                        # `SLACK WEBHOOK: https://...` formaban kerult ide, es a
+                        # titok "ott volt a fajlban", megis beallitatlannak
+                        # latszott. Egy `=` nelkuli sor szinte mindig elirt kulcs.
+                        print(f"[env] A .env {lineno}. sora '=' nelkul van, kihagyva: "
+                              f"{line.split(':')[0][:24]!r}... (helyes forma: KULCS=ertek)")
                         continue
                     key, _, val = line.partition("=")
                     values[key.strip()] = val.strip().strip('"').strip("'")

@@ -204,10 +204,17 @@
           </div>
           <div id="slack-fields" class="{{ '' if config.alerts.slack.enabled else 'disabled-block' }}">
             <div class="field">
-              <label>Webhook URL</label>
-              <input type="password" name="slack_webhook"
-                value="{{ config.alerts.slack.webhook_url if config.alerts.slack.webhook_url != 'YOUR_SLACK_WEBHOOK_URL' else '' }}"
-                placeholder="https://hooks.slack.com/services/...">
+              <label>Webhook URL (a <code>.env</code>-ből, csak megjelenítés)</label>
+              <input type="text" value="{{ slack_url_masked or 'nincs beállítva' }}" readonly>
+              <div class="card-desc">
+                {% if slack_ready %}
+                  Csatorna kész. Teszt: <code>python main.py --test-slack</code>
+                {% else %}
+                  Nem küld ki semmit — {{ slack_reason }}. Az URL a git-ignorált
+                  <code>.env</code> fájl <code>SLACK_WEBHOOK_URL=</code> sorába megy,
+                  nem ide (a config.yaml git-tracked). Utána indítsd újra a szervert.
+                {% endif %}
+              </div>
             </div>
           </div>
         </div>

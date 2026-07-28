@@ -153,8 +153,21 @@ alerts:
     to_address: poczai@nodu.build
     app_password: YOUR_APP_PASSWORD
   slack:
-    enabled: false
-    webhook_url: YOUR_SLACK_WEBHOOK_URL
+    enabled: true
+    # A webhook-URL a .env-ben el (SLACK_WEBHOOK_URL) — NEM itt. Az URL onmagaban
+    # titok: aki ismeri, a csatornara irhat, es ez a fajl git-tracked (ugyanaz az
+    # ok, mint a GEMINI_API_KEY-nel, HANDOFF §5). Az itteni ertek csak visszafele-
+    # kompatibilitasi fallback, hagyd uresen.
+    # URL nelkul minden Slack-ut CSENDBEN KIHAGYJA magat (nem hiba, nem crash),
+    # es a digest NEM allitja 'alerted'-re a posztokat.
+    # Teszt: python main.py --test-slack
+    webhook_url: ''
+    # Hany jel keruljon EGY Slack-uzenetbe. A digest MINDEN jelet kikuld, tobb
+    # uzenetre lapozva (korabban csak az elso 5-ot reszletezte, a tobbit
+    # "... es meg N tovabbi"-ba osszesitette — 90 felgyult jelbol 85 igy
+    # lathatatlanul elhasznalodott volna). Felso korlat 49: a Slack Block Kit
+    # 50 blokk/uzenet limitje mellett a fejlec is egy blokk.
+    posts_per_message: 20
   webhook:
     enabled: false
     url: YOUR_N8N_WEBHOOK_URL
@@ -180,6 +193,12 @@ health:
   check_interval_hours: 6
   window: 5              # ennyi utolso futast ertekel connectoronkent
   active_within_hours: 24 # csak a 24 oran belul futott connectorokat vizsgalja
+  # A HIANYZO futas kapuja: ha egy utemezett connector a periodusa x stale_factor
+  # ideje nem futott, 'stale' statuszt kap es riasztast valt ki. 2026-07-28-ig ez
+  # nem letezett — ami nem futott, az nem is szerepelt a riportban, tehat 5
+  # connector csendben eltunt, a /health pedig 200-at adott (audit §2.2).
+  # 2.5-nel: egy 90 perces connector ~3,75 ora utan, a napi backup ~2,5 nap utan szol.
+  stale_factor: 2.5
   ignore:                # stage-ek, ahol a 0 elem normalis allapot
   - classifier
 # Valasz-draftok automatikus generalasa a fajdalom-jelekbol. Az emberi kapu a
@@ -215,9 +234,24 @@ classifier:
   # napi ~1 helyett), amit a 15-os batch orankent nem gyoz le. 25 x 13 s = ~5,5
   # perc/futas, orankent futva ez naponta 600 poszt kapacitas.
   batch_size: 25
-  delay_seconds: 13
+  # MERT ertek, nem tipp (2026-07-28, audit §3.9). A 13 s meg az INGYENES Gemini-
+  # szinthez lett hangolva (5 RPM), de a szamlazas 2026-07-25 ota be van kapcsolva
+  # (§4/9). Lepcsozetes eles meres 6-6 poszttal: 13 s -> 13,2 s/poszt (4,5 RPM);
+  # 5 s -> 6,2 s/poszt (9,7 RPM); 2 s -> 3,3 s/poszt (18,1 RPM). Tartos kor 30
+  # poszttal 2 s-nal: 3,9 s/poszt (15,2 RPM), es MIND a 48 hivas 429 NELKUL futott.
+  # 100 poszt atfutasa: 13 s-nal ~3 ora (4 utemezett korben), 2 s-nal ~6,5 perc.
+  # Ha 429 jelenik meg a runs.error-ban, emeld 5-re — a classifier maga is var
+  # 20 s-ot perc-kvota eseten.
+  delay_seconds: 2
   draft_min_severity: 3
 stackoverflow:
+  # KIVEZETVE 2026-07-28 (audit §3.6). Élettartam-mérés: 37 futás, 1887 nyers elem
+  # → 5 poszt → 0 osztályozott jel, 320 s futásidő. Az utolsó 48 órában 26 futás,
+  # 1326 elem, 0 új poszt. Ez nem hiba (nincs error), csak terméketlen — ugyanaz a
+  # kategória, mint a buildingSMART keresés nélkül (§7/L). A kód és a config MARAD,
+  # hogy egy `enabled: true`-val visszakapcsolható legyen; az ütemező és a heartbeat
+  # az `enabled` alapján hagyja ki. CLI-ból továbbra is futtatható: --stackoverflow.
+  enabled: false
   api_key: ''
   poll_interval_minutes: 180
   # A softwareengineering.stackexchange BIM-témában gyakorlatilag üres — kivezetve.
@@ -483,3 +517,8 @@ knowledge_base:
   - c:\NODU\NODU technical\Release notes
   - c:\NODU\NODU Bridge Repo
   output_file: storage/nodu_knowledge_base.md
+  # Mennyi kerulhet a tudasbazisbol EGY promptba. A fajl ~280 KB (~70k token), es
+  # 2026-07-28-ig TELJESEN bekerult minden forum-draft promptjaba (a prompt 99,1%-a).
+  # A forum-draft ut MA EGYALTALAN nem hasznalja; ez a keret a heti tartalom- es
+  # trend-generalasra vonatkozik. Ld. docs/04-rendszer-audit-2026-07-28.md §2.4.
+  prompt_max_chars: 8000
