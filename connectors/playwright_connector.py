@@ -12,6 +12,7 @@ böngészővel rendereli az oldalakat és kinyeri a posztokat.
 import re
 from datetime import datetime, timezone
 
+from connectors.khoros_url import canonical_external_id, canonical_thread_url
 from filters.keyword_filter import KeywordFilter
 from storage.db import insert_post, log_run
 
@@ -123,11 +124,15 @@ class PlaywrightConnector:
                     if not keywords:
                         continue
 
+                    # A dedup-kulcs KANONIZALT (khoros_url.py): a nyers href
+                    # tartalmazza a futasonkent valtozo `search-action-id`-t, ezert
+                    # a UNIQUE(platform, external_id) sosem fogott — 1309 poszt = 33
+                    # valodi szal (docs/04-rendszer-audit-2026-07-28.md §1.1).
                     post = {
                         "source": "playwright",
                         "platform": forum_name,
-                        "external_id": href,
-                        "url": href or url,
+                        "external_id": canonical_external_id(href) or href,
+                        "url": canonical_thread_url(href) or url,
                         "author": author,
                         "title": title,
                         "body": body[:2000],
