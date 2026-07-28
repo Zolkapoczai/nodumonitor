@@ -13,6 +13,7 @@ import sqlite3
 import sys
 import threading
 from datetime import datetime, timezone
+from urllib.parse import quote
 
 import yaml
 import requests
@@ -20,12 +21,14 @@ import requests
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from flask import Flask, render_template, request, redirect, url_for, jsonify, Response
+from markupsafe import escape
 from storage.db import (
     init_db, get_pending_drafts, mark_draft, get_weekly_stats,
     get_adhoc_results, get_post, get_post_with_signal, get_opportunities,
     get_connector_health, count_opportunities, get_opportunity_platform_counts,
     get_decision_log,
 )
+from storage.config_writer import patch_config_file, ConfigPatchError
 
 app = Flask(__name__)
 
@@ -34,15 +37,17 @@ CONFIG_PATH = os.path.join(BASE_DIR, "config.yaml")
 
 _jobs: dict = {}
 
+# Az utolso Tartalom Pipeline (blog + LinkedIn) generalas teljes eredmenye —
+# kulon tarolva a `_jobs`-tol, mert az csak egy stringesitett osszefoglalot
+# tart (pl. connector-darabszam), itt viszont a teljes strukturat meg kell
+# orizni a Dashboard kiemelt kartyajanak megjelenitesehez. Folyamat-memoriaban
+# el, ugyanugy nem eli tul az ujrainditast, mint a `_jobs` tobbi bejegyzese.
+_last_content_pipeline: dict | None = None
+
 
 def load_config() -> dict:
     with open(CONFIG_PATH, encoding="utf-8") as f:
         return yaml.safe_load(f)
-
-
-def save_config(config: dict) -> None:
-    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-        yaml.dump(config, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
 
 
 def get_db_path(config: dict) -> str:
@@ -134,11 +139,31 @@ def dashboard():
     # egy uj forras automatikusan megjelenjen (ne beegetett lista legyen).
     opp_channels = get_opportunity_platform_counts(db_path, only_pain=True)
 
+    # A Tartalom Pipeline kiemelt kartyajahoz: a legutobbi eredmeny (ha van
+    # ebben a szerver-munkameneteben), plusz hogy a Slack-csatorna el-e —
+    # ugyanaz a mert allapot, amit az Admin is mutat, nem csak a config-flag.
+    from alerts.notifier import slack_status
+    slack_ready, _slack_reason = slack_status(config.get("alerts", {}))
+
     return render_template("dashboard.html", config=config, drafts=drafts,
                            opportunities=opportunities, hot_count=hot_count,
                            opp_total=opp_total, opp_channels=opp_channels,
-                           opp_limit=opp_limit,
+                           opp_limit=opp_limit, content_pipeline=_last_content_pipeline,
+                           slack_ready=slack_ready,
                            stats=_stats(config), active_view="dashboard")
+
+
+def _admin_context(config: dict) -> dict:
+    db_path = get_db_path(config)
+    init_db(db_path)
+    # A Slack-csatorna allapota: az URL a .env-ben van, tehat a sablon a
+    # config.yaml-bol NEM tudja megallapitani, hogy el-e a csatorna.
+    from alerts.notifier import slack_status, slack_webhook_url
+    slack_ready, slack_reason = slack_status(config.get("alerts", {}))
+    slack_url = slack_webhook_url(config.get("alerts", {}))
+    return dict(config=config, slack_ready=slack_ready, slack_reason=slack_reason,
+                slack_url_masked=(slack_url[:30] + "..." if slack_url else ""),
+                stats=_stats(config), active_view="admin")
 
 
 @app.route("/admin")
@@ -147,20 +172,24 @@ def admin():
     gate = _admin_gate(config)
     if gate:
         return gate
-    db_path = get_db_path(config)
-    init_db(db_path)
-    # A Slack-csatorna allapota: az URL a .env-ben van, tehat a sablon a
-    # config.yaml-bol NEM tudja megallapitani, hogy el-e a csatorna.
-    from alerts.notifier import slack_status, slack_webhook_url
-    slack_ready, slack_reason = slack_status(config.get("alerts", {}))
-    slack_url = slack_webhook_url(config.get("alerts", {}))
-    return render_template("admin.html", config=config,
-                           slack_ready=slack_ready, slack_reason=slack_reason,
-                           slack_url_masked=(slack_url[:30] + "..." if slack_url else ""),
-                           stats=_stats(config), active_view="admin")
+    return render_template("admin.html", **_admin_context(config))
 
 
 # --- Config mentés ---
+
+def _bool_field(form, name):
+    """
+    None, ha a checkbox rejtett kiserto mezoje (`{name}__present`) hianyzik a
+    POST-bol - igy egy reszleges POST (pl. curl egy mezovel) nem tud
+    atfordítani egy boolt, amit meg sem emlitett. A valodi admin-urlap ezt a
+    kiserto mezot MINDIG kuldi (ui/templates/admin.html), tehat a normal
+    mentesi utat nem erinti (docs/04-rendszer-audit-2026-07-28.md §2.7 rokon
+    hibaja: reszleges kapu rosszabb, mint a nyilvanvaloan nyitott).
+    """
+    if f"{name}__present" not in form:
+        return None
+    return name in form
+
 
 @app.route("/save", methods=["POST"])
 def save():
@@ -170,50 +199,93 @@ def save():
         return gate
     f = request.form
 
-    config["reddit"]["client_id"] = f.get("reddit_client_id", "").strip() or "YOUR_REDDIT_CLIENT_ID"
-    config["reddit"]["client_secret"] = f.get("reddit_client_secret", "").strip() or "YOUR_REDDIT_CLIENT_SECRET"
-    raw_subs = f.get("reddit_subreddits", "")
-    config["reddit"]["subreddits"] = [s.strip() for s in raw_subs.split(",") if s.strip()]
+    updates = {}
+    skipped = []
 
-    config["scoring"]["gemini_enabled"] = "gemini_enabled" in f
-    config["scoring"]["gemini_model"] = f.get("gemini_model", "gemini-2.5-flash").strip()
-    # A Gemini- es YouTube-kulcsot SZANDEKOSAN nem irjuk vissza a config.yaml-be:
-    # az git-tracked, es a GitHub push-protection (joggal) blokkolja az ilyen
-    # commitot. A kulcsok a git-ignoralt .env-ben elnek (GEMINI_API_KEY,
-    # YOUTUBE_API_KEY), env_secrets.py olvassa oket. Ha az admin urlapon uj
-    # kulcsot irsz be, azt a .env-be kell atvinni — a mezo csak megjelenit.
+    def add_text(name, path):
+        # Ures/hianyzo mezo = VALTOZATLAN, nem placeholder-felulirás. A
+        # korabbi `.strip() or "YOUR_..."` minta destruktiv volt: egy ures
+        # mezovel bekuldott POST az elo titkot placeholderre cserelte
+        # (d42c3c8-ban ez tortent a subreddit-listaval es a booleanokkal is).
+        val = (f.get(name, "") or "").strip()
+        if val:
+            updates[path] = val
+        else:
+            skipped.append(name)
 
-    config["alerts"]["email"]["enabled"] = "email_enabled" in f
-    config["alerts"]["email"]["from_address"] = f.get("email_from", "").strip() or "YOUR_EMAIL@gmail.com"
-    config["alerts"]["email"]["to_address"] = f.get("email_to", "").strip() or "poczai@nodu.build"
-    pw = f.get("email_password", "").strip()
-    config["alerts"]["email"]["app_password"] = pw if pw else "YOUR_APP_PASSWORD"
+    def add_list(name, path, split):
+        vals = [s.strip() for s in split(f.get(name, "") or "") if s.strip()]
+        if vals:
+            updates[path] = vals
+        else:
+            skipped.append(name)
 
-    config["alerts"]["slack"]["enabled"] = "slack_enabled" in f
+    def add_bool(name, path):
+        val = _bool_field(f, name)
+        if val is not None:
+            updates[path] = val
+
+    add_text("reddit_client_id", ("reddit", "client_id"))
+    add_text("reddit_client_secret", ("reddit", "client_secret"))
+    add_list("reddit_subreddits", ("reddit", "subreddits"), lambda s: s.split(","))
+
+    add_bool("gemini_enabled", ("scoring", "gemini_enabled"))
+    add_text("gemini_model", ("scoring", "gemini_model"))
+    # A Gemini- es YouTube-kulcsot SZANDEKOSAN nem irjuk vissza a config.yaml-be
+    # (nincs is a config_writer.PATCHABLE-ben): az git-tracked, es a GitHub
+    # push-protection (joggal) blokkolja az ilyen commitot. A kulcsok a
+    # git-ignoralt .env-ben elnek (GEMINI_API_KEY, YOUTUBE_API_KEY),
+    # env_secrets.py olvassa oket. Ha az admin urlapon uj kulcsot irsz be, azt
+    # a .env-be kell atvinni — a mezo csak megjelenit.
+
+    add_bool("email_enabled", ("alerts", "email", "enabled"))
+    add_text("email_from", ("alerts", "email", "from_address"))
+    add_text("email_to", ("alerts", "email", "to_address"))
+    add_text("email_password", ("alerts", "email", "app_password"))
+
+    add_bool("slack_enabled", ("alerts", "slack", "enabled"))
     # A Slack webhook-URL-t SZANDEKOSAN nem irjuk vissza a config.yaml-be (ld. a
     # Gemini-kulcsnal fentebb): az URL onmagaban titok, a config.yaml pedig
     # git-tracked. A .env `SLACK_WEBHOOK_URL` sora a forras, env_secrets olvassa.
     # Az admin urlapon a mezo csak allapotot jelez, nem szerkesztheto.
 
-    # Kulcsszavak (admin Kulcsszavak szekcio) — soronkent egy kifejezes
-    if "kw_primary" in f:
-        config.setdefault("keywords", {})
-        config["keywords"]["primary"] = [s.strip() for s in f.get("kw_primary", "").splitlines() if s.strip()]
-        config["keywords"]["pain_points"] = [s.strip() for s in f.get("kw_pain", "").splitlines() if s.strip()]
-        config["keywords"]["context"] = [s.strip() for s in f.get("kw_context", "").splitlines() if s.strip()]
+    # Kulcsszavak — harom FUGGETLEN feltetel (korabban egyetlen `if "kw_primary"
+    # in f` orizte mindharmat: egy kw_primary-t tartalmazo, kw_pain-t nem
+    # tartalmazo POST kinullazta volna az 54 pain-kulcsszot).
+    add_list("kw_primary", ("keywords", "primary"), lambda s: s.splitlines())
+    add_list("kw_pain", ("keywords", "pain_points"), lambda s: s.splitlines())
+    add_list("kw_context", ("keywords", "context"), lambda s: s.splitlines())
 
-    if "content_language" in f:
-        config.setdefault("linkedin_content", {})
-        config["linkedin_content"]["language"] = f.get("content_language", "en").strip()
-
-    if "report_language" in f:
-        config.setdefault("weekly_report", {})
-        config["weekly_report"]["language"] = f.get("report_language", "hu").strip()
+    add_text("content_language", ("linkedin_content", "language"))
+    add_text("report_language", ("weekly_report", "language"))
 
     # A youtube_api_key mezot sem irjuk vissza (ld. a Gemini-nel fentebb).
 
-    save_config(config)
-    return redirect(url_for("admin") + "?saved=1")
+    try:
+        patch_config_file(CONFIG_PATH, updates)
+    except ConfigPatchError as e:
+        # Lathato hibasav, nem stacktrace/500 (docs/04-rendszer-audit-2026-07-28.md
+        # §2.7 rokon hibaja: a config["szekcio"] indexeles korabban KeyError->500-at
+        # adott volna hianyzo szekcional). Szandekosan NEM az admin.html-t
+        # renderelja ujra: pont azert bukott a patch, mert a config.yaml
+        # valamelyik szekcioja hianyzik/serult, es az a sablon MINDEN
+        # szekciot feltetelez (`config.scoring.gemini_enabled` stb.) — egy
+        # ujrarenderelt admin.html ugyanezen a hianyon maga is elhasalna.
+        return Response(
+            "<!doctype html><meta charset=\"utf-8\">"
+            "<div class=\"save-banner error\" style=\"margin:24px;font-family:sans-serif;"
+            "padding:14px 18px;border-radius:8px;background:#FEF2F2;color:#DC2626;"
+            "border:1px solid #FCA5A5;\">Mentés sikertelen: " + escape(str(e)) + "</div>"
+            "<p style=\"margin:0 24px;font-family:sans-serif;\">"
+            "<a href=\"/admin\">Vissza az Adminba</a></p>",
+            400,
+            {"Content-Type": "text/html; charset=utf-8"},
+        )
+
+    query = "?saved=1"
+    if skipped:
+        query += "&warn=" + quote(",".join(skipped))
+    return redirect(url_for("admin") + query)
 
 
 # --- Connector futtatás (admin) ---
@@ -285,11 +357,20 @@ def run_action(action):
     elif action == "linkedin-content":
         from responder.draft_generator import generate_content_pipeline
         from alerts.notifier import send_content_pipeline_ideas
+
         def _linkedin():
+            global _last_content_pipeline
             res = generate_content_pipeline(config, db_path)
+            stamp = datetime.now(tz=timezone.utc).isoformat()
             if res:
                 send_content_pipeline_ideas(res, config.get("alerts", {}))
+                _last_content_pipeline = {"ok": True, "generated_at": stamp, **res}
                 return "1 cikk + " + str(len(res.get("linkedin_posts", []))) + " teaser"
+            _last_content_pipeline = {
+                "ok": False, "generated_at": stamp,
+                "reason": "Nincs elég friss fájdalom-jel a beállított időszakban, "
+                          "vagy a Gemini API nincs bekapcsolva az Adminban.",
+            }
             return "Nincs elég adat"
         _run_in_bg("linkedin-content", _linkedin)
 
@@ -604,6 +685,23 @@ def api_status():
     db_path = get_db_path(config)
     pending = len(get_pending_drafts(db_path))
     return jsonify({"jobs": _jobs, "pending_drafts": pending})
+
+
+@app.route("/api/content-pipeline")
+def api_content_pipeline():
+    """A Dashboard kiemelt Tartalom Pipeline kartyajanak eredmenye — a job
+    lezarulasa utan ezt hivja le a kliens, hogy a friss blog+LinkedIn
+    javaslatot inline megjelenithesse (nem csak a Slack-csatornan).
+
+    A `slack_ready`-t is idekeveri, hogy a kliens-oldali (JS) render
+    ugyanazt a "elkuldve Slackre is" / "Slack nincs beallitva" jelzest tudja
+    adni, mint a szerver-oldali (Jinja) elso betoltes."""
+    from alerts.notifier import slack_status
+    config = load_config()
+    slack_ready, _reason = slack_status(config.get("alerts", {}))
+    body = dict(_last_content_pipeline or {})
+    body["slack_ready"] = slack_ready
+    return jsonify(body)
 
 
 if __name__ == "__main__":

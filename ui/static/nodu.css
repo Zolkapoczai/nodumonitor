@@ -451,6 +451,15 @@ textarea { resize: vertical; min-height: 80px; }
 }
 .toast.show { opacity: 1; transform: translateY(0); }
 
+/* Save banner (admin /save eredmenye: sikeres, figyelmezteto, hiba) */
+.save-banner {
+  padding: 12px 18px; border-radius: 8px; margin-bottom: 20px;
+  font-size: 13.5px; font-weight: 600;
+}
+.save-banner.ok    { background: var(--green-bg); color: var(--green); border: 1px solid var(--green-border); }
+.save-banner.warn  { background: var(--amber-bg); color: var(--amber); border: 1px solid var(--amber-border); }
+.save-banner.error { background: var(--red-bg);   color: var(--red);   border: 1px solid var(--red-border); }
+
 /* Disabled block */
 .disabled-block { opacity: .45; pointer-events: none; }
 
@@ -743,6 +752,48 @@ textarea { resize: vertical; min-height: 80px; }
   color: var(--accent);
   font-weight: 700;
 }
+
+/* ================= Tartalom Pipeline (kiemelt kartya, Attekinto) ================= */
+.content-pipeline-card {
+  border-radius: 14px;
+  border: 1px solid var(--accent-border);
+  background: linear-gradient(135deg, var(--accent-light) 0%, #ffffff 50%);
+  box-shadow: 0 6px 20px rgba(240, 78, 35, 0.10);
+  padding: 24px 28px;
+  margin-bottom: 24px;
+}
+.cp-header { display: flex; align-items: flex-start; gap: 16px; }
+.cp-icon {
+  width: 40px; height: 40px; flex-shrink: 0; border-radius: 10px;
+  background: var(--accent); color: #FFFFFF;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 4px 10px rgba(240, 78, 35, 0.28);
+}
+.cp-header-text { flex: 1; min-width: 0; }
+.cp-title {
+  font-family: var(--font-heading); font-size: 16px; font-weight: 700;
+  color: var(--text); margin-bottom: 4px;
+}
+.cp-desc { font-size: 12.5px; color: var(--text-muted); line-height: 1.5; }
+.cp-status { font-size: 12.5px; color: var(--text-muted); margin-top: 14px; }
+.cp-result { margin-top: 18px; }
+.cp-blog {
+  background: #FFFFFF; border: 1px solid var(--border); border-radius: 10px;
+  padding: 16px 20px; margin-bottom: 14px;
+}
+.cp-blog-title { font-family: var(--font-heading); font-size: 15px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+.cp-blog-meta { font-size: 12px; color: var(--accent); font-weight: 600; margin-bottom: 10px; }
+.cp-blog-outline { font-size: 13px; color: var(--text-dark); line-height: 1.6; white-space: pre-wrap; }
+.cp-posts { display: grid; gap: 12px; }
+.cp-post {
+  background: #FFFFFF; border: 1px solid var(--border); border-left: 3px solid var(--blue);
+  border-radius: 8px; padding: 12px 16px;
+}
+.cp-post-label {
+  font-family: var(--font-heading); font-size: 10.5px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .04em; color: var(--blue); margin-bottom: 6px;
+}
+.cp-post-text { font-size: 13px; color: var(--text-dark); line-height: 1.55; white-space: pre-wrap; }
 
 .metric-sub-badge { display: inline-flex; align-items: center; background: rgba(255, 90, 31, 0.12); color: var(--accent); padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.02em; margin-left: 12px; vertical-align: middle; font-family: var(--font-heading); }
 .metric-value-row {

@@ -63,6 +63,53 @@
         </div>
       </div>
 
+      <!-- Tartalom Pipeline: kiemelt kartya (blog + LinkedIn otletek AI-val) -->
+      <div class="content-pipeline-card" id="content-pipeline-card">
+        <div class="cp-header">
+          <div class="cp-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/>
+            </svg>
+          </div>
+          <div class="cp-header-text">
+            <div class="cp-title">Tartalom Pipeline</div>
+            <div class="cp-desc">Heti blogcikk-ötlet + LinkedIn poszt-javaslatok a legsúlyosabb fájdalompontokból, AI-val generálva.</div>
+          </div>
+          <button type="button" class="btn btn-primary btn-sm" id="cp-btn" onclick="runContentPipeline()">
+            {{ 'Újragenerálás' if content_pipeline else 'Indítás' }}
+          </button>
+        </div>
+        <div class="cp-status" id="cp-status">
+          {%- if content_pipeline -%}
+            {%- if content_pipeline.ok -%}
+              Utoljára generálva: {{ content_pipeline.generated_at }} &middot;
+              {{ 'elküldve Slackre is' if slack_ready else 'Slack nincs beállítva' }}
+            {%- else -%}
+              {{ content_pipeline.reason }}
+            {%- endif -%}
+          {%- else -%}
+            Még nem futott ezen a szerver-munkameneten.
+          {%- endif -%}
+        </div>
+        <div class="cp-result" id="cp-result">
+          {% if content_pipeline and content_pipeline.ok %}
+          <div class="cp-blog">
+            <div class="cp-blog-title">{{ content_pipeline.blog_title }}</div>
+            <div class="cp-blog-meta">Célközönség: {{ content_pipeline.blog_audience }} &middot; Fő fájdalom: {{ content_pipeline.blog_core_problem }}</div>
+            <div class="cp-blog-outline">{{ content_pipeline.blog_outline }}</div>
+          </div>
+          <div class="cp-posts">
+            {% for p in content_pipeline.linkedin_posts %}
+            <div class="cp-post">
+              <div class="cp-post-label">LinkedIn poszt {{ loop.index }}</div>
+              <div class="cp-post-text">{{ p }}</div>
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
+        </div>
+      </div>
+
       <!-- Report 1: Honnan jönnek a leadek -->
       <div class="card report-card">
         <div class="card-header-row">
@@ -427,9 +474,10 @@
         {% set processors = [
           ('generate-drafts', 'Válaszjavaslat generálás', 'Minden releváns, feldolgozatlan bejegyzésre 1 javaslat'),
           ('weekly-report', 'Heti riport', 'Slack-összefoglaló: források, top fájdalompontok'),
-          ('linkedin-content', 'Tartalom Pipeline (Blog + LinkedIn)', 'Heti blog- és poszt-javaslatok a top fájdalompontokból'),
           ('build-knowledge', 'Tudásbázis frissítése', 'A lokális mappákból (technical, repo) újraépíti a kontextust az AI számára')
         ] %}
+        {# A Tartalom Pipeline (Blog + LinkedIn) innentől kiemelt kártya az Áttekintőn,
+           nem generikus futtató-sor — ld. #content-pipeline-card. #}
         {% for key, title, desc in processors %}
         <div class="run-row">
           <div class="run-info">
@@ -1151,7 +1199,7 @@ function setBadge(key, state) {
 setInterval(function() {
   fetch('/api/status').then(r => r.json()).then(data => {
     const jobs = data.jobs || {};
-    ['reddit','search','playwright','stackoverflow','forums','github','youtube','generate-drafts','weekly-report','linkedin-content','build-knowledge'].forEach(key => {
+    ['reddit','search','playwright','stackoverflow','forums','github','youtube','generate-drafts','weekly-report','build-knowledge'].forEach(key => {
       const j = jobs[key]; const el = document.getElementById('badge-' + key);
       if (!j || !el) return;
       el.className = 'badge';
@@ -1169,6 +1217,101 @@ function runAllConnectors() {
     setBadge(k, 'run');
   });
   toast('Összes adatgyűjtő indítása...');
+}
+
+// --- Tartalom Pipeline: kiemelt kartya (Attekinto) ---
+let cpPollTimer = null;
+
+// Ha az oldal betoltesekor mar fut egy generalas (pl. ujratoltott lap, vagy
+// egy masik fulon inditott futas), a kartya ne tunjon tetlennek — csatlakozzon
+// a mar folyamatban levo job figyeleséhez.
+window.addEventListener('DOMContentLoaded', () => {
+  const cpBtn = document.getElementById('cp-btn');
+  if (!cpBtn) return;
+  fetch('/api/status').then(r => r.json()).then(data => {
+    const job = (data.jobs || {})['linkedin-content'];
+    if (job && job.status === 'running') {
+      cpBtn.disabled = true;
+      cpBtn.textContent = 'Generálás...';
+      document.getElementById('cp-status').textContent =
+        'Tartalom generálása folyamatban (a Gemini-hívás miatt eltarthat egy percig)...';
+      startContentPipelinePoll();
+    }
+  }).catch(() => {});
+});
+
+function runContentPipeline() {
+  const btn = document.getElementById('cp-btn');
+  const status = document.getElementById('cp-status');
+  btn.disabled = true;
+  btn.textContent = 'Generálás...';
+  status.textContent = 'Tartalom generálása folyamatban (a Gemini-hívás miatt eltarthat egy percig)...';
+
+  fetch('/run/linkedin-content?ajax=1', { method: 'POST' }).then(r => r.json()).then(d => {
+    // A "mar folyamatban van" (409) NEM hibaag itt: valojaban FUT egy peldany
+    // (pl. egy korabbi kattintas vagy egy masik ful inditotta), tehat akkor is
+    // figyelni kezdjuk, kulonben a szoveg orokre a hibauzeneten ragadna,
+    // miutan a mar futo generalas kozben sikeresen befejezodik.
+    startContentPipelinePoll();
+  }).catch(() => {
+    status.textContent = 'Hiba történt az indításkor.';
+    btn.disabled = false;
+    btn.textContent = 'Indítás';
+  });
+}
+
+function startContentPipelinePoll() {
+  if (cpPollTimer) clearInterval(cpPollTimer);
+  cpPollTimer = setInterval(pollContentPipelineJob, 2500);
+  pollContentPipelineJob();
+}
+
+function pollContentPipelineJob() {
+  fetch('/api/status').then(r => r.json()).then(data => {
+    const job = (data.jobs || {})['linkedin-content'];
+    if (!job) return;
+    if (job.status === 'done') {
+      clearInterval(cpPollTimer); cpPollTimer = null;
+      fetch('/api/content-pipeline').then(r => r.json()).then(renderContentPipeline);
+    } else if (job.status === 'error') {
+      clearInterval(cpPollTimer); cpPollTimer = null;
+      document.getElementById('cp-status').textContent = 'Hiba: ' + (job.error || 'ismeretlen hiba');
+      const btn = document.getElementById('cp-btn');
+      btn.disabled = false;
+      btn.textContent = 'Indítás';
+    }
+  }).catch(() => {});
+}
+
+function renderContentPipeline(data) {
+  const btn = document.getElementById('cp-btn');
+  const status = document.getElementById('cp-status');
+  const result = document.getElementById('cp-result');
+  btn.disabled = false;
+  btn.textContent = 'Újragenerálás';
+
+  if (!data || !data.ok) {
+    status.textContent = (data && data.reason) ? data.reason : 'Nem sikerült elég adatot találni.';
+    result.innerHTML = '';
+    return;
+  }
+
+  let when = data.generated_at || '';
+  try { when = new Date(data.generated_at).toLocaleString('hu-HU'); } catch (e) {}
+  const slackNote = data.slack_ready ? 'elküldve Slackre is' : 'Slack nincs beállítva';
+  status.textContent = 'Utoljára generálva: ' + when + ' · ' + slackNote;
+
+  let html = '<div class="cp-blog">' +
+    '<div class="cp-blog-title">' + esc(data.blog_title) + '</div>' +
+    '<div class="cp-blog-meta">Célközönség: ' + esc(data.blog_audience) + ' &middot; Fő fájdalom: ' + esc(data.blog_core_problem) + '</div>' +
+    '<div class="cp-blog-outline">' + esc(data.blog_outline) + '</div>' +
+    '</div><div class="cp-posts">';
+  (data.linkedin_posts || []).forEach((p, i) => {
+    html += '<div class="cp-post"><div class="cp-post-label">LinkedIn poszt ' + (i + 1) + '</div>' +
+      '<div class="cp-post-text">' + esc(p) + '</div></div>';
+  });
+  html += '</div>';
+  result.innerHTML = html;
 }
 
 </script>

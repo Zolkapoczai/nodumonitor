@@ -19,6 +19,14 @@
 
   <main class="main">
 
+    {% if save_error %}
+    <div class="save-banner error">Mentés sikertelen: {{ save_error }}</div>
+    {% elif request.args.get('warn') %}
+    <div class="save-banner warn">Mentve. Ezek a mezők üresen érkeztek, ezért változatlanul hagytuk: {{ request.args.get('warn') }}</div>
+    {% elif request.args.get('saved') %}
+    <div class="save-banner ok">Mentve.</div>
+    {% endif %}
+
     <form method="POST" action="/save" id="config-form">
 
       <!-- ===================== API kulcsok ===================== -->
@@ -73,6 +81,7 @@
           </div>
           <div class="toggle-row">
             <label class="toggle">
+              <input type="hidden" name="gemini_enabled__present" value="1">
               <input type="checkbox" name="gemini_enabled" id="gemini-toggle"
                 {% if config.scoring.gemini_enabled %}checked{% endif %}
                 onchange="setDisabled('gemini-fields', !this.checked)">
@@ -155,6 +164,7 @@
           </div>
           <div class="toggle-row">
             <label class="toggle">
+              <input type="hidden" name="email_enabled__present" value="1">
               <input type="checkbox" name="email_enabled" id="email-toggle"
                 {% if config.alerts.email.enabled %}checked{% endif %}
                 onchange="setDisabled('email-fields', !this.checked)">
@@ -192,6 +202,7 @@
           </div>
           <div class="toggle-row">
             <label class="toggle">
+              <input type="hidden" name="slack_enabled__present" value="1">
               <input type="checkbox" name="slack_enabled" id="slack-toggle"
                 {% if config.alerts.slack.enabled %}checked{% endif %}
                 onchange="setDisabled('slack-fields', !this.checked)">
@@ -296,9 +307,10 @@
         {% set processors = [
           ('generate-drafts', 'Válaszjavaslat generálás', 'Minden releváns, feldolgozatlan bejegyzésre 1 javaslat'),
           ('weekly-report', 'Heti riport', 'Slack-összefoglaló: források, top fájdalompontok'),
-          ('linkedin-content', 'Tartalom Pipeline (Blog + LinkedIn)', 'Heti blog- és poszt-javaslatok a top fájdalompontokból'),
           ('build-knowledge', 'Tudásbázis frissítése', 'A lokális mappákból (technical, repo) újraépíti a kontextust az AI számára')
         ] %}
+        {# A Tartalom Pipeline (Blog + LinkedIn) a Dashboard Áttekintő fülén kiemelt
+           kártya lett, innen eltávolítva — ld. dashboard.html #content-pipeline-card. #}
         {% for key, title, desc in processors %}
         <div class="run-row">
           <div class="run-info">
@@ -350,9 +362,10 @@
         {% set processors = [
           ('generate-drafts', 'Válaszjavaslat generálás', 'Minden releváns, feldolgozatlan bejegyzésre 1 javaslat'),
           ('weekly-report', 'Heti riport', 'Slack-összefoglaló: források, top fájdalompontok'),
-          ('linkedin-content', 'Tartalom Pipeline (Blog + LinkedIn)', 'Heti blog- és poszt-javaslatok a top fájdalompontokból'),
           ('build-knowledge', 'Tudásbázis frissítése', 'A lokális mappákból (technical, repo) újraépíti a kontextust az AI számára')
         ] %}
+        {# A Tartalom Pipeline (Blog + LinkedIn) a Dashboard Áttekintő fülén kiemelt
+           kártya lett, innen eltávolítva — ld. dashboard.html #content-pipeline-card. #}
         {% for key, title, desc in processors %}
         <div class="run-row">
           <div class="run-info">
