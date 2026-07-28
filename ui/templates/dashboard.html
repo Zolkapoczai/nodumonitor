@@ -1097,8 +1097,26 @@ function doCopy(id) {
     toast('Szöveg vágólapra másolva.');
   }
 }
+// A dontes naplozasa (drafts.decided_by). Ma nincs felhasznalo-azonositas, tehat
+// ez ONBEVALLAS: egyszer megkerdezzuk a nevet, es a bongeszo megjegyzi. A szerver
+// 'form' source-kent tarolja, hogy a naplo ne allitson hitelesitest.
+function deciderName() {
+  let who = localStorage.getItem('nodu_decider') || '';
+  if (!who) {
+    who = (prompt('A döntés naplózásához: mi a neved? (egyszer kérdezem)') || '').trim();
+    if (who) localStorage.setItem('nodu_decider', who);
+  }
+  return who;
+}
+function decisionBody() {
+  return {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ decided_by: deciderName() }),
+  };
+}
 function confirmApprove(id) {
-  fetch('/draft/' + id + '/approve', { method: 'POST' }).then(r => r.json()).then(() => {
+  fetch('/draft/' + id + '/approve', decisionBody()).then(r => r.json()).then(() => {
     document.getElementById('copy-' + id).style.display = 'none';
     document.getElementById('done-' + id).style.display = 'block';
     toast('Draft jóváhagyva. Eltávolítás a listából...');
@@ -1114,7 +1132,7 @@ function confirmApprove(id) {
 }
 function doReject(id) {
   if (!confirm('Biztosan elutasítod ezt a javaslatot?')) return;
-  fetch('/draft/' + id + '/reject', { method: 'POST' }).then(r => r.json()).then(() => {
+  fetch('/draft/' + id + '/reject', decisionBody()).then(r => r.json()).then(() => {
     const card = document.getElementById('dcard-' + id);
     card.style.transition = 'opacity .3s';
     card.style.opacity = '0';

@@ -65,7 +65,15 @@ def init_db(db_path: str) -> None:
             generated_at TEXT    NOT NULL,
             status       TEXT    DEFAULT 'pending',
             posted_at    TEXT,
-            note         TEXT
+            note         TEXT,
+            -- Ki dontott es mikor. A decided_by_source AZT MONDJA MEG, MENNYIRE
+            -- HIHETO a nev: ma nincs felhasznalo-azonositas a dashboardon, tehat
+            -- egy webes jovahagyas neve ONBEVALLAS ('form'), nem hitelesitett
+            -- identitas. Ha lesz auth, az 'auth' erteket adja, es a regi sorokrol
+            -- is latszik marad, hogy azok gyengebb bizonyitekok.
+            decided_by        TEXT,
+            decided_at        TEXT,
+            decided_by_source TEXT
         );
 
         CREATE TABLE IF NOT EXISTS signals (
@@ -107,6 +115,23 @@ def init_db(db_path: str) -> None:
     if "items_seen" not in run_cols:
         conn.execute("ALTER TABLE runs ADD COLUMN items_seen INTEGER")
         
+    # classify_attempts: hany osztalyozasi kiserlet tortent a poszton. A csonka
+    # JSON-t ado poszt korabban VEGTELENUL visszatert a sorba (nincs nyoma a
+    # sikertelen kiserletnek), es orankent elegetett egy fizetos hivast (§3.8).
+    if "classify_attempts" not in cols:
+        conn.execute("ALTER TABLE posts ADD COLUMN classify_attempts INTEGER DEFAULT 0")
+
+    # decided_by/_at/_by_source: KI hagyta jova vagy vetette el a draftot. Amig egy
+    # ember dolgozik a rendszerrel, a `status: approved` elegendo volt; tobb
+    # jovahagyonal viszont ertelmezhetetlen — nem tudod, ki dontott, es egy vitatott
+    # kimeno komment nem visszakovetheto. A regi sorokban NULL marad = "nem tudjuk"
+    # (ugyanaz a minta, mint a runs.items_seen-nel).
+    draft_cols = [r[1] for r in conn.execute("PRAGMA table_info(drafts)").fetchall()]
+    if "decided_by" not in draft_cols:
+        conn.execute("ALTER TABLE drafts ADD COLUMN decided_by TEXT")
+        conn.execute("ALTER TABLE drafts ADD COLUMN decided_at TEXT")
+        conn.execute("ALTER TABLE drafts ADD COLUMN decided_by_source TEXT")
+
     signal_cols = [r[1] for r in conn.execute("PRAGMA table_info(signals)").fetchall()]
     if "solved_internally" not in signal_cols:
         conn.execute("ALTER TABLE signals ADD COLUMN solved_internally INTEGER DEFAULT 0")
@@ -176,29 +201,73 @@ def get_post(db_path: str, post_id: int) -> dict | None:
     return dict(row) if row else None
 
 
-def get_unclassified_posts(db_path: str, limit: int = 20, search_term_null_only: bool = True) -> list[dict]:
+def get_unclassified_posts(db_path: str, limit: int = 20, search_term_null_only: bool = True,
+                           max_attempts: int = 3) -> list[dict]:
     """
     Meg nem osztalyozott posztok (nincs meg hozzajuk signals-sor) a Pain
     Classifier szamara. search_term_null_only=True (alapertelmezett) kizarja
     az ad-hoc keresesi zajokat (require_keywords=False mentesek), csak az
     utemezett connectorok mar elo-szurt talalatait osztalyozza.
+
+    A SORREND FIFO (`fetched_at ASC`), es a tobbszor elbukott poszt a sor VEGERE
+    kerul. Korabban `fetched_at DESC` volt, ami LIFO-t adott: 2026-07-28-i meres
+    szerint 257 osztalyozatlan poszt varakozott, a legregebbi **4 napja**, miközben
+    24 ora alatt 725 poszt lett osztalyozva — a regieket a friss beomlesek orokre
+    lenyomtak. A `classify_attempts` (posts) szamlalo pedig azt zarja, hogy egy
+    tartosan csonka JSON-t ado poszt orankent egy fizetos hivast egessen el a
+    vegtelenben (docs/04-rendszer-audit-2026-07-28.md §3.8).
     """
     conn = get_connection(db_path)
     where = "s.id IS NULL"
     if search_term_null_only:
         where += " AND p.search_term IS NULL"
+    if max_attempts is not None:
+        where += " AND COALESCE(p.classify_attempts, 0) < ?"
+    params: list = [max_attempts] if max_attempts is not None else []
     rows = conn.execute(
         f"""
         SELECT p.* FROM posts p
         LEFT JOIN signals s ON s.post_id = p.id
         WHERE {where}
-        ORDER BY p.fetched_at DESC
+        ORDER BY COALESCE(p.classify_attempts, 0) ASC, p.fetched_at ASC
         LIMIT ?
         """,
-        (limit,),
+        (*params, limit),
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def bump_classify_attempt(db_path: str, post_id: int) -> None:
+    """
+    A poszt osztalyozasi kiserletszamanak novelese.
+
+    A classifier a HIVAS ELOTT hivja: ha a valasz csonka JSON vagy a hivas kivetellel
+    all le, a szamlalo mar akkor is nott, tehat a poszt a sor vegere kerul, es
+    `max_attempts` felett kiesik. Igy a hibas poszt nem eget el vegtelen sok fizetos
+    hivast, de nem is veszik el csendben — a `classify_attempts` lekerdezheto.
+    """
+    conn = get_connection(db_path)
+    conn.execute(
+        "UPDATE posts SET classify_attempts = COALESCE(classify_attempts, 0) + 1 WHERE id = ?",
+        (post_id,),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_classify_backlog(db_path: str) -> dict:
+    """Osztalyozasi hatralek: hany poszt var, mennyi ideje, es hany esett ki kiserletszam miatt."""
+    conn = get_connection(db_path)
+    row = conn.execute("""
+        SELECT COUNT(*) AS waiting,
+               MIN(p.fetched_at) AS oldest,
+               SUM(CASE WHEN COALESCE(p.classify_attempts, 0) >= 3 THEN 1 ELSE 0 END) AS exhausted
+        FROM posts p LEFT JOIN signals s ON s.post_id = p.id
+        WHERE s.id IS NULL AND p.search_term IS NULL
+    """).fetchone()
+    conn.close()
+    return {"waiting": row["waiting"], "oldest": row["oldest"], "exhausted": row["exhausted"] or 0}
 
 
 def insert_signal(db_path: str, record: dict) -> bool:
@@ -241,7 +310,7 @@ def get_signals_for_review(db_path: str, min_severity: int = 0, limit: int = 100
         SELECT s.*, p.title, p.url, p.platform, p.source, p.author, p.body, p.keywords, p.score AS keyword_score
         FROM signals s JOIN posts p ON s.post_id = p.id
         WHERE s.severity >= ?
-        ORDER BY s.severity DESC, s.confidence DESC, s.classified_at DESC
+        ORDER BY s.severity DESC, s.buying_intent DESC, s.classified_at DESC
         LIMIT ?
         """,
         (min_severity, limit),
@@ -251,7 +320,8 @@ def get_signals_for_review(db_path: str, min_severity: int = 0, limit: int = 100
 
 
 def get_opportunities(db_path: str, only_pain: bool = True, min_severity: int = 1,
-                      limit: int = 100, platform: str = None) -> list[dict]:
+                      limit: int = 100, platform: str = None,
+                      post_status: str = None) -> list[dict]:
     """
     A dashboard "Lehetosegek" nezet forrasa: osztalyozott jelek a poszt
     adataival, fajdalom-fokuszban. Rendezes (prezentacios rangsor, NEM
@@ -262,11 +332,15 @@ def get_opportunities(db_path: str, only_pain: bool = True, min_severity: int = 
     platform: opcionalis csatorna-szures (`posts.platform` exakt egyezes). A
     dashboard ma kliens-oldalon szur a mar kirenderelt kartyakon, de a
     szerver-oldali szures igy is elerheto (pl. API/CLI).
+    post_status: opcionalis szures a poszt statuszara (pl. 'new' a napi digesthez).
+    HASZNALD, ha statusz szerint valogatsz — a Pythonban vegzett utoszures a
+    `limit` MIATT hibas eredmenyt ad (ld. `_opportunity_where` docstring).
+
     A valodi darabszamokhoz ld. `count_opportunities` /
     `get_opportunity_platform_counts` — a lista hossza NEM total.
     """
     conn = get_connection(db_path)
-    clause, params = _opportunity_where(only_pain, min_severity, platform)
+    clause, params = _opportunity_where(only_pain, min_severity, platform, post_status)
     rows = conn.execute(
         f"""
         SELECT s.*, p.title, p.url, p.platform, p.source, p.author,
@@ -275,7 +349,7 @@ def get_opportunities(db_path: str, only_pain: bool = True, min_severity: int = 
         FROM signals s JOIN posts p ON s.post_id = p.id
         WHERE {clause}
         ORDER BY s.nodu_mention DESC, s.is_pain DESC, s.severity DESC, s.buying_intent DESC,
-                 s.confidence DESC, s.classified_at DESC
+                 s.classified_at DESC
         LIMIT ?
         """,
         (*params, limit),
@@ -285,9 +359,20 @@ def get_opportunities(db_path: str, only_pain: bool = True, min_severity: int = 
 
 
 def _opportunity_where(only_pain: bool, min_severity: int,
-                       platform: str = None) -> tuple[str, list]:
-    """A `get_opportunities` szuro-feltetelei egy helyen — hogy a darabszamok
-    ugyanazt a halmazt szamoljak, mint amit a nezet megjelenit."""
+                       platform: str = None, post_status: str = None) -> tuple[str, list]:
+    """
+    A `get_opportunities` szuro-feltetelei egy helyen — hogy a darabszamok
+    ugyanazt a halmazt szamoljak, mint amit a nezet megjelenit.
+
+    `post_status`: a poszt statuszara szurunk MAR AZ SQL-BEN. Ez nem kozmetika —
+    a napi digest korabban Pythonban szurt a `status == 'new'`-ra, de a lekerdezes
+    mar levagta a listat a `limit`-nel (default 100), es a rendezes severity
+    szerinti, nem ido szerinti. Meres (2026-07-28): 35 varakozo jelbol a digest
+    3-at latott, 32 STRANDOLT — es strukturalisan sosem kerult volna sorra, mert a
+    mar 'alerted' sorok nem esnek ki a halmazbol, tehat a 100-as hatar monoton
+    lejjebb tolodik. Ez a §7/J–§7/N hibaosztaly harmadik elofordulasa volt, ezuttal
+    az ERTESITESI uton (docs/04-rendszer-audit-2026-07-28.md §1.2).
+    """
     where = ["p.search_term IS NULL", "s.severity >= ?"]
     params: list = [min_severity]
     if only_pain:
@@ -295,19 +380,25 @@ def _opportunity_where(only_pain: bool, min_severity: int,
     if platform:
         where.append("p.platform = ?")
         params.append(platform)
+    if post_status:
+        where.append("p.status = ?")
+        params.append(post_status)
     return " AND ".join(where), params
 
 
 def count_opportunities(db_path: str, only_pain: bool = True, min_severity: int = 1,
-                        platform: str = None) -> int:
+                        platform: str = None, post_status: str = None) -> int:
     """
     A lehetosegek VALODI szama — nem a megjelenitett lapmeret.
 
     Miert kulon fuggveny: a dashboard `limit=100`-cal kerte le a lehetosegeket, es
     a badge/metrika a lekert LISTA hosszat irta ki totalkent — 305 lehetoseg
     mellett is "100"-at. Ugyanaz a hiba, mint a Nyers leadeknel (HANDOFF §7/J).
+
+    `post_status`-szal ugyanaz a halmaz szamolhato, mint amit a digest kikuld —
+    ezzel ellenorizheto, hogy a kikuldes utan valoban 0 'new' jel maradt-e.
     """
-    clause, params = _opportunity_where(only_pain, min_severity, platform)
+    clause, params = _opportunity_where(only_pain, min_severity, platform, post_status)
     conn = get_connection(db_path)
     n = conn.execute(
         f"SELECT COUNT(*) AS cnt FROM signals s JOIN posts p ON s.post_id = p.id WHERE {clause}",
@@ -359,7 +450,7 @@ def get_recent_pain_signals(db_path: str, lookback_days: int = 7, limit: int = 8
                s.competitor_mentioned, s.competitor_name, p.platform, p.title
         FROM signals s JOIN posts p ON s.post_id = p.id
         WHERE s.is_pain = 1 AND p.search_term IS NULL AND p.fetched_at >= ?
-        ORDER BY s.nodu_mention DESC, s.severity DESC, s.buying_intent DESC, s.confidence DESC
+        ORDER BY s.nodu_mention DESC, s.buying_intent DESC, s.severity DESC, s.classified_at DESC
         LIMIT ?
         """,
         (cutoff, limit),
@@ -437,7 +528,7 @@ def get_pain_posts_without_draft(db_path: str, min_severity: int = 3,
         LEFT JOIN drafts d ON d.post_id = p.id
         WHERE (s.is_pain = 1 OR s.nodu_mention = 1) AND s.severity >= ? AND p.search_term IS NULL
               AND d.id IS NULL{exclude_sql}
-        ORDER BY s.nodu_mention DESC, s.severity DESC, s.buying_intent DESC, s.confidence DESC
+        ORDER BY s.nodu_mention DESC, s.buying_intent DESC, s.severity DESC, s.classified_at DESC
         LIMIT ?
         """,
         (min_severity, *exclude_params, limit),
@@ -588,14 +679,79 @@ def get_pending_drafts(db_path: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def mark_draft(db_path: str, draft_id: int, status: str, note: str = None) -> None:
+def mark_draft(db_path: str, draft_id: int, status: str, note: str = None,
+               decided_by: str = None, decided_by_source: str = None) -> None:
+    """
+    Draft statuszanak allitasa, a DONTES NAPLOZASAVAL.
+
+    `decided_by` = a dontest hozo neve/azonositoja, `decided_by_source` = mennyire
+    hiheto ez a nev:
+      'auth' — hitelesitett felhasznalo (ma nincs ilyen ut)
+      'form' — a webes felhasznalo ONBEVALLASA (basic-auth username vagy urlap-mezo)
+      'cli'  — a gepen bejelentkezett OS-felhasznalo (`main.py --review`)
+    A ket mezo egyutt jar: nev nelkul a source-t sem irjuk be, mert egy 'form'
+    jelolt ures nev semmit nem mond. Ha nincs nev, a regi viselkedes marad
+    (NULL = "nem tudjuk"), a statusz-valtas viszont akkor is megtortenik.
+    """
     conn = get_connection(db_path)
-    conn.execute(
-        "UPDATE drafts SET status = ?, posted_at = ?, note = ? WHERE id = ?",
-        (status, _utcnow().isoformat() if status == "posted" else None, note, draft_id),
-    )
+    if decided_by:
+        conn.execute(
+            """UPDATE drafts
+                  SET status = ?, posted_at = ?, note = ?,
+                      decided_by = ?, decided_at = ?, decided_by_source = ?
+                WHERE id = ?""",
+            (status, _utcnow().isoformat() if status == "posted" else None, note,
+             decided_by.strip()[:80], _utcnow().isoformat(),
+             (decided_by_source or "form"), draft_id),
+        )
+    else:
+        conn.execute(
+            "UPDATE drafts SET status = ?, posted_at = ?, note = ? WHERE id = ?",
+            (status, _utcnow().isoformat() if status == "posted" else None, note, draft_id),
+        )
     conn.commit()
     conn.close()
+
+
+def get_last_run_times(db_path: str) -> dict[str, str]:
+    """
+    Connectoronkent az UTOLSO futas kezdete (ISO-string), a `runs` tablabol.
+
+    Ket helyen kell: (1) az utemezo ebbol szamolja, mikor jarjon le legkozelebb egy
+    interval-job — igy egy szerver-ujrainditas NEM lo ki mindent azonnal
+    (2026-07-27-en 3 ora alatt 71 futas volt a varhato ~9 helyett, mert minden job
+    `next_run_time=now`-val regisztralt); (2) a heartbeat ebbol allapitja meg, hogy
+    egy connector EGYALTALAN NEM futott-e — a hianyzo futas korabban lathatatlan
+    volt (docs/04-rendszer-audit-2026-07-28.md §2.5 es §2.2).
+    """
+    conn = get_connection(db_path)
+    rows = conn.execute(
+        "SELECT connector, MAX(started_at) AS last_run FROM runs GROUP BY connector"
+    ).fetchall()
+    conn.close()
+    return {r["connector"]: r["last_run"] for r in rows if r["last_run"]}
+
+
+def get_decision_log(db_path: str, limit: int = 50) -> list[dict]:
+    """
+    A legutobbi draft-dontesek naploja (`drafts.decided_*`), legfrissebb elol.
+
+    Csak az a sor jon vissza, aminel TUDJUK, ki dontott — a migracio elotti
+    dontesek `decided_by`-ja NULL, es egy ures nevu sor semmit nem bizonyit.
+    A `decided_by_source` a naplo sulya: 'auth' > 'cli' > 'form' (ld. mark_draft).
+    """
+    conn = get_connection(db_path)
+    rows = conn.execute("""
+        SELECT d.id AS draft_id, d.status, d.decided_by, d.decided_at,
+               d.decided_by_source, d.note,
+               p.id AS post_id, p.platform, p.title, p.url
+        FROM drafts d JOIN posts p ON d.post_id = p.id
+        WHERE d.decided_by IS NOT NULL AND TRIM(d.decided_by) <> ''
+        ORDER BY d.decided_at DESC
+        LIMIT ?
+    """, (limit,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 
 def log_run(db_path: str, connector: str, started_at: str, finished_at: str,
@@ -620,21 +776,31 @@ def log_run(db_path: str, connector: str, started_at: str, finished_at: str,
 
 
 def get_connector_health(db_path: str, window: int = 5,
-                         active_within_hours: int = 24) -> list[dict]:
+                         active_within_hours: int = 24,
+                         expected: dict = None,
+                         stale_factor: float = 3.0) -> list[dict]:
     """
     Connector-egeszseg a `runs` naplobol — a nema hibak felderitesere.
 
-    Csak azokat a connectorokat vizsgalja, amelyek az elmult `active_within_hours`
-    oraban legalabb egyszer futottak (igy a kivezetett connectorok nem zajonganak),
-    es mindegyik utolso `window` futasat ertekeli:
+    Azokat a connectorokat vizsgalja, amelyek az elmult `active_within_hours`
+    oraban legalabb egyszer futottak, ES amelyeket az `expected` szerint FUTNI
+    KELLETT VOLNA. Statuszok:
 
       error     — MINDEN vizsgalt futas kivetellel allt le
       blind     — MINDEN vizsgalt futas 0 nyers elemet latott (szelektor/API-toress)
+      stale     — utemezve van, de `stale_factor` x periodus ideje nem futott
+                  (vagy soha nem futott). EZ A HIANYZO FUTAS.
       unknown   — kevesebb futas van, mint `window`, vagy egyik sem jelent items_seen-t
       ok        — minden mas (ha csak 1 futas is latott elemet, a cso el)
 
     A `new_posts=0` MAGABAN sosem hiba: egy egeszseges connector is adhat sokszor
     nullat, ha nincs uj tartalom.
+
+    `expected`: {connector_nev: periodus_percben} — a `main.connector_schedule()`
+    adja. NELKULE a fuggveny a regi modon mukodik: csak azt latja, ami futott,
+    tehat a HIANYZO futas eszrevetlen marad. Pontosan ez tortent 2026-07-28-ig: 5
+    connector esett ki csendben a 24 oras ablakbol, es a `/health` 200-at adott
+    (docs/04-rendszer-audit-2026-07-28.md §2.2).
     """
     cutoff = (_utcnow() - timedelta(hours=active_within_hours)).isoformat()
     conn = get_connection(db_path)
@@ -646,7 +812,46 @@ def get_connector_health(db_path: str, window: int = 5,
         ).fetchall()
     ]
 
-    report = []
+    expected = expected or {}
+    last_runs = {
+        r["connector"]: r["last_run"]
+        for r in conn.execute(
+            "SELECT connector, MAX(started_at) AS last_run FROM runs GROUP BY connector"
+        ).fetchall()
+    }
+
+    # Az elvart, de az ablakban nem futott connectorok: ezek a 'stale' jeloltek.
+    stale: list[dict] = []
+    now = _utcnow()
+    for name, interval in expected.items():
+        if name in active:
+            continue
+        raw = last_runs.get(name)
+        age_minutes = None
+        if raw:
+            try:
+                last = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+                if last.tzinfo is None:
+                    last = last.replace(tzinfo=timezone.utc)
+                age_minutes = (now - last).total_seconds() / 60.0
+            except ValueError:
+                age_minutes = None
+        limit_minutes = max(float(interval or 60), 1.0) * stale_factor
+        if age_minutes is None or age_minutes > limit_minutes:
+            stale.append({
+                "connector": name,
+                "status": "stale",
+                "runs_considered": 0,
+                "new_posts_in_window": 0,
+                "items_seen_in_window": None,
+                "last_error": (
+                    f"soha nem futott (utemezve: {interval} perc)" if raw is None else
+                    f"{int(age_minutes)} perc ota nem futott, pedig {interval} percenkent kellene"
+                ),
+                "last_run": raw,
+            })
+
+    report = list(stale)
     for connector in sorted(active):
         rows = conn.execute(
             """
