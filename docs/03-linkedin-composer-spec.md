@@ -29,6 +29,58 @@
 > Az architektúra leírása és a döntések indoklása a
 > `responder/linkedin_engine.py` modul-docstringjében van, a kód mellett.
 
+> ## ⚙️ KIEGÉSZÍTVE (2026-07-29) — Conversation Intent Layer (engine v2)
+> **Mérés:** 30+ kézzel értékelt LinkedIn-poszt. Vélemény-, dilemma- és
+> debate-posztokon a motor 91–95/100. Mesterség-, tutorial-, portfólió- és
+> technika-megosztás posztokon viszont **üzleti stratégiává, ROI-vá, szervezeti
+> hatássá emelte a témát**, amit a szerző szándékosan technikai szinten tartott:
+> a komment technikailag helyes volt, de más kérdésre válaszolt.
+>
+> **Diagnózis:** nem reasoning-hiba, hanem hiányzó döntési szint. A v1 minden
+> stratégiát egyenlően mért, függetlenül attól, milyen beszélgetésbe száll be.
+>
+> **A változás:** a stratégia-választás ELÉ bekerült két új, a REASON-hívásban
+> felvett mező (`conversation_intent`, `discourse_level`) — **nincs új LLM-hívás,
+> a hívás-szám változatlanul 2, legfeljebb 3.** A kettőből a kód két külön
+> mechanizmussal dolgozik:
+>
+> | | Mechanizmus | Mit tesz |
+> |---|---|---|
+> | **Intent-bias** | lágy súlyozás | 13 beszélgetés-típus (`CONVERSATION_INTENTS`) mindegyike fel- vagy lehúzza az egyes stratégiákat. A stratégia-tér nem szűkül, csak átrendeződik. |
+> | **Level-vétó** | kemény kapu | Ha a szerző **technical** síkon beszél, a `business_impact` nem jelölhető (`_LEVEL_VETO`). Ez a munkaparancs "Critical Principle"-je. |
+>
+> **Miért vétó és nem levonás:** ha a modell a `business_impact`-et 10-re
+> pontozza és a többit 4-re, egy −2-es bias még mindig átengedi — a mérhető
+> következmény pedig pont ez a hiba volt. Az elfogadási kritérium is absztolút
+> ("Craftsmanship posts no longer drift toward business value"), nem statisztikai.
+>
+> **Nincs regresszió a működő eseten:** a `professional_opinion` és az
+> `industry_debate` intent-bias-a **üres** — a 91–95/100-as esetben a döntés
+> bitre a v1-es. Teszttel rögzítve (`test_linkedin_intent.py` B szekció, v1
+> referencia-implementációval összevetve).
+>
+> **A két szabály interakciója (tudatos döntés):** egy vélemény-poszt, amit a
+> szerző technikai síkon tartott, a vétó miatt NEM kap `business_impact`
+> stratégiát — holott a munkaparancs a `business_impact`-et a
+> `professional_opinion` preferált listáján is felsorolja. A feloldás: az
+> intent-lista azt mondja meg, *mi jöhet szóba*, a szint azt, *hol vagyunk*. Ha a
+> szerző már üzleti síkra tette a beszélgetést, a vétó nem lép be, és a
+> `business_impact` nyerhet (`_LEVEL_STRATEGY_BIAS['business']` még fel is húzza).
+>
+> **Kapu (stage 9b):** technikai síkon az executive-absztrakció szótár (ROI,
+> competitive advantage, profitability, organisational/digital transformation,
+> TCO, business case, bottom line — EN+HU) determinisztikus **sértés**, mert
+> mérhető. Precízió-orientált lista: a "cost"/"value"/"efficiency" szándékosan
+> NINCS benne, mert technikai kommentben ártatlanul is előfordul.
+>
+> **Kill switch:** `linkedin.intent_layer: 'on' | 'off'`. Kikapcsolva a döntés
+> ÉS a compose-prompt is bitre a v1-es (`_LAYER_OFF` az egységelem) — így a
+> 30+ posztos mérés ugyanezen a kódon megismételhető A/B-ként, git-revert nélkül.
+>
+> **Válasz-szerződés:** a dashboard 8 legacy mezője változatlan; az új mezők
+> (`conversation_intent`, `discourse_level`, `topic_gravity`, `strategy_scores`,
+> `strategy_vetoed`, `intent_layer`) additívak. DB-séma nem változott.
+
 ## Cél
 Egy dashboard-fül, ahova egy LinkedIn-poszt szövege bemásolható, és a rendszer egyetlen Gemini-hívással eldönti, melyik válasz-mód illik rá, majd megírja a választ.
 

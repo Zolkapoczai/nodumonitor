@@ -19,6 +19,47 @@ valasztotta: parafrazalt.
   Stage 8-9  GATE     — DETERMINISZTIKUS ellenorzes kod ban (nem LLM), es csak
                         sertes eseten egy celzott ujrairas.
 
+CONVERSATION INTENT LAYER (2026-07-29, v2)
+A v1 minden strategiat EGYENLOEN mert, fuggetlenul attol, MILYEN beszelgetesbe
+szall be a komment. 30+ kezzel ertekelt poszt merese: velemeny-/dilemma-/
+debate-posztokon 91-95/100, DE mesterseg-, tutorial-, portfolio- es
+technika-megosztas posztokon a motor uzleti strategiava, ROI-va, szervezeti
+hatassa emelte a temat, holott a szerzo szandekosan technikai szinten tartotta.
+A komment technikailag helyes volt, de MAS KERDESRE valaszolt, mint amit a
+szerzo feltett.
+
+Ez nem reasoning-hiba volt, hanem hianyzo dontesi szint. Ezert a strategia-
+valasztas ELE bekerult ket uj, a REASON-hivasban felvett mezo:
+
+  conversation_intent — MILYEN szakmai beszelgetes ez? (nem: mi a temaja)
+  discourse_level     — MELYIK sikon beszel a szerzo: technical | management |
+                        business
+
+es a kettobol a KOD ket kulon mechanizmussal dolgozik:
+
+  1. INTENT-BIAS (lagy)  — minden intent el- vagy lehuzza az egyes strategiakat
+     (`CONVERSATION_INTENTS[...]["bias"]`). A pontozas marad a modelle, a
+     sulyozas a kode. A strategia-ter nem szukul, csak atrendezodik.
+  2. LEVEL-VETO (kemeny) — ha a szerzo TECHNIKAI sikon beszel, a
+     `business_impact` egyaltalan nem jelolhet (`_LEVEL_VETO`). Ez a munkaparancs
+     "Critical Principle"-je: a beszelgetes absztrakcios szintjet nem a motor
+     valasztja meg. Lagy levonas itt nem elegendo volt: ha a modell 10-re
+     pontozza a business_impactet es 4-re a tobbit, egy -2-es bias meg mindig
+     atengedi — a merheto kovetkezmeny pedig pont ez a hiba volt.
+
+MIERT NEM UJ LLM-HIVAS A LAYER
+Az intent egy OSZTALYOZAS ugyanarrol a szovegrol, amit a REASON-hivas mar
+elemez — kulon hivasban ugyanazt a posztot olvasnank ujra, +1 korral es
++latenciaval, szinkron UI-muveletben. Ket uj sema-mezo ugyanazt a hatart huzza
+meg, koltseg nelkul (a projekt elve: "Egy hivas, egy sema" —
+01-architektura-audit §6/§7). A hivas-szam VALTOZATLAN: 2, legfeljebb 3.
+
+AMI SZANDEKOSAN NEM VALTOZOTT
+A `professional_opinion` es az `industry_debate` intent bias-a URES — ezek a
+merésben 91-95/100-at kaptak, tehat a mai viselkedes a helyes viselkedes.
+Az elfogadasi kriterium ("Opinion posts remain as strong as today") csak igy
+garantalhato: a nem-torott esetben a dontes bitre azonos a v1-essel.
+
 MIERT 2 HIVAS ES NEM 9 (a brief 9 stage-et ir le)
 1. A projekt sajat, rogzitett elve (01-architektura-audit §6/§7): "Egy hivas, egy
    sema — nem 6 kulon agent-hivas", koltseg es latencia miatt.
@@ -52,7 +93,7 @@ from google.genai import types
 
 from env_secrets import get_secret
 
-ENGINE_VERSION = "linkedin-tle-v1"
+ENGINE_VERSION = "linkedin-tle-v2"
 
 # --- Stage 4: strategiak -----------------------------------------------------
 # Pontosan EGY strategia valasztodik kommentenkent. A `directive` a compose-
@@ -115,6 +156,256 @@ PERSPECTIVES = [
     "business_value", "data_quality", "change_management",
 ]
 
+# --- Conversation Intent Layer (uj: stage 3.5, a strategia-valasztas ELOTT) --
+# "Milyen szakmai beszelgetes ez?" — NEM "mi a temaja". A `recognise` a REASON-
+# prompt osztalyozasi kriteriuma, a `directive` a COMPOSE-hivasba kerul, a `bias`
+# pedig a strategia-pontszamokat sulyozza (pick_strategy).
+#
+# A BIAS-SZAMOK OLVASATA: a modell 0-10-re pontoz, tehat +/-1.5 eszreveheto de
+# felulirhato, +/-3 dontő, -5 gyakorlatilag kizar. Ahol a munkaparancs "strong
+# preference"/"strong penalty"-t irt, ott a nagyobb ertek all.
+CONVERSATION_INTENTS: dict[str, dict] = {
+    "professional_opinion": {
+        "label": "Professional Opinion",
+        "recognise": "the author argues a position or states a view and invites "
+                     "agreement or disagreement",
+        "directive": "The author is arguing a position. Engage with the argument "
+                     "itself — its reasoning, its limits, its consequences.",
+        # URES SZANDEKOSAN: a merésben ez az eset 91-95/100. Nincs mit javitani,
+        # es a v1-es dontest bitre meg kell orizni (elfogadasi kriterium 1).
+        "bias": {},
+    },
+    "industry_debate": {
+        "label": "Industry Debate",
+        "recognise": "the post enters an ongoing industry-level disagreement, or "
+                     "contrasts conflicting viewpoints or vendor/standard camps",
+        "directive": "This is a live industry disagreement. Take a clear, "
+                     "defensible position and say what it rests on.",
+        "bias": {},                       # ld. professional_opinion — mert eset
+    },
+    "engineering_problem": {
+        "label": "Engineering Problem",
+        "recognise": "the author describes an unresolved technical problem, "
+                     "failure, blocker or dilemma they are actually facing",
+        "directive": "There is an unresolved problem here. Produce new insight "
+                     "into the problem — a cause, a constraint, a trade-off the "
+                     "author has not named yet.",
+        # A munkaparancs: preferalt systems_thinking / field_experience /
+        # practical_lesson / missing_perspective; business_impact "only moderate
+        # influence". A constructive_challenge NEM kap levonast: egy hibas
+        # premisszat kimondani a legertekesebb hozzaszolas lehet.
+        "bias": {
+            "systems_thinking": 2.0,
+            "field_experience": 2.0,
+            "practical_lesson": 2.0,
+            "missing_perspective": 1.5,   # a -1.5 alapbias-t nullara hozza
+            "business_impact": -1.5,
+            "future_outlook": -1.0,
+        },
+    },
+    "technical_tutorial": {
+        "label": "Technical Tutorial",
+        "recognise": "the post teaches a method, workflow or software technique, "
+                     "or walks through how to do something",
+        "directive": "The author is teaching. EXTEND the lesson: practical "
+                     "nuance, an implementation trade-off, a common mistake, or "
+                     "a field observation that makes the method more reliable. "
+                     "No executive abstraction.",
+        "bias": {
+            "field_experience": 2.5,
+            "practical_lesson": 2.5,
+            "missing_perspective": 0.5,
+            "future_outlook": -2.0,
+            "business_impact": -4.0,
+        },
+    },
+    "craftsmanship": {
+        "label": "Craftsmanship",
+        "recognise": "the author shares detailed modelling, drafting or "
+                     "engineering craft — how a thing was actually made, with "
+                     "attention to the making itself",
+        "directive": "The author is sharing craft. CONTRIBUTE CRAFT: your own "
+                     "observation at the same level of concreteness. Do not "
+                     "reframe the work as a business or organisational matter.",
+        # A munkaparancs Root Cause-a NEVSZERINT KETTOT nevez meg elkovetokent:
+        # "Business Impact OR Systems Thinking may win even when the author is
+        # simply sharing craftsmanship" — ezert a systems_thinking is levonast kap.
+        "bias": {
+            "field_experience": 3.0,
+            "practical_lesson": 3.0,
+            "constructive_challenge": -1.0,
+            "systems_thinking": -2.0,
+            "future_outlook": -2.5,
+            "business_impact": -5.0,
+        },
+    },
+    "portfolio_showcase": {
+        "label": "Portfolio Showcase",
+        "recognise": "the author presents finished work, a project or a "
+                     "visual/render primarily to show it",
+        "directive": "The author is showing work. Acknowledge ONE concrete "
+                     "engineering observation about it, then continue the "
+                     "technical discussion with one practical insight. No ROI, "
+                     "no competitive advantage, no organisational framing.",
+        # A publikus kritika bemutatott munkara tarsadalmilag is rossz valasz,
+        # ezert a constructive_challenge itt erosebb levonast kap, mint masutt.
+        "bias": {
+            "field_experience": 2.5,
+            "practical_lesson": 2.0,
+            "systems_thinking": -1.5,
+            "constructive_challenge": -2.0,
+            "future_outlook": -2.0,
+            "business_impact": -5.0,
+        },
+    },
+    "case_study": {
+        "label": "Case Study",
+        "recognise": "the post reports a concrete implementation with its "
+                     "context, decisions and outcome",
+        "directive": "This is a reported implementation. Engage with the "
+                     "decisions and their consequences — what generalises from "
+                     "this case and what does not.",
+        # Hatareset: a case study gyakran MAR tartalmaz uzleti keretezest. Ha
+        # igen, azt a discourse_level jelzi es a veto nem lep be; ha nem, ez a
+        # moderalt levonas tartja technikai sikon.
+        "bias": {
+            "field_experience": 1.5,
+            "practical_lesson": 1.5,
+            "missing_perspective": 1.0,
+            "systems_thinking": 0.5,
+            "business_impact": -1.0,
+        },
+    },
+    "product_demonstration": {
+        "label": "Product Demonstration",
+        "recognise": "the author demonstrates a tool, plugin, feature or "
+                     "release, their own or someone else's",
+        "directive": "A tool is being demonstrated. Engage with what it does and "
+                     "does not handle in real workflows. Never position a "
+                     "competing product.",
+        "bias": {
+            "field_experience": 2.0,
+            "practical_lesson": 1.5,
+            "constructive_challenge": 1.0,
+            "business_impact": -2.0,
+            "future_outlook": -0.5,
+        },
+    },
+    "reflection": {
+        "label": "Reflection",
+        "recognise": "the author reflects personally on their career, practice, "
+                     "a lesson learned or a change in how they work",
+        "directive": "This is personal reflection. Match it with observation "
+                     "from practice, not with analysis of the author.",
+        "bias": {
+            "field_experience": 2.0,
+            "practical_lesson": 1.0,
+            "missing_perspective": 0.5,
+            "systems_thinking": -1.0,
+            "constructive_challenge": -2.0,
+            "business_impact": -3.0,
+        },
+    },
+    "question_to_community": {
+        "label": "Question to Community",
+        "recognise": "the author asks the reader a real question and wants an "
+                     "answer",
+        "directive": "ANSWER THE QUESTION THAT WAS ASKED. Do not change the "
+                     "subject, and do not answer a more interesting question "
+                     "instead. The answer comes first; anything else is a rider.",
+        # A `missing_perspective` itt a legrosszabb valasz: "van egy szempont,
+        # amit nem vettel figyelembe" pontosan a temavaltas. Az alapbias-szal
+        # egyutt -3.5, tehat gyakorlatilag kizart.
+        "bias": {
+            "field_experience": 3.0,
+            "practical_lesson": 3.0,
+            "missing_perspective": -2.0,
+            "constructive_challenge": -1.5,
+            "future_outlook": -2.0,
+            "business_impact": -3.0,
+            "systems_thinking": -0.5,
+        },
+    },
+    "announcement": {
+        "label": "Announcement",
+        "recognise": "the author announces their own news — a release, a role, "
+                     "a milestone, an event",
+        "directive": "This is the author's own news. One clause of "
+                     "acknowledgement, then one substantive observation about "
+                     "what it changes in practice. Never criticise it.",
+        "bias": {
+            "field_experience": 1.5,
+            "future_outlook": 1.0,
+            "practical_lesson": 0.5,
+            "systems_thinking": -1.0,
+            "business_impact": -2.0,
+            "constructive_challenge": -3.0,
+        },
+    },
+    "industry_news": {
+        "label": "Industry News",
+        "recognise": "the author shares third-party news (a vendor release, an "
+                     "acquisition, a standard) without arguing a position on it",
+        "directive": "News is being relayed without a position. Supply the "
+                     "reading of it that practitioners need — what actually "
+                     "changes for the work.",
+        "bias": {
+            "future_outlook": 1.5,
+            "field_experience": 1.0,
+            "missing_perspective": 1.0,
+            "constructive_challenge": -1.0,
+        },
+    },
+    "general": {
+        "label": "General",
+        "recognise": "none of the above fits — use this only as a last resort",
+        "directive": "Contribute one substantive professional observation at the "
+                     "author's own level.",
+        "bias": {},                       # ismeretlen eset: v1-es viselkedes
+    },
+}
+
+# --- Discourse level: MELYIK sikon beszel a szerzo? --------------------------
+# Ez NEM ugyanaz, mint a `technical_depth` (az azt meri, MENNYIRE melyen technikai
+# a szoveg). Egy poszt lehet felszines ES uzleti sikon fekvo, vagy expert-szintu
+# ES tisztan technikai. A ketto kulon mezo, kulon dontest tamogat.
+_DISCOURSE_LEVELS = ["technical", "management", "business"]
+
+# A "Critical Principle" KODBAN. Lagy levonas helyett VETO — ld. a modul-
+# docstring 2. pontjat: a -2-es bias atengedi a 10-re pontozott business_impactet,
+# es pont ez volt a jelentett hiba.
+_LEVEL_VETO: dict[str, set[str]] = {
+    "technical": {"business_impact"},
+    "management": set(),
+    "business": set(),
+}
+
+# Ha a szerzo MAR uzleti sikra tette a beszelgetest, ott folytatni nem elemelés,
+# hanem a beszelgetes kovetese — ilyenkor a business_impact felertekelodik.
+_LEVEL_STRATEGY_BIAS: dict[str, dict[str, float]] = {
+    "technical": {},                      # a vetot nem kell levonassal duplazni
+    "management": {},
+    "business": {"business_impact": 1.5},
+}
+
+
+def _intent_key(raw) -> str:
+    """A modell intent-mezoje -> ervenyes kulcs (ismeretlen esetben 'general')."""
+    key = str(raw or "").strip().lower()
+    return key if key in CONVERSATION_INTENTS else "general"
+
+
+def _level_key(raw) -> str:
+    """A modell discourse_level-mezoje -> ervenyes kulcs.
+
+    Ismeretlen ertek eseten 'technical' a default, mert az a SZIGORUBB ag (ott
+    all a veto). Egy hibas/hianyzo osztalyozas igy nem nyithatja meg az uzleti
+    keretezest — a hallgatolagos viselkedes a konzervativ.
+    """
+    key = str(raw or "").strip().lower()
+    return key if key in _DISCOURSE_LEVELS else "technical"
+
+
 # --- Visszafele-kompatibilis lekepezes --------------------------------------
 # A dashboard `renderLinkedinResult()`-ja 8 mezot olvas (topic, post_type,
 # engagement_intent, reply_style, brand_mode, confidence, reply_text, rationale).
@@ -151,25 +442,49 @@ LinkedIn post. You produce REASONING ONLY — never the comment itself.
 Fill the JSON fields in this order:
 
 1. topic / post_type — classify semantically, one value each.
-2. author_objective — what the author actually wants (attention, validation,
+2. conversation_intent — WHAT KIND OF PROFESSIONAL CONVERSATION IS THIS? This is
+   not the topic and not the subject matter: it is what the author is DOING.
+   Exactly one value:
+{chr(10).join(f'   - {k}: {v["recognise"]}' for k, v in CONVERSATION_INTENTS.items())}
+3. discourse_level — WHICH PLANE the author chose to speak on. Report what IS
+   there, not what could be there:
+   - technical — the post stays with the work itself: geometry, families,
+     parameters, methods, tools, code, modelling decisions.
+   - management — the post is about process, teams, coordination, standards
+     adoption, workflows across people.
+   - business — the post itself already argues cost, revenue, risk, competitive
+     position, client value or organisational strategy.
+   Choosing "business" or "management" when the author never went there is an
+   ERROR, and it changes how the comment is written. When genuinely unsure,
+   answer "technical". This is INDEPENDENT of technical_depth: a shallow post can
+   be on the business plane, an expert post can be purely technical.
+4. topic_gravity — the post's natural centre of gravity in 2-5 words: the
+   concrete subject a knowledgeable reply would stay close to. Examples:
+   "Revit family authoring", "Civil 3D surface modelling", "MEP clash
+   coordination", "IFC property mapping". Name the subject, not the abstraction.
+5. author_objective — what the author actually wants (attention, validation,
    recruitment, debate, teaching, announcement...). Not a summary.
-3. audience — who the post is written for.
-4. technical_depth — surface | practitioner | expert.
-5. emotional_tone — the author's register (neutral, frustrated, promotional,
+6. audience — who the post is written for.
+7. technical_depth — surface | practitioner | expert.
+8. emotional_tone — the author's register (neutral, frustrated, promotional,
    celebratory, reflective, provocative...).
-6. core_thesis — the ONE central claim, in one sentence. Ignore supporting
+9. core_thesis — the ONE central claim, in one sentence. Ignore supporting
    arguments and examples. If the post has several, pick the load-bearing one.
-7. missing_perspective — the STRONGEST dimension the post does not address,
-   from the allowed list. Exactly one. Never a list.
-8. missing_perspective_reason — one sentence: why this omission matters here.
-9. strategy_fit — score EVERY strategy 0-10 on how much professional value it
-   would add to THIS post. Do not pick a winner; score them all honestly, and
-   let the scores differ. The missing perspective from step 7 is an input to
-   this scoring, not the answer to it.
-{chr(10).join(f'   - {k}: fits when {v["wins_when"]}' for k, v in STRATEGIES.items())}
-10. strategy_reason — one sentence: what the comment has to accomplish for this
+10. missing_perspective — the STRONGEST dimension the post does not address,
+    from the allowed list. Exactly one. Never a list.
+11. missing_perspective_reason — one sentence: why this omission matters here.
+12. strategy_fit — score EVERY strategy 0-10 on how much professional value it
+    would add to THIS post. Do not pick a winner; score them all honestly, and
+    let the scores differ. The missing perspective from step 10 is an input to
+    this scoring, not the answer to it.
+{chr(10).join(f'    - {k}: fits when {v["wins_when"]}' for k, v in STRATEGIES.items())}
+    Score on professional value ALONE. Do NOT down-score a strategy because it
+    seems to clash with the conversation_intent or the discourse_level — those
+    are weighted separately, after you answer. Double-counting them here distorts
+    the decision.
+13. strategy_reason — one sentence: what the comment has to accomplish for this
     specific audience to be worth reading.
-11. explicit_tool_request — true ONLY if the post (or the author in it) directly
+14. explicit_tool_request — true ONLY if the post (or the author in it) directly
     asks the reader to name a tool, product, plugin, service or vendor.
     True examples: "what do you use for this?", "any tool recommendations?",
     "how do you solve this in practice — which software?", "milyen eszkozzel
@@ -177,19 +492,23 @@ Fill the JSON fields in this order:
     FALSE for: describing a problem, complaining, asking for opinions or advice
     in general, rhetorical questions, or asking "how" without asking "with what".
     Someone stating a pain is NOT asking for a product. Default to false.
-12. tool_request_quote — if explicit_tool_request is true, copy the EXACT words
+15. tool_request_quote — if explicit_tool_request is true, copy the EXACT words
     from the post that contain the request, verbatim, nothing else. Empty string
     if false. Do not paraphrase — the quote is verified against the post.
-11. insight — ONE original, specific claim that is NOT stated in the post and is
+16. insight — ONE original, specific claim that is NOT stated in the post and is
     not a restatement of it. This is the substance of the comment. Go deeper,
     not wider. No hedging, no generalities like "communication is important".
-12. confidence — 0.0-1.0, your confidence in this reasoning.
+    The insight must sit at the discourse_level you reported in step 3 — on a
+    technical post, a deeper technical claim, NOT a business consequence.
+17. confidence — 0.0-1.0, your confidence in this reasoning.
 
 Hard rules:
 - Do NOT summarise the post anywhere.
 - The insight must survive the question "would an experienced professional learn
   something from this?". If not, choose a different one.
 - No invented statistics, customer names or personal anecdotes.
+- Depth is not abstraction. Going deeper into the author's own subject is worth
+  more than moving up a level away from it.
 """.strip()
 
 _REASON_SCHEMA = {
@@ -197,6 +516,10 @@ _REASON_SCHEMA = {
     "properties": {
         "topic": {"type": "STRING", "enum": _TOPICS},
         "post_type": {"type": "STRING", "enum": _POST_TYPES},
+        # Conversation Intent Layer — a strategia-valasztas ELOTTI dontes.
+        "conversation_intent": {"type": "STRING", "enum": list(CONVERSATION_INTENTS)},
+        "discourse_level": {"type": "STRING", "enum": _DISCOURSE_LEVELS},
+        "topic_gravity": {"type": "STRING"},
         "author_objective": {"type": "STRING"},
         "audience": {"type": "STRING"},
         "technical_depth": {"type": "STRING", "enum": ["surface", "practitioner", "expert"]},
@@ -217,7 +540,8 @@ _REASON_SCHEMA = {
         "confidence": {"type": "NUMBER"},
     },
     "required": [
-        "topic", "post_type", "author_objective", "audience", "technical_depth",
+        "topic", "post_type", "conversation_intent", "discourse_level",
+        "topic_gravity", "author_objective", "audience", "technical_depth",
         "emotional_tone", "core_thesis", "missing_perspective",
         "missing_perspective_reason", "strategy_fit", "strategy_reason",
         "explicit_tool_request", "tool_request_quote", "insight", "confidence",
@@ -236,7 +560,48 @@ _BRAND_RELEVANT_TOPICS = {"archicad", "revit", "interoperability", "ifc"}
 _STRATEGY_BIAS = {"missing_perspective": -1.5}
 
 
-def pick_strategy(fit: dict) -> str:
+def effective_bias(intent: str = "general",
+                   discourse_level: str = "technical") -> dict[str, float]:
+    """Strategiankent a HAROM bias-forras osszege.
+
+      alap   — `_STRATEGY_BIAS`: a fallback-levonas, intenttol fuggetlenul.
+      intent — `CONVERSATION_INTENTS[intent]["bias"]`: milyen beszelgetes ez.
+      szint  — `_LEVEL_STRATEGY_BIAS[level]`: hol all a szerzo absztrakcioban.
+
+    Osszeadodnak, nem felulirjak egymast: igy a `missing_perspective` alap-levonasa
+    megmarad ott is, ahol az intent felhozza (pl. engineering_problem +1.5 -> net 0),
+    es nem kell minden intentnel ujra leirni.
+    """
+    intent_bias = CONVERSATION_INTENTS[_intent_key(intent)].get("bias", {})
+    level_bias = _LEVEL_STRATEGY_BIAS.get(_level_key(discourse_level), {})
+    return {
+        slug: (_STRATEGY_BIAS.get(slug, 0.0)
+               + intent_bias.get(slug, 0.0)
+               + level_bias.get(slug, 0.0))
+        for slug in STRATEGIES
+    }
+
+
+def score_strategies(fit: dict, intent: str = "general",
+                     discourse_level: str = "technical") -> tuple[dict, set]:
+    """(sulyozott pontszamok, vetozott strategiak) — a dontes teljes nyoma.
+
+    Kulon fuggveny, hogy a dontes VISSZAADHATO es teszthető legyen a valasztas
+    nelkul is: a `generate_comment` ezt teszi be a valaszba
+    (`strategy_scores` / `strategy_vetoed`), igy utolag megmagyarazhato, miert
+    az a strategia nyert — ugyanaz az elv, mint a `brand_gate_reason`-nel.
+    """
+    bias = effective_bias(intent, discourse_level)
+    scores = {}
+    for slug in STRATEGIES:
+        raw = fit.get(slug)
+        base = float(raw) if isinstance(raw, (int, float)) else 0.0
+        scores[slug] = round(base + bias[slug], 2)
+    return scores, set(_LEVEL_VETO.get(_level_key(discourse_level), set()))
+
+
+def pick_strategy(fit: dict, intent: str = "general",
+                  discourse_level: str = "technical") -> str:
     """Stage 4 dontes — DETERMINISZTIKUS, a modell pontszamaibol.
 
     Miert nem a modell valaszt: enum-valasztasnal pozicio- es
@@ -247,15 +612,21 @@ def pick_strategy(fit: dict) -> str:
     a pontszamot sulyprofil szamolja"). Igy a dontes auditalhato es
     reprodukalhato: ugyanaz a pontszam-vektor mindig ugyanazt adja.
 
+    2026-07-29 (v2): a pontszamra rakerul a Conversation Intent Layer sulyozasa,
+    es a VETO. A default `discourse_level="technical"` a SZIGORUBB ag — egy
+    hivas, ami nem ad meg szintet, nem nyithatja meg az uzleti keretezest.
+
     Holtverseny: a STRATEGIES deklaracios sorrendje dont (a fallback all utolso).
     """
+    scores, vetoed = score_strategies(fit, intent, discourse_level)
+    # A veto sosem urithet ki a jelolt-listat: 7 strategia, legfeljebb 1 vetozott.
+    # A `or list(STRATEGIES)` csak vedoszabaly egy jovobeli, szelesebb veto ellen.
+    candidates = [s for s in STRATEGIES if s not in vetoed] or list(STRATEGIES)
+
     best, best_score = None, None
-    for slug in STRATEGIES:                      # stabil, deklaracios sorrend
-        raw = fit.get(slug)
-        score = (float(raw) if isinstance(raw, (int, float)) else 0.0)
-        score += _STRATEGY_BIAS.get(slug, 0.0)
-        if best_score is None or score > best_score:
-            best, best_score = slug, score
+    for slug in candidates:                      # stabil, deklaracios sorrend
+        if best_score is None or scores[slug] > best_score:
+            best, best_score = slug, scores[slug]
     return best or "missing_perspective"
 
 # --- Stage 6-7: COMPOSE -----------------------------------------------------
@@ -266,6 +637,23 @@ written by a practitioner, not by an assistant.
 
 Structure: roughly 20% acknowledgement of the author's point, 80% new thinking.
 The acknowledgement is a bridge, not praise — one clause, then move on.
+
+STAY IN THE CONVERSATION THAT IS ALREADY HAPPENING. This is the hardest rule and
+the one most often broken:
+- Write at the abstraction level the AUTHOR chose. Never climb from technical to
+  process, to management, to business, to strategy. If the author is discussing
+  how a wall type behaves, the comment discusses how a wall type behaves — not
+  what it costs the practice.
+- Stay near the post's centre of gravity. A post about Revit families is about
+  family authoring, not about digital transformation. A post about Civil 3D
+  surfaces is about terrain modelling, not about hardware budgets.
+- Depth is not abstraction. Going further INTO the author's own subject is
+  thought leadership. Moving UP and away from it is changing the subject.
+- Continue the conversation; do not reframe it. If the author asks something,
+  answer it. If the author teaches, extend the lesson. If the author shows work,
+  discuss the engineering in it. If the author shares craft, contribute craft.
+Only follow the discussion to commercial, organisational or strategic ground if
+the author has ALREADY taken it there.
 
 Experience layer: make the insight credible with observational framing — the
 equivalent of "In enterprise projects...", "One recurring pattern is...",
@@ -320,6 +708,48 @@ _FORBIDDEN_PATTERNS: list[tuple[str, str]] = [
 ]
 
 _BRAND_PATTERN = re.compile(r"\bnodu\b|\bnodu[ .-]?bridge\b", re.IGNORECASE)
+
+# --- Stage 9b: executive-absztrakcio szivargas (2026-07-29) ------------------
+# A munkaparancs nevszerint felsorolt "Avoid" listaja: generic ROI, competitive
+# advantage, profitability, organisational transformation, executive framing. Ezek
+# MERHETOK, tehat a kapuba tartoznak, nem csak a promptba (ugyanaz az elv, mint a
+# tiltott dicseret-fordulatoknal): a prompt-utasitast a modell megszegheti, a
+# regexet nem.
+#
+# PRECIZIO > FEDES. Egy hamis pozitiv egy FELESLEGES ujrairo hivast koltene, ezert
+# csak olyan kifejezes van a listan, ami technikai kommentben nem fordul elo
+# ARTATLANUL. Ezert nincs itt "cost", "value", "efficiency", "time" — ezek egy
+# technikai kommentben teljesen legitimek ("the cost of remodelling the family").
+_EXEC_ABSTRACTION_PATTERNS: list[tuple[str, str]] = [
+    (r"\broi\b", "ROI"),
+    (r"\breturn on investment\b", "ROI"),
+    (r"\bmegter(?:ules|ülés)\b", "ROI (HU)"),
+    (r"\bcompetitive advantage\b", "versenyelony-keretezes"),
+    (r"\bversenyelony\b|\bversenyelőny\b", "versenyelony-keretezes (HU)"),
+    (r"\bprofitabilit(?:y|ies)\b", "jovedelmezoseg-keretezes"),
+    (r"\bjovedelmezoseg\b|\bjövedelmezőség\b", "jovedelmezoseg-keretezes (HU)"),
+    (r"\borganisational transformation\b|\borganizational transformation\b",
+     "szervezeti transzformacio"),
+    (r"\bszervezeti (?:atalakulas|átalakulás|transzformacio|transzformáció)\b",
+     "szervezeti transzformacio (HU)"),
+    (r"\bdigital transformation\b", "digitalis transzformacio"),
+    (r"\bdigit(?:alis|ális) transzform(?:acio|áció)\b", "digitalis transzformacio (HU)"),
+    (r"\btotal cost of ownership\b|\btco\b", "TCO"),
+    (r"\bbusiness case\b", "business case"),
+    (r"\bbottom line\b", "bottom line"),
+    (r"\bstakeholder value\b|\bshareholder value\b", "stakeholder value"),
+    (r"\bbusiness value\b", "business value"),
+    (r"\buzleti ertek\b|\büzleti érték\b", "business value (HU)"),
+    (r"\bc-level\b|\bexecutive buy-?in\b", "executive framing"),
+    (r"\bbottom-?line impact\b", "bottom line"),
+]
+
+# Azok az intentek, ahol a munkaparancs KIFEJEZETTEN tiltja az uzleti keretezest,
+# fuggetlenul attol, mit mondott a discourse_level. Ha a szint-osztalyozas
+# tevedne, ez a masodik halo.
+_NO_EXEC_ABSTRACTION_INTENTS = {
+    "craftsmanship", "portfolio_showcase", "technical_tutorial",
+}
 
 # Az experience-layer angol pelda-frazisai. Elesben (2026-07-27) a modell ezeket
 # SZO SZERINT beemelte egy magyar kommentbe ("Egy recurring pattern, hogy...",
@@ -385,12 +815,18 @@ def _normalise(comment: str) -> str:
     return text
 
 
-def check_quality(comment: str, post_text: str, brand_allowed: bool = False) -> list[str]:
+def check_quality(comment: str, post_text: str, brand_allowed: bool = False,
+                  intent: str = "", discourse_level: str = "") -> list[str]:
     """Stage 9 — deterministikus kapu. Visszaadja a KONKRET serteseket.
 
     A lista uressege a "mehet" jel. A hivo ezt a listat adja at az ujrairo
     hivasnak, hogy a modell tudja, mit kell javitani — igy egy korbol javul,
     nem talalgat.
+
+    `intent` / `discourse_level` (2026-07-29): ha a szerzo technikai sikon
+    beszelt — vagy az intent kifejezetten tiltja az uzleti keretezest —, akkor az
+    executive-absztrakcio szotar is sertes. Ures ertekkel a kapu a v1-es
+    viselkedest adja, tehat a regi hivasok valtozatlanul mukodnek.
     """
     issues: list[str] = []
     text = (comment or "").strip()
@@ -401,6 +837,16 @@ def check_quality(comment: str, post_text: str, brand_allowed: bool = False) -> 
     for pattern, label in _FORBIDDEN_PATTERNS:
         if re.search(pattern, low, re.IGNORECASE | re.MULTILINE):
             issues.append(f"tiltott fordulat ({label})")
+
+    # Absztrakcio-szivargas: uzleti/vezetoi szotar olyan beszelgetesben, amit a
+    # szerzo technikai szinten tartott. Csak akkor mer, ha van mihez mernie —
+    # ures intent/level eseten (regi hivas) kihagyjuk.
+    if (discourse_level == "technical") or (intent in _NO_EXEC_ABSTRACTION_INTENTS):
+        for pattern, label in _EXEC_ABSTRACTION_PATTERNS:
+            if re.search(pattern, low, re.IGNORECASE | re.MULTILINE):
+                issues.append(
+                    f"uzleti absztrakcio technikai beszelgetesben ({label})"
+                )
 
     wc = len(_words(text))
     if wc < MIN_WORDS:
@@ -484,6 +930,28 @@ def _brand_policy(config: dict) -> str:
     return value if value in ("off", "on_request", "auto") else "on_request"
 
 
+# A layer kikapcsolt allapotanak "egysegeleme": a `general` intent bias-a ures, a
+# `management` szint bias-a ES vetoja is ures — ezzel a dontes BITRE a v1-es.
+_LAYER_OFF = ("general", "management")
+
+
+def _intent_layer_enabled(config: dict) -> bool:
+    """`linkedin.intent_layer`: on (default) | off.
+
+    Miert van kapcsolo: a Conversation Intent Layer viselkedes-valtozas, amit
+    benchmarkon merunk. Ezzel a 30+ posztos meres UGYANAZON a kodon megismetelheto
+    ki- es bekapcsolva, git-revert nelkul. Kikapcsolva a dontes bitre a v1-es
+    (ld. `_LAYER_OFF`), es a compose-prompt sem kap intent/szint sort.
+
+    A YAML az on/off/yes/no szavakat booleanna alakitja (YAML 1.1) — ezert a bool
+    agat is kezeljuk, ugyanaz a csapda, mint a `_brand_policy`-nal (HANDOFF §4/17).
+    """
+    raw = (config.get("linkedin", {}) or {}).get("intent_layer", "on")
+    if isinstance(raw, bool):
+        return raw
+    return str(raw).strip().lower() not in ("off", "false", "0", "no", "none")
+
+
 def _quote_in_post(quote: str, post_text: str, min_words: int = 3) -> bool:
     """Szerepel-e az idezet TENYLEGESEN a posztban?
 
@@ -539,16 +1007,38 @@ def brand_mention_allowed(config: dict, reasoning: dict,
 
 
 def _compose_user_msg(post_text: str, author_line: str, reasoning: dict,
-                      brand_allowed: bool, issues: list[str] | None = None) -> str:
+                      brand_allowed: bool, issues: list[str] | None = None,
+                      intent_layer: bool = True) -> str:
     """A compose-hivas feladat-uzenete.
 
     A kritikus megkotesek (nyelv, hossz, tilalmak) a system-promptban IS benne
     vannak, de itt megismetelodnek: a HANDOFF §4/2 elesben megtanult lecke
     szerint a modell a csak listaelemkent szereplo szabalyt nem tartja be.
+
+    `intent_layer=False` eseten az intent/szint/gravity sorok kimaradnak — igy a
+    kikapcsolt layer a v1-es promptot allitja elo.
     """
     strat = STRATEGIES[reasoning["strategy"]]
-    parts = [
-        f"{author_line}POST:\n{post_text[:1800]}\n",
+    intent = CONVERSATION_INTENTS[_intent_key(reasoning.get("conversation_intent"))]
+    level = _level_key(reasoning.get("discourse_level"))
+    gravity = (reasoning.get("topic_gravity") or "").strip()
+
+    # A beszelgetes-tipus es az absztrakcios szint a HIVAS ELEJERE kerul, nem a
+    # vegere: a HANDOFF §4/2 lecke szerint a modell a lista vegen szereplo
+    # megkotest gyakran nem tartja be. Ez a ket sor donti el, MELYIK
+    # beszelgetesbe szall be — a strategia mar csak azt, hogyan.
+    parts = [f"{author_line}POST:\n{post_text[:1800]}\n"]
+    if intent_layer:
+        parts.append(f"CONVERSATION TYPE: {intent['label']} — {intent['directive']}")
+        parts.append(
+            f"THE AUTHOR IS SPEAKING ON THE {level.upper()} PLANE. Write on that "
+            f"same plane. Do not move the discussion to a higher level of "
+            f"abstraction."
+        )
+        if gravity:
+            parts.append(f"CENTRE OF GRAVITY: {gravity}. Stay close to this subject.")
+    parts += [
+        "",
         "REASONING (use it, do not repeat it):",
         f"- core thesis: {reasoning['core_thesis']}",
         f"- missing perspective: {reasoning['missing_perspective']} "
@@ -561,6 +1051,14 @@ def _compose_user_msg(post_text: str, author_line: str, reasoning: dict,
         "Write it in the SAME language as the POST above. Do not switch language.",
         "Do not praise, do not summarise, do not open with agreement.",
     ]
+    if intent_layer:
+        parts.append("Do not reframe the conversation into a different one.")
+        if level == "technical":
+            parts.append(
+                "The author stayed technical, so you stay technical: no ROI, no "
+                "competitive advantage, no profitability, no organisational or "
+                "executive framing. Contribute engineering substance instead."
+            )
     if brand_allowed:
         # Csak akkor jutunk ide, ha a poszt tenylegesen eszkozt kert (vagy a
         # globalis 'auto' mod aktiv). A megnevezes ilyenkor a KERDESRE adott
@@ -615,7 +1113,12 @@ def generate_comment(config: dict, post_text: str, author_name: str = "",
         reasoning = _call_json(
             client, model, _REASON_PROMPT,
             f"{author_line}POST:\n{post_text[:2000]}",
-            _REASON_SCHEMA, max_tokens=900,
+            # 900 -> 1100: a semaba harom uj mezo kerult (conversation_intent,
+            # discourse_level, topic_gravity). A ket enum nehany token, a
+            # topic_gravity 2-5 szo — de a csonka-JSON hiba (§4/1) itt a TELJES
+            # valaszt viszi, ezert a keret inkabb bo. A fel nem hasznalt keret nem
+            # kerul semmibe: a szamlazas a tenyleges output-tokenre megy.
+            _REASON_SCHEMA, max_tokens=1100,
         )
     except Exception as e:
         print(f"[linkedin-tle] reasoning HIBA: {e}")
@@ -623,8 +1126,30 @@ def generate_comment(config: dict, post_text: str, author_name: str = "",
     if not reasoning or not isinstance(reasoning.get("strategy_fit"), dict):
         print(f"[linkedin-tle] Ervenytelen reasoning: {reasoning}")
         return {"error": "A reasoning-lépés érvénytelen választ adott."}
+
+    # --- Stage 3.5: Conversation Intent Layer ---
+    # A modell OSZTALYOZ (szenzor), a sulyozast es a vetot a kod vegzi (biro) —
+    # §4/16. Kikapcsolt layer eseten a `_LAYER_OFF` par az egysegelem, tehat a
+    # dontes bitre a v1-es.
+    intent_layer = _intent_layer_enabled(config)
+    if intent_layer:
+        intent = _intent_key(reasoning.get("conversation_intent"))
+        level = _level_key(reasoning.get("discourse_level"))
+    else:
+        intent, level = _LAYER_OFF
+    # A normalizalt ertekeket visszairjuk: innentol a compose es a kapu is a
+    # KODBAN ervenyesnek elfogadott erteket lassa, nem a modell nyers stringjet.
+    reasoning["conversation_intent"] = intent
+    reasoning["discourse_level"] = level
+
     # Stage 4: a dontest a kod hozza a modell pontszamaibol (ld. pick_strategy).
-    reasoning["strategy"] = pick_strategy(reasoning["strategy_fit"])
+    reasoning["strategy"] = pick_strategy(reasoning["strategy_fit"], intent, level)
+    strategy_scores, strategy_vetoed = score_strategies(
+        reasoning["strategy_fit"], intent, level)
+    print(f"[linkedin-tle] intent={intent} | szint={level} | "
+          f"gravity={(reasoning.get('topic_gravity') or '-')!r}"
+          + (f" | vetozott={sorted(strategy_vetoed)}" if strategy_vetoed else "")
+          + ("" if intent_layer else " | INTENT LAYER KIKAPCSOLVA"))
 
     # Markaemlites: a POSZT tulajdonsaga, nem globalis beallitas (ld.
     # brand_mention_allowed). Az idezetet ellenorizzuk a posztban.
@@ -637,7 +1162,7 @@ def generate_comment(config: dict, post_text: str, author_name: str = "",
     for attempt in range(2):
         user_msg = _compose_user_msg(
             post_text, author_line, reasoning, brand_allowed,
-            issues if attempt else None,
+            issues if attempt else None, intent_layer=intent_layer,
         )
         try:
             out = _call_json(client, model, _COMPOSE_PROMPT, user_msg,
@@ -646,7 +1171,13 @@ def generate_comment(config: dict, post_text: str, author_name: str = "",
             print(f"[linkedin-tle] compose HIBA: {e}")
             return {"error": f"Gemini API hiba (compose): {e}"}
         comment = _normalise(((out or {}).get("comment") or ""))
-        issues = check_quality(comment, post_text, brand_allowed)
+        # A kapu csak akkor meri az absztrakcio-szivargast, ha a layer be van
+        # kapcsolva — kikapcsolva a v1-es kapu fut.
+        issues = check_quality(
+            comment, post_text, brand_allowed,
+            intent=intent if intent_layer else "",
+            discourse_level=level if intent_layer else "",
+        )
         if not issues:
             break
         rewrites = attempt + 1
@@ -655,14 +1186,18 @@ def generate_comment(config: dict, post_text: str, author_name: str = "",
     if not comment:
         return {"error": "A kompozíciós lépés üres kommentet adott."}
 
-    intent, style = _STRATEGY_TO_LEGACY[reasoning["strategy"]]
+    # `legacy_intent`, NEM `intent`: a fenti `intent` a Conversation Intent Layer
+    # erteke, es ez a sor korabban elarnyekolta (a valasz-osszeallitas ezutan
+    # `CONVERSATION_INTENTS['share_experience']`-t keresett -> KeyError MINDEN
+    # hivason). A ket fogalom kulon nevet kap, hogy ne csuszhasson ossze ujra.
+    legacy_intent, style = _STRATEGY_TO_LEGACY[reasoning["strategy"]]
     strat_label = STRATEGIES[reasoning["strategy"]]["label"]
 
     return {
         # --- legacy mezok: a dashboard ezeket olvassa, formatum valtozatlan ---
         "topic": reasoning.get("topic", "general"),
         "post_type": reasoning.get("post_type", "general"),
-        "engagement_intent": intent,
+        "engagement_intent": legacy_intent,
         "reply_style": style,
         # A UI harom erteket ismer (LI_BRAND_LABELS): bridge | nodu | none.
         # "bridge" akkor, ha a megnevezes tenyleg megtortent ES interop-temaban —
@@ -677,6 +1212,14 @@ def generate_comment(config: dict, post_text: str, author_name: str = "",
                      f"(kihagyott szempont: {reasoning.get('missing_perspective', '')})".strip(),
         # --- uj, additiv mezok (a UI figyelmen kivul hagyja oket) ---
         "engine": ENGINE_VERSION,
+        # Conversation Intent Layer — a dontes teljes, utolag megmagyarazhato nyoma.
+        "conversation_intent": intent,
+        "conversation_intent_label": CONVERSATION_INTENTS[intent]["label"],
+        "discourse_level": level,
+        "topic_gravity": reasoning.get("topic_gravity", ""),
+        "intent_layer": intent_layer,
+        "strategy_scores": strategy_scores,          # sulyozott pontszamok
+        "strategy_vetoed": sorted(strategy_vetoed),  # amit a szint kizart
         "strategy": reasoning["strategy"],
         "strategy_label": strat_label,
         "core_thesis": reasoning.get("core_thesis", ""),

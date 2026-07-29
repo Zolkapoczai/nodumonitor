@@ -146,14 +146,24 @@ check("A4 no-op mentes -> ures lista, fajl bajtra valtozatlan",
 live_copy = make_fixture("live_a.yaml", None) if False else os.path.join(TMPDIR, "live_a.yaml")
 shutil.copy(LIVE_CONFIG, live_copy)
 live_before = read_text(live_copy)
-check("A5 elo config: kiindulo komment-only sorok = 206", count_comment_only(live_before) == 206)
-check("A6 elo config: kiindulo inline kommentek = 8", count_inline_comments(live_before) == 8)
+# A kiindulo szamot a FAJLBOL vesszuk, nem beegetve: a config.yaml elo dokumentum
+# (2026-07-29-en pl. a linkedin.intent_layer 14 komment-sorral bovult), es egy
+# beegetett darabszam minden legitim config-szerkesztesnel elhasal, holott a
+# MERT INVARIANS nem a szam, hanem hogy az iras utan UGYANANNYI marad.
+live_comment_lines = count_comment_only(live_before)
+live_inline_comments = count_inline_comments(live_before)
+check("A5 elo config: erdemben kommentelt (a komment-only sorok szama > 150)",
+      live_comment_lines > 150, str(live_comment_lines))
+check("A6 elo config: van inline komment is", live_inline_comments >= 8,
+      str(live_inline_comments))
 patch_config_file(live_copy, {("weekly_report", "language"): "en"})
 live_after = read_text(live_copy)
-check("A7 elo config MASOLATAN egy mezo irasa utan is 206 komment-only marad",
-      count_comment_only(live_after) == 206, str(count_comment_only(live_after)))
-check("A8 elo config MASOLATAN egy mezo irasa utan is 8 inline komment marad",
-      count_inline_comments(live_after) == 8, str(count_inline_comments(live_after)))
+check("A7 elo config MASOLATAN egy mezo irasa utan MIND a komment-only sor marad",
+      count_comment_only(live_after) == live_comment_lines,
+      f"{count_comment_only(live_after)} != {live_comment_lines}")
+check("A8 elo config MASOLATAN egy mezo irasa utan MIND az inline komment marad",
+      count_inline_comments(live_after) == live_inline_comments,
+      f"{count_inline_comments(live_after)} != {live_inline_comments}")
 b_after1 = read_bytes(live_copy)
 changed2 = patch_config_file(live_copy, {("weekly_report", "language"): "en"})  # ismetelt, valtozatlan
 check("A9 elo config masolat: ismetelt mentes ugyanazzal az ertekkel -> bajtra no-op",

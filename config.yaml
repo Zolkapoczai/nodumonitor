@@ -487,6 +487,21 @@ linkedin:
   # IDÉZŐJEL KELL: a YAML az off/on/yes/no szavakat booleanná alakítja, és akkor
   # a string-összehasonlítás csendben mindig hamis lenne.
   brand_positioning: 'on_request'
+  # intent_layer — Conversation Intent Layer (2026-07-29, engine v2).
+  #   'on'  — (ALAPÉRTELMEZÉS) a motor a stratégia-választás ELŐTT eldönti, MILYEN
+  #           szakmai beszélgetésbe száll be (conversation_intent), és MELYIK
+  #           síkon beszél a szerző (discourse_level: technical/management/
+  #           business). Az intent súlyozza a stratégia-pontszámokat; technikai
+  #           síkon a business_impact stratégia VETÓZOTT.
+  #           Indok: 30+ kézzel értékelt poszt mérése — vélemény-/debate-posztokon
+  #           91-95/100, de mesterség-, tutorial- és portfólió-posztokon a motor
+  #           üzleti stratégiává emelte a témát, amit a szerző szándékosan
+  #           technikai szinten tartott.
+  #   'off' — a v1-es viselkedés: minden stratégia egyenlően versenyez, nincs
+  #           vetó, és a compose-prompt sem kap intent/szint sort. A döntés bitre
+  #           azonos az engine v1-essel — így ugyanezen a kódon A/B-zhető.
+  # IDÉZŐJEL KELL: a YAML az on/off szavakat booleanná alakítja (HANDOFF §4/17).
+  intent_layer: 'on'
 linkedin_content:
   enabled: true
   posts_per_week: 2
