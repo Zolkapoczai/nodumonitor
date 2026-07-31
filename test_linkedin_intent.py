@@ -29,10 +29,13 @@ def check(name, cond, detail=""):
 
 from responder.linkedin_engine import (  # noqa: E402
     CONVERSATION_INTENTS, STRATEGIES, ENGINE_VERSION, _DISCOURSE_LEVELS,
+    RESPONDER_ROLES, RESPONSE_MODES, HUMAN_TEMPERATURES,
     _LEVEL_VETO, _LEVEL_STRATEGY_BIAS, _STRATEGY_BIAS, _LAYER_OFF,
     _REASON_SCHEMA, _NO_EXEC_ABSTRACTION_INTENTS, _EXEC_ABSTRACTION_PATTERNS,
-    _intent_key, _level_key, _intent_layer_enabled, _compose_user_msg,
+    _intent_key, _level_key, _responder_role_key, _response_mode_key,
+    _human_temperature_key, _intent_layer_enabled, _compose_user_msg,
     effective_bias, score_strategies, pick_strategy, check_quality,
+    ai_fingerprint_terms,
 )
 
 STRAT_KEYS = set(STRATEGIES)
@@ -59,15 +62,21 @@ check("A5 mindharom szinthez van veto- es bias-bejegyzes",
       all(lv in _LEVEL_VETO and lv in _LEVEL_STRATEGY_BIAS for lv in _DISCOURSE_LEVELS))
 
 props, req = _REASON_SCHEMA["properties"], _REASON_SCHEMA["required"]
-check("A6 a harom uj mezo a semaban ES kotelezo",
+check("A6 az intent/szint/gravity/role/shape/temperature mezok a semaban ES kotelezoek",
       all(f in props and f in req
-          for f in ("conversation_intent", "discourse_level", "topic_gravity")))
+          for f in ("conversation_intent", "discourse_level", "topic_gravity",
+                    "expected_responder_role", "response_mode", "human_temperature")))
 check("A7 a sema enum == a taxonomia kulcsai",
       props["conversation_intent"]["enum"] == list(CONVERSATION_INTENTS)
-      and props["discourse_level"]["enum"] == _DISCOURSE_LEVELS)
-check("A8 az engine-verzio bumpolva", ENGINE_VERSION.endswith("v2"), ENGINE_VERSION)
+      and props["discourse_level"]["enum"] == _DISCOURSE_LEVELS
+      and props["expected_responder_role"]["enum"] == list(RESPONDER_ROLES)
+      and props["response_mode"]["enum"] == list(RESPONSE_MODES)
+      and props["human_temperature"]["enum"] == HUMAN_TEMPERATURES)
+check("A8 az engine-verzio bumpolva", ENGINE_VERSION.endswith("v3"), ENGINE_VERSION)
 check("A9 a legacy post_type mezo MEGMARADT (dashboard-szerzodes)",
       "post_type" in props and "post_type" in req)
+check("A10 personal_experience intent letezik (human temperature vedelme)",
+      "personal_experience" in CONVERSATION_INTENTS)
 
 
 # --- B) nincs regresszio a mukodo eseten ------------------------------------
@@ -241,6 +250,37 @@ check("G10 a munkaparancs 'Avoid' listaja mind a harom intentre all",
       {"craftsmanship", "portfolio_showcase", "technical_tutorial"})
 
 
+# --- G2) response shaping: emberi hang, konkretseg, stilus -----------------
+check("G2.1 ismeretlen szerep konzervativ peer default",
+      _responder_role_key("nonsense") == "peer_practitioner")
+check("G2.2 ismeretlen response mode technikai kozelseg default",
+      _response_mode_key("nonsense") == "technical_extension")
+check("G2.3 ismeretlen temperature gyakorlati default",
+      _human_temperature_key("nonsense") == "practical")
+check("G2.4 ervenyes role/mode/temperature normalizalva marad",
+      _responder_role_key("PRODUCT_REVIEWER") == "product_reviewer"
+      and _response_mode_key("direct_answer") == "direct_answer"
+      and _human_temperature_key("reflective") == "reflective")
+
+stock = "We often see the parameter GUID become the real failure point after handover. " + TECH_OK
+check("G2.5 sablonos nyitas SERTES", any("ismetlodo nyitas" in i for i in
+      check_quality(stock, POST, False, "engineering_problem", "technical")))
+
+efficiency_ending = TECH_OK + " This improves operational efficiency."
+check("G2.6 sablonos hatekonysag-zaras SERTES", any("hatekony" in i for i in
+      check_quality(efficiency_ending, POST, False, "engineering_problem", "technical")))
+
+fingerprint = TECH_OK + " The governance framework creates operational efficiency."
+check("G2.7 ket uj framework-kifejezes technikai sikon SERTES", any("AI-ujjlenyomat" in i for i in
+      check_quality(fingerprint, POST, False, "engineering_problem", "technical")))
+check("G2.8 egyetlen uj framework-kifejezes nem hamis pozitiv", not any("AI-ujjlenyomat" in i for i in
+      check_quality(TECH_OK + " The governance question remains open.", POST, False,
+                    "engineering_problem", "technical")))
+source_framework = "The governance framework for this workflow needs attention."
+check("G2.9 szerzo sajat framework-nyelve nem szamolodik",
+      ai_fingerprint_terms("The governance framework changes slowly.", source_framework) == [])
+
+
 # --- H) kill switch ---------------------------------------------------------
 check("H1 default: bekapcsolva", _intent_layer_enabled({}) is True)
 check("H2 'off' -> kikapcsolva",
@@ -258,6 +298,9 @@ REASONING = {
     "strategy": "field_experience",
     "conversation_intent": "craftsmanship",
     "discourse_level": "technical",
+    "expected_responder_role": "peer_practitioner",
+    "response_mode": "technical_extension",
+    "human_temperature": "practical",
     "topic_gravity": "Revit family authoring",
     "core_thesis": "Nested families are overused.",
     "missing_perspective": "lifecycle",
@@ -273,27 +316,33 @@ check("I2 bekapcsolva: az absztrakcios sik a promptban van", "TECHNICAL PLANE" i
 check("I3 bekapcsolva: a centre of gravity atmegy", "Revit family authoring" in on)
 check("I4 bekapcsolva: technikai sikon a ROI-tilalom kimondva",
       "no ROI" in on and "executive framing" in on)
-check("I5 KIKAPCSOLVA: egyik uj sor sem kerul be (v1-es prompt)",
+check("I5 bekapcsolva: szerep, response shape es human temperature atmegy",
+      "YOUR EXPECTED ROLE: peer_practitioner" in on
+      and "RESPONSE SHAPE: technical_extension" in on
+      and "HUMAN TEMPERATURE: practical" in on)
+check("I6 KIKAPCSOLVA: egyik uj sor sem kerul be (v1-es prompt)",
       not any(s in off for s in ("CONVERSATION TYPE", "PLANE", "CENTRE OF GRAVITY",
-                                 "no ROI", "Do not reframe")))
-check("I6 a reasoning-mezok mindket agban benne vannak",
+                                 "YOUR EXPECTED ROLE", "RESPONSE SHAPE",
+                                 "HUMAN TEMPERATURE", "stock consultant opening",
+                                 "generic payoff", "no ROI", "Do not reframe")))
+check("I7 a reasoning-mezok mindket agban benne vannak",
       "core thesis" in on and "core thesis" in off
       and REASONING["insight"] in on and REASONING["insight"] in off)
 
 biz = dict(REASONING, discourse_level="business", conversation_intent="professional_opinion")
 biz_msg = _compose_user_msg("post body", "", biz, False, None, intent_layer=True)
-check("I7 business sikon nincs technikai-tilalom sor", "no ROI" not in biz_msg)
-check("I8 business sikon a sik-megjeloles BUSINESS", "BUSINESS PLANE" in biz_msg)
+check("I8 business sikon nincs technikai-tilalom sor", "no ROI" not in biz_msg)
+check("I9 business sikon a sik-megjeloles BUSINESS", "BUSINESS PLANE" in biz_msg)
 
 no_grav = dict(REASONING, topic_gravity="   ")
-check("I9 ures gravity eseten a sor kimarad",
+check("I10 ures gravity eseten a sor kimarad",
       "CENTRE OF GRAVITY" not in
       _compose_user_msg("p", "", no_grav, False, None, intent_layer=True))
-check("I10 az ujrairo kor a konkret hibalistat atadja",
+check("I11 az ujrairo kor a konkret hibalistat atadja",
       "tul rovid (12 szo, min 60)" in
       _compose_user_msg("p", "", REASONING, False, ["tul rovid (12 szo, min 60)"],
                         intent_layer=True))
-check("I11 minden intent directive-je bekerul a promptba (nincs KeyError)",
+check("I12 minden intent directive-je bekerul a promptba (nincs KeyError)",
       all("CONVERSATION TYPE" in _compose_user_msg(
           "p", "", dict(REASONING, conversation_intent=i), False, None, True)
           for i in CONVERSATION_INTENTS))
@@ -310,6 +359,8 @@ import responder.linkedin_engine as eng  # noqa: E402
 REASON_OUT = {
     "topic": "revit", "post_type": "experience",
     "conversation_intent": "craftsmanship", "discourse_level": "technical",
+    "expected_responder_role": "peer_practitioner",
+    "response_mode": "technical_extension", "human_temperature": "practical",
     "topic_gravity": "Revit family authoring",
     "author_objective": "share craft", "audience": "BIM practitioners",
     "technical_depth": "expert", "emotional_tone": "reflective",
@@ -379,6 +430,10 @@ check("J3 az intent atkerult a valaszba",
 check("J4 a discourse_level es a gravity atkerult",
       res_on.get("discourse_level") == "technical"
       and res_on.get("topic_gravity") == "Revit family authoring")
+check("J4.1 role, response shape es human temperature atkerult",
+      res_on.get("expected_responder_role") == "peer_practitioner"
+      and res_on.get("response_mode") == "technical_extension"
+      and res_on.get("human_temperature") == "practical")
 check("J5 VEGPONTTOL VEGPONTIG: a top-pontszamu business_impact NEM nyert",
       res_on.get("strategy") != "business_impact", str(res_on.get("strategy")))
 check("J6 helyette mesterseg-strategia nyert",
@@ -388,7 +443,9 @@ check("J7 a dontes nyoma visszajon (auditalhatosag)",
       isinstance(res_on.get("strategy_scores"), dict)
       and res_on.get("strategy_vetoed") == ["business_impact"])
 check("J8 a compose-prompt megkapta az intent-sorokat",
-      any("CONVERSATION TYPE" in p and "TECHNICAL PLANE" in p for p in prompts_on))
+      any("CONVERSATION TYPE" in p and "TECHNICAL PLANE" in p
+          and "YOUR EXPECTED ROLE" in p and "RESPONSE SHAPE" in p
+          and "HUMAN TEMPERATURE" in p for p in prompts_on))
 check("J9 a DASHBOARD-SZERZODES all: mind a 8 legacy mezo megvan",
       all(k in res_on for k in ("topic", "post_type", "engagement_intent",
                                 "reply_style", "brand_mode", "confidence",
@@ -396,7 +453,7 @@ check("J9 a DASHBOARD-SZERZODES all: mind a 8 legacy mezo megvan",
 check("J10 a kapu atengedte a kommentet (nincs uzleti absztrakcio benne)",
       res_on.get("quality_issues") == [] and res_on.get("rewrites") == 0,
       str(res_on.get("quality_issues")))
-check("J11 az engine-verzio a valaszban v2", res_on.get("engine") == "linkedin-tle-v2")
+check("J11 az engine-verzio a valaszban v3", res_on.get("engine") == "linkedin-tle-v3")
 check("J12 KIKAPCSOLVA: ugyanezen a bemeneten a v1-es dontes (business_impact)",
       res_off.get("strategy") == "business_impact" and res_off.get("intent_layer") is False,
       str(res_off.get("strategy")))

@@ -93,7 +93,7 @@ from google.genai import types
 
 from env_secrets import get_secret
 
-ENGINE_VERSION = "linkedin-tle-v2"
+ENGINE_VERSION = "linkedin-tle-v3"
 
 # --- Stage 4: strategiak -----------------------------------------------------
 # Pontosan EGY strategia valasztodik kommentenkent. A `directive` a compose-
@@ -306,6 +306,23 @@ CONVERSATION_INTENTS: dict[str, dict] = {
             "business_impact": -3.0,
         },
     },
+    "personal_experience": {
+        "label": "Personal Experience",
+        "recognise": "the author shares a lived moment, visit, interaction or "
+                     "personal observation, where the human experience is the "
+                     "point rather than a lesson or a framework",
+        "directive": "This is a human experience. Respond as a fellow "
+                     "practitioner: stay with the people, observation and immediate "
+                     "meaning. Do not convert the story into process, governance or "
+                     "organisational language.",
+        "bias": {
+            "field_experience": 2.5,
+            "practical_lesson": 0.5,
+            "systems_thinking": -1.5,
+            "constructive_challenge": -2.0,
+            "business_impact": -3.0,
+        },
+    },
     "question_to_community": {
         "label": "Question to Community",
         "recognise": "the author asks the reader a real question and wants an "
@@ -371,6 +388,35 @@ CONVERSATION_INTENTS: dict[str, dict] = {
 # ES tisztan technikai. A ketto kulon mezo, kulon dontest tamogat.
 _DISCOURSE_LEVELS = ["technical", "management", "business"]
 
+# --- Conversation-shaping layer (v3) ----------------------------------------
+# Az intent azt mondja meg, MILYEN beszelgetes zajlik; ez a ket mezo azt, milyen
+# szerepet var el a szerzo a valaszolotol, illetve MI legyen a komment formaja.
+# Mindketto ugyanabban a REASON-hivasban jon vissza: nem indokol uj LLM-kort.
+RESPONDER_ROLES: dict[str, str] = {
+    "peer_practitioner": "Speak as a peer practitioner sharing directly relevant craft.",
+    "technical_advisor": "Give the requested technical advice plainly before adding context.",
+    "discussion_partner": "Explore the author's question or position with them, not at them.",
+    "product_reviewer": "Offer concrete, user-centred feedback on the demonstrated tool or feature.",
+    "research_peer": "Engage as a research peer: be precise about evidence, method and limits.",
+    "experience_sharer": "Share a closely related observation while preserving the human tone.",
+    "professional_peer": "Respond as an experienced equal at the author's chosen level.",
+}
+
+RESPONSE_MODES: dict[str, str] = {
+    "direct_answer": "Answer the explicit question directly in the opening sentence.",
+    "concrete_suggestion": "Give one concrete feature, example, alternative or practical idea first.",
+    "technical_extension": "Extend the technique with one near implementation trade-off or common failure mode.",
+    "analytical_response": "Engage the stated argument with one specific implication or limitation.",
+    "experience_connection": "Connect through one closely related field observation; preserve the human focus.",
+}
+
+HUMAN_TEMPERATURES = [
+    "matter_of_fact", "practical", "curious", "reflective", "celebratory",
+    "personal", "frustrated", "provocative",
+]
+
+_HUMAN_CENTERED_INTENTS = {"reflection", "personal_experience"}
+
 # A "Critical Principle" KODBAN. Lagy levonas helyett VETO — ld. a modul-
 # docstring 2. pontjat: a -2-es bias atengedi a 10-re pontozott business_impactet,
 # es pont ez volt a jelentett hiba.
@@ -404,6 +450,24 @@ def _level_key(raw) -> str:
     """
     key = str(raw or "").strip().lower()
     return key if key in _DISCOURSE_LEVELS else "technical"
+
+
+def _responder_role_key(raw) -> str:
+    """Modell-mezo -> ervenyes valaszolo-szerep, konzervativ peer defaulttal."""
+    key = str(raw or "").strip().lower()
+    return key if key in RESPONDER_ROLES else "peer_practitioner"
+
+
+def _response_mode_key(raw) -> str:
+    """Modell-mezo -> ervenyes valaszforma; ismeretlenul kozel marad a munkahoz."""
+    key = str(raw or "").strip().lower()
+    return key if key in RESPONSE_MODES else "technical_extension"
+
+
+def _human_temperature_key(raw) -> str:
+    """Modell-mezo -> ervenyes emberi hangnem, semleges gyakorlati defaulttal."""
+    key = str(raw or "").strip().lower()
+    return key if key in HUMAN_TEMPERATURES else "practical"
 
 
 # --- Visszafele-kompatibilis lekepezes --------------------------------------
@@ -458,22 +522,38 @@ Fill the JSON fields in this order:
    ERROR, and it changes how the comment is written. When genuinely unsure,
    answer "technical". This is INDEPENDENT of technical_depth: a shallow post can
    be on the business plane, an expert post can be purely technical.
-4. topic_gravity — the post's natural centre of gravity in 2-5 words: the
+4. expected_responder_role — WHICH ROLE the author implicitly invites. Exactly
+   one value:
+{chr(10).join(f'   - {k}: {v}' for k, v in RESPONDER_ROLES.items())}
+   A direct question normally needs technical_advisor; a request for feature
+   ideas needs product_reviewer; a personal story needs experience_sharer. Do
+   not default to an industry analyst when the post assigns a narrower role.
+5. response_mode — WHAT SHAPE will serve that role. Exactly one value:
+{chr(10).join(f'   - {k}: {v}' for k, v in RESPONSE_MODES.items())}
+   When the author explicitly asks for suggestions, select concrete_suggestion.
+   When the author asks a question, select direct_answer unless they specifically
+   ask for feature ideas or alternatives.
+6. human_temperature — the human register to preserve. Exactly one value:
+   matter_of_fact | practical | curious | reflective | celebratory | personal |
+   frustrated | provocative. Preserve a human story as a human story: do not
+   translate a factory visit, career moment or personal observation into a
+   process, governance or efficiency discussion.
+7. topic_gravity — the post's natural centre of gravity in 2-5 words: the
    concrete subject a knowledgeable reply would stay close to. Examples:
    "Revit family authoring", "Civil 3D surface modelling", "MEP clash
    coordination", "IFC property mapping". Name the subject, not the abstraction.
-5. author_objective — what the author actually wants (attention, validation,
+8. author_objective — what the author actually wants (attention, validation,
    recruitment, debate, teaching, announcement...). Not a summary.
-6. audience — who the post is written for.
-7. technical_depth — surface | practitioner | expert.
-8. emotional_tone — the author's register (neutral, frustrated, promotional,
+9. audience — who the post is written for.
+10. technical_depth — surface | practitioner | expert.
+11. emotional_tone — the author's register (neutral, frustrated, promotional,
    celebratory, reflective, provocative...).
-9. core_thesis — the ONE central claim, in one sentence. Ignore supporting
+12. core_thesis — the ONE central claim, in one sentence. Ignore supporting
    arguments and examples. If the post has several, pick the load-bearing one.
-10. missing_perspective — the STRONGEST dimension the post does not address,
+13. missing_perspective — the STRONGEST dimension the post does not address,
     from the allowed list. Exactly one. Never a list.
-11. missing_perspective_reason — one sentence: why this omission matters here.
-12. strategy_fit — score EVERY strategy 0-10 on how much professional value it
+14. missing_perspective_reason — one sentence: why this omission matters here.
+15. strategy_fit — score EVERY strategy 0-10 on how much professional value it
     would add to THIS post. Do not pick a winner; score them all honestly, and
     let the scores differ. The missing perspective from step 10 is an input to
     this scoring, not the answer to it.
@@ -482,9 +562,9 @@ Fill the JSON fields in this order:
     seems to clash with the conversation_intent or the discourse_level — those
     are weighted separately, after you answer. Double-counting them here distorts
     the decision.
-13. strategy_reason — one sentence: what the comment has to accomplish for this
+16. strategy_reason — one sentence: what the comment has to accomplish for this
     specific audience to be worth reading.
-14. explicit_tool_request — true ONLY if the post (or the author in it) directly
+17. explicit_tool_request — true ONLY if the post (or the author in it) directly
     asks the reader to name a tool, product, plugin, service or vendor.
     True examples: "what do you use for this?", "any tool recommendations?",
     "how do you solve this in practice — which software?", "milyen eszkozzel
@@ -492,15 +572,15 @@ Fill the JSON fields in this order:
     FALSE for: describing a problem, complaining, asking for opinions or advice
     in general, rhetorical questions, or asking "how" without asking "with what".
     Someone stating a pain is NOT asking for a product. Default to false.
-15. tool_request_quote — if explicit_tool_request is true, copy the EXACT words
+18. tool_request_quote — if explicit_tool_request is true, copy the EXACT words
     from the post that contain the request, verbatim, nothing else. Empty string
     if false. Do not paraphrase — the quote is verified against the post.
-16. insight — ONE original, specific claim that is NOT stated in the post and is
+19. insight — ONE original, specific claim that is NOT stated in the post and is
     not a restatement of it. This is the substance of the comment. Go deeper,
     not wider. No hedging, no generalities like "communication is important".
     The insight must sit at the discourse_level you reported in step 3 — on a
     technical post, a deeper technical claim, NOT a business consequence.
-17. confidence — 0.0-1.0, your confidence in this reasoning.
+20. confidence — 0.0-1.0, your confidence in this reasoning.
 
 Hard rules:
 - Do NOT summarise the post anywhere.
@@ -519,6 +599,9 @@ _REASON_SCHEMA = {
         # Conversation Intent Layer — a strategia-valasztas ELOTTI dontes.
         "conversation_intent": {"type": "STRING", "enum": list(CONVERSATION_INTENTS)},
         "discourse_level": {"type": "STRING", "enum": _DISCOURSE_LEVELS},
+        "expected_responder_role": {"type": "STRING", "enum": list(RESPONDER_ROLES)},
+        "response_mode": {"type": "STRING", "enum": list(RESPONSE_MODES)},
+        "human_temperature": {"type": "STRING", "enum": HUMAN_TEMPERATURES},
         "topic_gravity": {"type": "STRING"},
         "author_objective": {"type": "STRING"},
         "audience": {"type": "STRING"},
@@ -541,6 +624,7 @@ _REASON_SCHEMA = {
     },
     "required": [
         "topic", "post_type", "conversation_intent", "discourse_level",
+        "expected_responder_role", "response_mode", "human_temperature",
         "topic_gravity", "author_objective", "audience", "technical_depth",
         "emotional_tone", "core_thesis", "missing_perspective",
         "missing_perspective_reason", "strategy_fit", "strategy_reason",
@@ -707,6 +791,44 @@ _FORBIDDEN_PATTERNS: list[tuple[str, str]] = [
     (r"\bpontosan (?:igy|így) van\b", "ures egyetertes (HU)"),
 ]
 
+# A benchmarkban ujra es ujra ezekkel a szerkezetekkel indult a komment. Nem
+# tartalmi hibak, de azonos nyitasok sorozata AI-ujjlenyomat. Csak mondat-eleji
+# egyezest merunk, igy a kifejezes kesobbi, tartalmilag indokolt hasznalata nem
+# serul.
+_STOCK_OPENING_PATTERNS: list[tuple[str, str]] = [
+    (r"^\s*we often see\b", "ismetlodo nyitas (We often see)"),
+    (r"^\s*one consideration(?: is)?\b", "ismetlodo nyitas (One consideration)"),
+    (r"^\s*in practice\b", "ismetlodo nyitas (In practice)"),
+    (r"^\s*one recurring (?:challenge|pattern)\b", "ismetlodo nyitas (One recurring)"),
+]
+
+# Csak a komment VEGEN vizsgaljuk: onmagukban ezek a szavak lehetnek igazak, de
+# konkluziokent nem mondanak tobbet, mint az alapertelmezett LLM-payoff. A modell
+# az aktualis gyakorlati/emberi kovetkezmennyel zarjon helyette.
+_EFFICIENCY_ENDING_PATTERNS: list[tuple[str, str]] = [
+    (r"\b(?:improves?|improving|improved|boosts?)\s+(?:overall\s+|operational\s+)?(?:productivity|efficiency)\.?\s*$",
+     "sablonos hatekonysag-zaras"),
+    (r"\b(?:supports?|improves?)\s+(?:better\s+)?project delivery\.?\s*$",
+     "sablonos project-delivery zaras"),
+    (r"\b(?:helps?|enables?|allows?)\s+(?:organisations?|organizations?)\s+(?:to\s+)?scale\.?\s*$",
+     "sablonos scale-zaras"),
+]
+
+# Egyetlen szo nem jelenti, hogy a komment elhagyta a beszelgetest. Ket vagy tobb
+# OLYAN kifejezes viszont, amit a szerzo nem hasznalt, mar a megfigyelt
+# framework->process->governance reflex merheto jele. Ezert itt nem tiltott szavak,
+# hanem kontextushoz kotott lanc.
+_AI_FINGERPRINT_PATTERNS: list[tuple[str, str]] = [
+    (r"\boperational efficiency\b", "operational efficiency"),
+    (r"\bstructured process(?:es)?\b", "structured process"),
+    (r"\bgovernance\b", "governance"),
+    (r"\bstandardi[sz]ation\b", "standardisation"),
+    (r"\bconsistency\b", "consistency"),
+    (r"\benterprise adoption\b", "enterprise adoption"),
+    (r"\bstakeholder alignment\b", "stakeholder alignment"),
+    (r"\bframework\b", "framework"),
+]
+
 _BRAND_PATTERN = re.compile(r"\bnodu\b|\bnodu[ .-]?bridge\b", re.IGNORECASE)
 
 # --- Stage 9b: executive-absztrakcio szivargas (2026-07-29) ------------------
@@ -815,8 +937,22 @@ def _normalise(comment: str) -> str:
     return text
 
 
+def ai_fingerprint_terms(comment: str, post_text: str) -> list[str]:
+    """Nem a posztbol jovo framework-nyelv visszatérő elemei.
+
+    A szerzo sajat "governance"-szavaira valaszolni teljesen jogos. Ezert csak
+    olyan mintat adunk vissza, ami a kommentben szerepel, a posztban viszont nem.
+    Egyetlen talalat diagnosztikai jel; ketto mar a minosegkapu szamara is eleg.
+    """
+    low_comment, low_post = (comment or "").lower(), (post_text or "").lower()
+    return [label for pattern, label in _AI_FINGERPRINT_PATTERNS
+            if re.search(pattern, low_comment, re.IGNORECASE)
+            and not re.search(pattern, low_post, re.IGNORECASE)]
+
+
 def check_quality(comment: str, post_text: str, brand_allowed: bool = False,
-                  intent: str = "", discourse_level: str = "") -> list[str]:
+                  intent: str = "", discourse_level: str = "",
+                  human_temperature: str = "") -> list[str]:
     """Stage 9 — deterministikus kapu. Visszaadja a KONKRET serteseket.
 
     A lista uressege a "mehet" jel. A hivo ezt a listat adja at az ujrairo
@@ -827,6 +963,11 @@ def check_quality(comment: str, post_text: str, brand_allowed: bool = False,
     beszelt — vagy az intent kifejezetten tiltja az uzleti keretezest —, akkor az
     executive-absztrakcio szotar is sertes. Ures ertekkel a kapu a v1-es
     viselkedest adja, tehat a regi hivasok valtozatlanul mukodnek.
+
+    v3: aktiv Conversation Intent Layer mellett a sablonos nyitas/záras is
+    merheto; a framework-reflex csak technikai vagy emberkozpontu
+    beszelgetesben, es csak ket uj (a szerzotol nem atvett) kifejezesnel indit
+    ujrairast.
     """
     issues: list[str] = []
     text = (comment or "").strip()
@@ -834,9 +975,20 @@ def check_quality(comment: str, post_text: str, brand_allowed: bool = False,
         return ["ures komment"]
 
     low = text.lower()
+    shaping_active = bool(intent or discourse_level or human_temperature)
     for pattern, label in _FORBIDDEN_PATTERNS:
         if re.search(pattern, low, re.IGNORECASE | re.MULTILINE):
             issues.append(f"tiltott fordulat ({label})")
+
+    if shaping_active:
+        for pattern, label in _STOCK_OPENING_PATTERNS:
+            if re.search(pattern, text, re.IGNORECASE | re.MULTILINE):
+                issues.append(label)
+
+        tail = low[-220:]
+        for pattern, label in _EFFICIENCY_ENDING_PATTERNS:
+            if re.search(pattern, tail, re.IGNORECASE | re.MULTILINE):
+                issues.append(label)
 
     # Absztrakcio-szivargas: uzleti/vezetoi szotar olyan beszelgetesben, amit a
     # szerzo technikai szinten tartott. Csak akkor mer, ha van mihez mernie —
@@ -847,6 +999,14 @@ def check_quality(comment: str, post_text: str, brand_allowed: bool = False,
                 issues.append(
                     f"uzleti absztrakcio technikai beszelgetesben ({label})"
                 )
+
+    # Az AI-fingerprint nem egyetlen tiltott szo: csak a nem-indokolt, tobbtagu
+    # framework-lanc. `human_temperature` a hivasi szerzodes resze es a jovo
+    # finomitast tamogatja; az intent eleg a determinisztikus scope-hoz.
+    fingerprint = ai_fingerprint_terms(text, post_text)
+    if ((discourse_level == "technical") or
+            (intent in _HUMAN_CENTERED_INTENTS)) and len(fingerprint) >= 2:
+        issues.append(f"AI-ujjlenyomat / framework-reflex ({', '.join(fingerprint[:3])})")
 
     wc = len(_words(text))
     if wc < MIN_WORDS:
@@ -1015,12 +1175,15 @@ def _compose_user_msg(post_text: str, author_line: str, reasoning: dict,
     vannak, de itt megismetelodnek: a HANDOFF §4/2 elesben megtanult lecke
     szerint a modell a csak listaelemkent szereplo szabalyt nem tartja be.
 
-    `intent_layer=False` eseten az intent/szint/gravity sorok kimaradnak — igy a
-    kikapcsolt layer a v1-es promptot allitja elo.
+    `intent_layer=False` eseten az intent/szint/gravity/role sorok kimaradnak —
+    igy a kikapcsolt layer a v1-es promptot allitja elo.
     """
     strat = STRATEGIES[reasoning["strategy"]]
     intent = CONVERSATION_INTENTS[_intent_key(reasoning.get("conversation_intent"))]
     level = _level_key(reasoning.get("discourse_level"))
+    responder_role = _responder_role_key(reasoning.get("expected_responder_role"))
+    response_mode = _response_mode_key(reasoning.get("response_mode"))
+    human_temperature = _human_temperature_key(reasoning.get("human_temperature"))
     gravity = (reasoning.get("topic_gravity") or "").strip()
 
     # A beszelgetes-tipus es az absztrakcios szint a HIVAS ELEJERE kerul, nem a
@@ -1034,6 +1197,27 @@ def _compose_user_msg(post_text: str, author_line: str, reasoning: dict,
             f"THE AUTHOR IS SPEAKING ON THE {level.upper()} PLANE. Write on that "
             f"same plane. Do not move the discussion to a higher level of "
             f"abstraction."
+        )
+        parts.append(
+            f"YOUR EXPECTED ROLE: {responder_role}. "
+            f"{RESPONDER_ROLES[responder_role]}"
+        )
+        parts.append(
+            f"RESPONSE SHAPE: {response_mode}. {RESPONSE_MODES[response_mode]}"
+        )
+        parts.append(
+            f"HUMAN TEMPERATURE: {human_temperature}. Match that register; do not "
+            "cool a human story into a process discussion."
+        )
+        parts.append(
+            "Begin with the contribution itself, not a stock consultant opening "
+            "such as 'We often see', 'One consideration', 'In practice' or 'One "
+            "recurring challenge'. Vary the rhetorical shape naturally."
+        )
+        parts.append(
+            "Do not end with a generic payoff such as productivity, efficiency, "
+            "project delivery or organisational scale. End on the concrete "
+            "engineering, human or practical point instead."
         )
         if gravity:
             parts.append(f"CENTRE OF GRAVITY: {gravity}. Stay close to this subject.")
@@ -1135,19 +1319,28 @@ def generate_comment(config: dict, post_text: str, author_name: str = "",
     if intent_layer:
         intent = _intent_key(reasoning.get("conversation_intent"))
         level = _level_key(reasoning.get("discourse_level"))
+        responder_role = _responder_role_key(reasoning.get("expected_responder_role"))
+        response_mode = _response_mode_key(reasoning.get("response_mode"))
+        human_temperature = _human_temperature_key(reasoning.get("human_temperature"))
     else:
         intent, level = _LAYER_OFF
+        responder_role = "peer_practitioner"
+        response_mode = "technical_extension"
+        human_temperature = "practical"
     # A normalizalt ertekeket visszairjuk: innentol a compose es a kapu is a
     # KODBAN ervenyesnek elfogadott erteket lassa, nem a modell nyers stringjet.
     reasoning["conversation_intent"] = intent
     reasoning["discourse_level"] = level
+    reasoning["expected_responder_role"] = responder_role
+    reasoning["response_mode"] = response_mode
+    reasoning["human_temperature"] = human_temperature
 
     # Stage 4: a dontest a kod hozza a modell pontszamaibol (ld. pick_strategy).
     reasoning["strategy"] = pick_strategy(reasoning["strategy_fit"], intent, level)
     strategy_scores, strategy_vetoed = score_strategies(
         reasoning["strategy_fit"], intent, level)
-    print(f"[linkedin-tle] intent={intent} | szint={level} | "
-          f"gravity={(reasoning.get('topic_gravity') or '-')!r}"
+    print(f"[linkedin-tle] intent={intent} | szint={level} | szerep={responder_role} | "
+          f"forma={response_mode} | gravity={(reasoning.get('topic_gravity') or '-')!r}"
           + (f" | vetozott={sorted(strategy_vetoed)}" if strategy_vetoed else "")
           + ("" if intent_layer else " | INTENT LAYER KIKAPCSOLVA"))
 
@@ -1177,6 +1370,7 @@ def generate_comment(config: dict, post_text: str, author_name: str = "",
             comment, post_text, brand_allowed,
             intent=intent if intent_layer else "",
             discourse_level=level if intent_layer else "",
+            human_temperature=human_temperature if intent_layer else "",
         )
         if not issues:
             break
@@ -1216,6 +1410,9 @@ def generate_comment(config: dict, post_text: str, author_name: str = "",
         "conversation_intent": intent,
         "conversation_intent_label": CONVERSATION_INTENTS[intent]["label"],
         "discourse_level": level,
+        "expected_responder_role": responder_role,
+        "response_mode": response_mode,
+        "human_temperature": human_temperature,
         "topic_gravity": reasoning.get("topic_gravity", ""),
         "intent_layer": intent_layer,
         "strategy_scores": strategy_scores,          # sulyozott pontszamok
@@ -1234,6 +1431,7 @@ def generate_comment(config: dict, post_text: str, author_name: str = "",
         "audience": reasoning.get("audience", ""),
         "technical_depth": reasoning.get("technical_depth", ""),
         "quality_issues": issues,          # ures = a kapu atengedte
+        "ai_fingerprint_terms": ai_fingerprint_terms(comment, post_text),
         "rewrites": rewrites,
         "post_overlap": round(overlap_ratio(comment, post_text), 3),
     }
