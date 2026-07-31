@@ -502,6 +502,27 @@ linkedin:
   #           azonos az engine v1-essel — így ugyanezen a kódon A/B-zhető.
   # IDÉZŐJEL KELL: a YAML az on/off szavakat booleanná alakítja (HANDOFF §4/17).
   intent_layer: 'on'
+  # image_input — a poszt képe mint BESOROLÁSI kontextus (2026-07-31).
+  #   'on'  — (ALAPÉRTELMEZÉS) a LinkedIn-fülön csatolható a poszt képe. A kép CSAK
+  #           a REASON-hívásba megy, a COMPOSE-ba nem: a besorolást pontosítja
+  #           (conversation_intent, discourse_level, topic_gravity), a komment
+  #           szövege viszont a poszt szövegén áll. Indok: a render-, fotó- és
+  #           screenshot-alapú posztok (portfolio_showcase / craftsmanship /
+  #           technical_tutorial) eddig gyakorlatilag a caption alapján soroltak be.
+  #           A kommentben a képre hivatkozni TILOS, és ezt determinisztikus kapu
+  #           kényszeríti ki: a kép állításait kódban nem tudjuk ellenőrizni.
+  #   'off' — a kép-választó meg sem jelenik, és egy kézzel küldött kép sem megy el.
+  # Megjegyzés: ha az intent_layer 'off', a kép akkor sem megy el, mert a besorolás
+  # eredményét a kikapcsolt layer eldobná — elküldeni tiszta token-veszteség lenne.
+  image_input: 'on'
+  # image_max_px — a böngésző ENNYIRE skálázza a képet feltöltés előtt (leghosszabb
+  # oldal). A Gemini kép-tokenizálásában mindkét oldal <= 384 px esetén a kép FIX
+  # 258 token; efölött 768x768-as csempék jönnek, csempénként 258 — egy nyers
+  # 1200x900-as screenshot így már ~1032 token (4x). A 384 elég ahhoz, hogy a modell
+  # render / fotó / diagram / screenshot között döntsön; screenshotról SZÖVEGET
+  # olvasni viszont nem elég. Ha az kell, 768 a következő értelmes érték.
+  # Az átméretezés a kliensen történik: nincs Pillow-függőség és nincs szerver-CPU.
+  image_max_px: 384
 linkedin_content:
   enabled: true
   posts_per_week: 2

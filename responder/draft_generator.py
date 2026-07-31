@@ -707,7 +707,9 @@ _LEGACY_LINKEDIN_REPLY_SCHEMA = {
 
 
 def generate_linkedin_reply(config: dict, post_text: str, author_name: str = "",
-                            author_role: str = "") -> dict | None:
+                            author_role: str = "",
+                            image_bytes: bytes | None = None,
+                            image_mime: str = "image/jpeg") -> dict | None:
     """
     LinkedIn-komment generalasa. **Vekony delegalo** a Thought Leadership Engine
     fele (`responder/linkedin_engine.py`).
@@ -722,4 +724,5 @@ def generate_linkedin_reply(config: dict, post_text: str, author_name: str = "",
     `ui/app.py` innen importal — a hivo oldalt nem kell atirni.
     """
     from responder.linkedin_engine import generate_comment
-    return generate_comment(config, post_text, author_name, author_role)
+    return generate_comment(config, post_text, author_name, author_role,
+                            image_bytes=image_bytes, image_mime=image_mime)

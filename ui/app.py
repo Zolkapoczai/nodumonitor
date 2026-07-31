@@ -11,6 +11,8 @@ Két nézet:
 import os
 import sqlite3
 import sys
+import base64
+import binascii
 import threading
 from datetime import datetime, timezone
 from urllib.parse import quote
@@ -145,11 +147,17 @@ def dashboard():
     from alerts.notifier import slack_status
     slack_ready, _slack_reason = slack_status(config.get("alerts", {}))
 
+    # A kep-atmeretezes a BONGESZOBEN tortenik (nincs Pillow-fuggoseg), ezert a
+    # kliensnek tudnia kell a plafont — kulonben a config-kapcsolo hazudna.
+    from responder.linkedin_engine import image_input_enabled, image_max_px
+
     return render_template("dashboard.html", config=config, drafts=drafts,
                            opportunities=opportunities, hot_count=hot_count,
                            opp_total=opp_total, opp_channels=opp_channels,
                            opp_limit=opp_limit, content_pipeline=_last_content_pipeline,
                            slack_ready=slack_ready,
+                           li_image_enabled=image_input_enabled(config),
+                           li_image_max_px=image_max_px(config),
                            stats=_stats(config), active_view="dashboard")
 
 
@@ -461,6 +469,38 @@ def api_posts():
 
 # --- LinkedIn valaszgeneralas (dashboard) ---
 
+# A kliens canvas-a MINDIG JPEG-et ad vissza (ld. dashboard.html resizeImage),
+# ezert a szerver CSAK JPEG-et fogad. Ez sokkal szukebb tamadasi felulet, mint egy
+# tobbformatumu allowlist, es semmit nem veszitunk vele.
+_LI_IMAGE_MAX_BYTES = 2 * 1024 * 1024        # 2 MB dekodolt; 384 px-es JPEG ~30-60 KB
+_JPEG_MAGIC = b"\xff\xd8\xff"
+
+
+def _decode_post_image(raw: str) -> tuple[bytes | None, str | None]:
+    """base64 data-URL -> (bytes, hibauzenet). Csak az egyiket adja vissza.
+
+    A kepet SOSEM irjuk lemezre es SOSEM logoljuk (egy base64 blob elarasztana a
+    logot) — a memoriaban dolgozzuk fel, majd elszall a keressel.
+    """
+    if not raw:
+        return None, None
+    payload = raw.split(",", 1)[1] if raw.startswith("data:") else raw
+    # 4/3-szoros base64-tobblet + tartalek: a dekodolas elott vagunk, hogy egy
+    # tulmeretes kerest ne is dekodoljunk.
+    if len(payload) > _LI_IMAGE_MAX_BYTES * 4 // 3 + 1024:
+        return None, "A kép túl nagy (max 2 MB)."
+    try:
+        blob = base64.b64decode(payload, validate=True)
+    except (binascii.Error, ValueError):
+        return None, "A kép nem érvényes base64."
+    if len(blob) > _LI_IMAGE_MAX_BYTES:
+        return None, "A kép túl nagy (max 2 MB)."
+    # Magic-byte: a MIME-fejlec a kliens allitasa, a bajtok a bizonyitek.
+    if not blob.startswith(_JPEG_MAGIC):
+        return None, "Csak JPEG kép fogadható el."
+    return blob, None
+
+
 @app.route("/linkedin/compose", methods=["POST"])
 def linkedin_compose():
     config = load_config()
@@ -472,11 +512,16 @@ def linkedin_compose():
     if not post_text:
         return jsonify({"ok": False, "error": "Üres poszt-szöveg."}), 400
 
+    image_bytes, image_err = _decode_post_image(data.get("image_b64") or "")
+    if image_err:
+        return jsonify({"ok": False, "error": image_err}), 400
+
     from responder.draft_generator import generate_linkedin_reply
     result = generate_linkedin_reply(
         config, post_text,
         author_name=(data.get("author_name") or "").strip(),
         author_role=(data.get("author_role") or "").strip(),
+        image_bytes=image_bytes,
     )
     if not result:
         return jsonify({"ok": False, "error": "Nem sikerült. Be van kapcsolva a Gemini API az Adminban?"})

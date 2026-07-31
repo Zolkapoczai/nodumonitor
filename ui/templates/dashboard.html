@@ -255,20 +255,20 @@
             {% if o.competitor_mentioned %}<span class="badge-competitor"> COMPETITOR{% if o.competitor_name %}: {{ o.competitor_name | upper }}{% endif %}</span>{% endif %}
             <span class="platform-pill">{{ o.platform }}</span>
             {% if o.ifc_involved %}<span class="issue-chip">IFC</span>{% endif %}
+            <span class="opp-metrics">Archicad {{ (o.archicad_probability * 100) | round | int }}% · Revit {{ (o.revit_probability * 100) | round | int }}%</span>
           </div>
           <div class="opp-title">{{ o.title or '(cím nélkül)' }}</div>
           <div class="opp-pain">{{ o.pain_summary }}</div>
           {% if o.tech_summary %}<div class="opp-tech">{{ o.tech_summary }}</div>{% endif %}
-          <div class="opp-meta">
-            <span>{{ o.author or 'ismeretlen szerző' }}{% if o.role_hypothesis %} · {{ o.role_hypothesis }}{% endif %}</span>
-            <span>Archicad {{ (o.archicad_probability * 100) | round | int }}% · Revit {{ (o.revit_probability * 100) | round | int }}%</span>
+          <div class="opp-foot">
+            <span class="opp-author" title="{{ o.author or 'ismeretlen szerző' }}{% if o.role_hypothesis %} · {{ o.role_hypothesis }}{% endif %}">{{ o.author or 'ismeretlen szerző' }}{% if o.role_hypothesis %} · {{ o.role_hypothesis }}{% endif %}</span>
             {% if o.issue_types %}
               {% for t in o.issue_types.split(',') %}<span class="issue-chip">{{ t.strip() }}</span>{% endfor %}
             {% endif %}
-          </div>
-          <div class="opp-actions">
-            <button class="btn btn-primary btn-sm" onclick="genDraftOpp({{ o.post_id }}, this)">Válasz generálása</button>
-            <a class="btn btn-secondary btn-sm" href="{{ o.url }}" target="_blank">Eredeti megnyitása</a>
+            <span class="opp-actions">
+              <button class="btn btn-primary btn-sm" onclick="genDraftOpp({{ o.post_id }}, this)">Válasz generálása</button>
+              <a class="btn btn-secondary btn-sm" href="{{ o.url }}" target="_blank">Eredeti megnyitása</a>
+            </span>
           </div>
         </div>
         {% endfor %}
@@ -368,6 +368,22 @@
             <input type="text" id="li-author-role" placeholder="Pl.: BIM Coordinator @ ...">
           </div>
         </div>
+        {% if li_image_enabled %}
+        <div class="li-image-row" id="li-image-row">
+          <div>
+            <div class="hint">A poszt képe (opcionális)</div>
+            <div class="li-image-help">Válaszd ki, vagy illeszd be vágólapról (Ctrl+V). A kép csak a besorolást pontosítja: a rendszer nem hivatkozik rá a kommentben.</div>
+          </div>
+          <label class="btn btn-secondary btn-sm" for="li-image-file" style="flex-shrink:0">Kép választása</label>
+          <input type="file" id="li-image-file" accept="image/*" style="display:none"
+                 onchange="onLiImagePicked(this.files[0])">
+          <div class="li-image-preview" id="li-image-preview" style="display:none">
+            <img id="li-image-thumb" alt="A kiválasztott kép előnézete">
+            <div class="li-image-info" id="li-image-info"></div>
+            <button class="btn btn-secondary btn-sm" onclick="clearLiImage()">Kép eltávolítása</button>
+          </div>
+        </div>
+        {% endif %}
         <div style="display:flex; gap:8px; margin-top:14px">
           <button class="btn btn-primary" id="li-btn" onclick="composeLinkedin()">Válasz generálása</button>
           <button class="btn btn-secondary" id="li-clear-btn" onclick="clearLinkedin()" style="display:none">Törlés</button>
@@ -1009,9 +1025,82 @@ const LI_BRAND_LABELS = {
 function updateLiClearBtn() {
   const hasText = document.getElementById('li-post-text').value.trim().length > 0;
   const hasResult = document.getElementById('li-result').innerHTML.trim().length > 0;
-  document.getElementById('li-clear-btn').style.display = (hasText || hasResult) ? 'inline-block' : 'none';
+  const hasImage = (typeof liImageB64 === 'string') && liImageB64.length > 0;
+  document.getElementById('li-clear-btn').style.display =
+    (hasText || hasResult || hasImage) ? 'inline-block' : 'none';
 }
 document.getElementById('li-post-text').addEventListener('input', updateLiClearBtn);
+
+// --- A poszt kepe: atmeretezes a BONGESZOBEN ---------------------------------
+// Miert itt es nem a szerveren: (1) nincs uj Python-fuggoseg (Pillow), (2) nincs
+// szerver-CPU, (3) a feltoltes is kisebb. A Gemini kep-tokenizalasban mindket oldal
+// <= LI_IMAGE_MAX_PX eseten a kep FIX 258 token; efolott 768x768-as csempek jonnek
+// (csempenkent 258), tehat egy nyers 1200x900-as screenshot mar ~1032 lenne.
+// A canvas MINDIG JPEG-et ad vissza — ezert fogad a szerver csak JPEG-et.
+const LI_IMAGE_MAX_PX = {{ li_image_max_px | default(384) }};
+let liImageB64 = '';
+
+function resizeImage(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const scale = Math.min(1, LI_IMAGE_MAX_PX / Math.max(img.width, img.height));
+      const w = Math.max(1, Math.round(img.width * scale));
+      const h = Math.max(1, Math.round(img.height * scale));
+      const cv = document.createElement('canvas');
+      cv.width = w; cv.height = h;
+      cv.getContext('2d').drawImage(img, 0, 0, w, h);
+      resolve({ dataUrl: cv.toDataURL('image/jpeg', 0.85), w: w, h: h,
+                ow: img.width, oh: img.height });
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('decode')); };
+    img.src = url;
+  });
+}
+
+function onLiImagePicked(file) {
+  if (!file) return;
+  // `linkedin.image_input: off` eseten a szekcio meg sincs renderelve — a
+  // vagolap-figyelo ilyenkor sem futhat bele egy nem letezo elembe.
+  if (!document.getElementById('li-image-preview')) return;
+  if (!file.type.startsWith('image/')) { toast('Csak képfájl választható.'); return; }
+  resizeImage(file).then(r => {
+    liImageB64 = r.dataUrl;
+    document.getElementById('li-image-thumb').src = r.dataUrl;
+    document.getElementById('li-image-info').textContent =
+      r.ow + '×' + r.oh + ' → ' + r.w + '×' + r.h +
+      ' (' + Math.round(r.dataUrl.length * 3 / 4 / 1024) + ' KB, 258 token)';
+    document.getElementById('li-image-preview').style.display = '';
+    updateLiClearBtn();
+  }).catch(() => toast('A képet nem sikerült beolvasni.'));
+}
+
+function clearLiImage() {
+  liImageB64 = '';
+  const f = document.getElementById('li-image-file');
+  if (f) f.value = '';
+  const p = document.getElementById('li-image-preview');
+  if (p) p.style.display = 'none';
+  updateLiClearBtn();
+}
+
+// Vagolap-beillesztes: a tipikus munkafolyamat egy screenshot -> Ctrl+V. Csak akkor
+// figyelunk, ha a LinkedIn-szekcio latszik, kulonben egy masik fulon vegzett
+// beillesztes is kepet toltene be.
+document.addEventListener('paste', e => {
+  const sec = document.getElementById('s-linkedin');
+  if (!sec || !sec.classList.contains('active')) return;
+  const items = (e.clipboardData || {}).items || [];
+  for (const it of items) {
+    if (it.type && it.type.startsWith('image/')) {
+      const f = it.getAsFile();
+      if (f) { onLiImagePicked(f); toast('Kép beillesztve a vágólapról.'); }
+      return;
+    }
+  }
+});
 
 function clearLinkedin() {
   document.getElementById('li-post-text').value = '';
@@ -1019,6 +1108,7 @@ function clearLinkedin() {
   document.getElementById('li-author-role').value = '';
   document.getElementById('li-result').innerHTML = '';
   document.getElementById('li-status').textContent = '';
+  clearLiImage();
   updateLiClearBtn();
 }
 
@@ -1038,6 +1128,7 @@ function composeLinkedin() {
       post_text: postText,
       author_name: document.getElementById('li-author-name').value.trim(),
       author_role: document.getElementById('li-author-role').value.trim(),
+      image_b64: liImageB64,
     })
   }).then(r => r.json()).then(d => {
     btn.disabled = false; btn.textContent = 'Válasz generálása';

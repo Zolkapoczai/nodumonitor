@@ -669,6 +669,77 @@ _REASON_SCHEMA = {
     ],
 }
 
+# --- Kep-bemenet (2026-07-31) -----------------------------------------------
+# MIERT KELL: a LinkedIn-posztok egy resze tulnyomoreszt KEP (render, fotó,
+# diagram, screenshot) — pont az a `portfolio_showcase` / `craftsmanship` /
+# `technical_tutorial` halmaz, amelyik a 30+ posztos benchmarkon a legrosszabbul
+# teljesitett. A motor eddig csak a szoveget latta, tehat egy render-posztnal
+# gyakorlatilag a caption alapjan sorolt be.
+#
+# A KEP CSAK BESOROLASI KONTEXTUS. Nem azert kapja a modell, hogy a kommentben
+# leirja, mit lat — hanem hogy a `conversation_intent`, a `discourse_level` es a
+# `topic_gravity` dontes ne a caption talalgatasan alljon. Ket okbol:
+#   1. A kep allitasait KODBAN NEM tudjuk ellenorizni (ellentetben a
+#      `tool_request_quote`-tal, amit a posztban megkeresunk — §4/18). Egy
+#      felrenezett reszlet magabiztosan hamis mondat lenne egy NYILVANOS
+#      kommentben.
+#   2. A COMPOSE-hivas eleve nem kapja meg a kepet, tehat a "csak kontextus"
+#      nagyreszt SZERKEZETILEG all, nem prompt-keresen.
+# Egy szivargasi ut marad: a REASON `insight`/`core_thesis` szabad szoveg. Ezt a
+# `_VISUAL_REFERENCE_PATTERNS` kapu zarja a kimeneten.
+#
+# TOKEN: a kliens 384 px-re skaláz, ezert a kep fix 258 token (a Gemini
+# kep-tokenizalas szerint mindket oldal <= 384 px eseten 258; efolott 768x768-as
+# csempek, csempenkent 258 — egy 1200x900-as screenshot mar ~1032). A
+# kep-utasitas es a `image_role` mezo CSAK akkor kerul a hivasba, ha van kep:
+# kep nelkul a REASON-hivas bajtra a korabbi.
+_IMAGE_ROLES = [
+    "primary_content",   # a poszt lenyege maga a kep (render, fotó, portfolio)
+    "screenshot",        # kepernyokep: hibauzenet, parameter-tabla, UI
+    "diagram",           # abra, folyamat, metszet
+    "illustration",      # kapcsolodo, de nem hordozza a tartalmat
+    "decorative",        # stock/branding, nincs informacio-tartalma
+]
+
+_IMAGE_REASON_BLOCK = f"""
+
+AN IMAGE FROM THE POST IS ATTACHED.
+Use it ONLY to classify the post more accurately — above all conversation_intent,
+discourse_level and topic_gravity. A post whose substance is a render or a photo
+is usually portfolio_showcase or craftsmanship on the technical plane, however
+abstract its caption sounds.
+Also fill:
+- image_role — what the image contributes. Exactly one:
+{chr(10).join(f'  - {r}' for r in _IMAGE_ROLES)}
+HARD LIMIT: do NOT describe the image, and do NOT put anything you can only see in
+the image into core_thesis or insight. Those fields feed the comment, and the
+comment must stand on the post's text alone. What you see informs your
+CLASSIFICATION, never the wording.""".rstrip()
+
+
+def reason_prompt_for(image: bool) -> str:
+    """A REASON system-prompt; a kep-blokk CSAK kep eseten kerul bele (~60 token)."""
+    return _REASON_PROMPT + (_IMAGE_REASON_BLOCK if image else "")
+
+
+def reason_schema_for(image: bool) -> dict:
+    """A REASON sema; az `image_role` CSAK kep eseten kotelezo mezo.
+
+    Miert nem mindig benne: ha kotelezo lenne kep nelkul is, a modellnek olyan
+    mezot kellene kitoltenie, amit a prompt nem magyaraz el (ez a
+    test_linkedin_intent.py A13.1 invariansa: minden kotelezo mezot ki kell
+    mondani a promptban). Igy a kep nelkuli ut valtozatlan.
+    """
+    if not image:
+        return _REASON_SCHEMA
+    schema = {
+        "type": _REASON_SCHEMA["type"],
+        "properties": {**_REASON_SCHEMA["properties"],
+                       "image_role": {"type": "STRING", "enum": _IMAGE_ROLES}},
+        "required": [*_REASON_SCHEMA["required"], "image_role"],
+    }
+    return schema
+
 # Azok a temak, ahol a NODU Bridge megnevezese IGAZ es relevans valasz egy
 # eszkoz-kerdesre. Egy renderelo-szoftverre vonatkozo kerdes nem meghivo a
 # Bridge-re — kulonben ugyanaz a spam lenne, csak kerdesre valaszolva.
@@ -866,6 +937,23 @@ _AI_FINGERPRINT_PATTERNS: list[tuple[str, str]] = [
     (r"\bframework\b", "framework"),
 ]
 
+# --- Stage 9c: kepre hivatkozas (2026-07-31) --------------------------------
+# A kep KIZAROLAG besorolasi kontextus (ld. `_IMAGE_REASON_BLOCK`). A COMPOSE nem
+# is kapja meg, de a REASON `insight`-jaba beszivaroghat egy csak-kepen-latszo
+# reszlet, es onnan a kommentbe. Ezt a kimeneten merjuk: ha a komment a KEPRE
+# hivatkozik, az sertes — mert az az allitas ellenorizhetetlen.
+# Csak akkor mer, ha tenylegesen volt kep (`image_attached`).
+_VISUAL_REFERENCE_PATTERNS: list[tuple[str, str]] = [
+    (r"\bin (?:the|your) (?:image|photo|picture|render|screenshot|drawing)\b", "kep-hivatkozas"),
+    (r"\b(?:the|your) (?:image|photo|picture|render|screenshot) (?:shows?|suggests?|indicates?)\b", "kep-hivatkozas"),
+    (r"\bas (?:seen|shown|visible) in\b", "kep-hivatkozas"),
+    (r"\bfrom (?:the|your) (?:image|photo|render|screenshot)\b", "kep-hivatkozas"),
+    (r"\bpictured\b|\bin shot\b", "kep-hivatkozas"),
+    (r"\ba (?:kepen|képen|fotón|foton|renderen|abran|ábrán|kepernyokepen|képernyőképen)\b", "kep-hivatkozas (HU)"),
+    (r"\b(?:latszik|látszik|lathato|látható) a (?:kepen|képen|fotón|foton)\b", "kep-hivatkozas (HU)"),
+    (r"\ba (?:megosztott|feltoltott|feltöltött) (?:kep|kép|fotó|foto)\b", "kep-hivatkozas (HU)"),
+]
+
 _BRAND_PATTERN = re.compile(r"\bnodu\b|\bnodu[ .-]?bridge\b", re.IGNORECASE)
 
 # --- Stage 9b: executive-absztrakcio szivargas (2026-07-29) ------------------
@@ -989,7 +1077,8 @@ def ai_fingerprint_terms(comment: str, post_text: str) -> list[str]:
 
 def check_quality(comment: str, post_text: str, brand_allowed: bool = False,
                   intent: str = "", discourse_level: str = "",
-                  human_temperature: str = "") -> list[str]:
+                  human_temperature: str = "",
+                  image_attached: bool = False) -> list[str]:
     """Stage 9 — deterministikus kapu. Visszaadja a KONKRET serteseket.
 
     A lista uressege a "mehet" jel. A hivo ezt a listat adja at az ujrairo
@@ -1005,6 +1094,9 @@ def check_quality(comment: str, post_text: str, brand_allowed: bool = False,
     merheto; a framework-reflex csak technikai vagy emberkozpontu
     beszelgetesben, es csak ket uj (a szerzotol nem atvett) kifejezesnel indit
     ujrairast.
+
+    `image_attached` (2026-07-31): ha a REASON kepet is kapott, a kommentben a
+    KEPRE hivatkozas sertes — az ilyen allitast kodban nem tudjuk ellenorizni.
     """
     issues: list[str] = []
     text = (comment or "").strip()
@@ -1044,6 +1136,15 @@ def check_quality(comment: str, post_text: str, brand_allowed: bool = False,
     if ((discourse_level == "technical") or
             (intent in _HUMAN_CENTERED_INTENTS)) and len(fingerprint) >= 2:
         issues.append(f"AI-ujjlenyomat / framework-reflex ({', '.join(fingerprint[:3])})")
+
+    # Kep-hivatkozas: csak akkor mer, ha tenylegesen volt kep. A kep besorolasi
+    # kontextus — amit csak azon lattunk, az nem allithato egy nyilvanos
+    # kommentben, mert ellenorizhetetlen.
+    if image_attached:
+        for pattern, label in _VISUAL_REFERENCE_PATTERNS:
+            if re.search(pattern, low, re.IGNORECASE | re.MULTILINE):
+                issues.append(f"a komment a kepre hivatkozik ({label})")
+                break
 
     wc = len(_words(text))
     if wc < MIN_WORDS:
@@ -1090,13 +1191,23 @@ def _client(config: dict) -> tuple[genai.Client | None, str, str | None]:
 
 
 def _call_json(client, model: str, system: str, user: str, schema: dict,
-               max_tokens: int) -> dict | None:
+               max_tokens: int, image: tuple[bytes, str] | None = None) -> dict | None:
     """Strukturalt hivas. thinking_budget=0 — a HANDOFF §4/1 lecke: a
     gemini-2.5-flash kulonben a max_output_tokens keretbol "gondolkodik", es
-    csonka JSON-t ad."""
+    csonka JSON-t ad.
+
+    `image` = (bytes, mime) vagy None. CSAK a REASON-hivas adja at (a COMPOSE
+    nem — ld. `generate_comment`): a kep a besorolast pontositja, a szovegezeshez
+    mar a reasoning-objektum kell. Igy a kep tokenjeit egyszer fizetjuk, es az
+    ujrairo kor sem fizeti ujra.
+    """
+    contents = user if image is None else [
+        types.Part.from_bytes(data=image[0], mime_type=image[1]),
+        user,
+    ]
     resp = client.models.generate_content(
         model=model,
-        contents=user,
+        contents=contents,
         config=types.GenerateContentConfig(
             system_instruction=system,
             response_mime_type="application/json",
@@ -1147,6 +1258,32 @@ def _intent_layer_enabled(config: dict) -> bool:
     if isinstance(raw, bool):
         return raw
     return str(raw).strip().lower() not in ("off", "false", "0", "no", "none")
+
+
+def image_input_enabled(config: dict) -> bool:
+    """`linkedin.image_input`: on (default) | off. YAML-boolean is kezelve (§4/17)."""
+    raw = (config.get("linkedin", {}) or {}).get("image_input", "on")
+    if isinstance(raw, bool):
+        return raw
+    return str(raw).strip().lower() not in ("off", "false", "0", "no", "none")
+
+
+def image_max_px(config: dict) -> int:
+    """`linkedin.image_max_px` — a kliens ENNYIRE skaláz le (leghosszabb oldal).
+
+    384 a default, mert a Gemini kep-tokenizalasban mindket oldal <= 384 px
+    eseten a kep FIX 258 token; efolott 768x768-as csempek jonnek, csempenkent
+    258 (egy 1200x900-as screenshot igy mar ~1032). A 384 eleg ahhoz, hogy a
+    modell render / fotó / diagram / screenshot kozott dontsen — screenshotrol
+    SZOVEGET olvasni viszont nem eleg. Ha az kell, 768 a kovetkezo ertelmes ertek,
+    ~4x tokenert.
+    """
+    raw = (config.get("linkedin", {}) or {}).get("image_max_px", 384)
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return 384
+    return value if 128 <= value <= 2048 else 384
 
 
 def _quote_in_post(quote: str, post_text: str, min_words: int = 3) -> bool:
@@ -1313,7 +1450,9 @@ def _compose_user_msg(post_text: str, author_line: str, reasoning: dict,
 
 
 def generate_comment(config: dict, post_text: str, author_name: str = "",
-                     author_role: str = "") -> dict:
+                     author_role: str = "",
+                     image_bytes: bytes | None = None,
+                     image_mime: str = "image/jpeg") -> dict:
     """
     Thought Leadership Engine — teljes pipeline egy LinkedIn-poszthoz.
 
@@ -1321,7 +1460,10 @@ def generate_comment(config: dict, post_text: str, author_name: str = "",
     Hiba eseten `{"error": "..."}` — a hivo (ui/app.py) ezt mar kezeli.
 
     Hivas-koltseg: tipikusan 2 LLM-hivas (reason + compose), legfeljebb 3
-    (egy celzott ujrairas, ha a deterministikus kapu sertest talalt).
+    (egy celzott ujrairas, ha a deterministikus kapu sertest talalt). A kep NEM
+    novel hivas-szamot: a REASON-hivas kapja meg, a COMPOSE es az ujrairas nem.
+
+    `image_bytes`: a poszt kepe (a kliens mar 384 px-re skálázta), vagy None.
     """
     post_text = (post_text or "").strip()
     if not post_text:
@@ -1337,10 +1479,20 @@ def generate_comment(config: dict, post_text: str, author_name: str = "",
         author_line = f"AUTHOR: {author_name or 'unknown'}" \
                       f"{' — ' + author_role if author_role else ''}\n"
 
-    # --- Stage 1-5: reasoning ---
+    # A layer-dontes a REASON-hivas ELE kerul, mert eldonti, kell-e a kep:
+    # kikapcsolt layer eseten az intent/szint a `_LAYER_OFF` par, tehat a kep
+    # osztalyozasi eredmenye eldobodna — elkuldeni tiszta token-veszteseg lenne.
+    intent_layer = _intent_layer_enabled(config)
+    use_image = bool(image_bytes) and intent_layer and image_input_enabled(config)
+    if image_bytes and not use_image:
+        why = ("linkedin.image_input=off" if not image_input_enabled(config)
+               else "az intent layer ki van kapcsolva, a kep besorolasa elveszne")
+        print(f"[linkedin-tle] a kep NEM megy el ({why})")
+
+    # --- Stage 1-5: reasoning (a kep CSAK ide) ---
     try:
         reasoning = _call_json(
-            client, model, _REASON_PROMPT,
+            client, model, reason_prompt_for(use_image),
             f"{author_line}POST:\n{post_text[:2000]}",
             # 900 -> 1200: a semaba a Conversation Intent es Conversation Response
             # Layer mezojei kerultek (intent, response strategy, szint, gravity,
@@ -1348,7 +1500,8 @@ def generate_comment(config: dict, post_text: str, author_name: str = "",
             # topic_gravity 2-5 szo — de a csonka-JSON hiba (§4/1) itt a TELJES
             # valaszt viszi, ezert a keret inkabb bo. A fel nem hasznalt keret nem
             # kerul semmibe: a szamlazas a tenyleges output-tokenre megy.
-            _REASON_SCHEMA, max_tokens=1200,
+            reason_schema_for(use_image), max_tokens=1200,
+            image=(image_bytes, image_mime) if use_image else None,
         )
     except Exception as e:
         print(f"[linkedin-tle] reasoning HIBA: {e}")
@@ -1357,11 +1510,15 @@ def generate_comment(config: dict, post_text: str, author_name: str = "",
         print(f"[linkedin-tle] Ervenytelen reasoning: {reasoning}")
         return {"error": "A reasoning-lépés érvénytelen választ adott."}
 
+    image_role = ""
+    if use_image:
+        raw_role = str(reasoning.get("image_role") or "").strip().lower()
+        image_role = raw_role if raw_role in _IMAGE_ROLES else "illustration"
+
     # --- Stage 3.5: Conversation Intent Layer ---
     # A modell OSZTALYOZ (szenzor), a sulyozast es a vetot a kod vegzi (biro) —
     # §4/16. Kikapcsolt layer eseten a `_LAYER_OFF` par az egysegelem, tehat a
     # dontes bitre a v1-es.
-    intent_layer = _intent_layer_enabled(config)
     if intent_layer:
         intent = _intent_key(reasoning.get("conversation_intent"))
         level = _level_key(reasoning.get("discourse_level"))
@@ -1387,6 +1544,7 @@ def generate_comment(config: dict, post_text: str, author_name: str = "",
         reasoning["strategy_fit"], intent, level)
     print(f"[linkedin-tle] intent={intent} | szint={level} | szerep={responder_role} | "
           f"forma={response_mode} | gravity={(reasoning.get('topic_gravity') or '-')!r}"
+          + (f" | kep={image_role}" if use_image else "")
           + (f" | vetozott={sorted(strategy_vetoed)}" if strategy_vetoed else "")
           + ("" if intent_layer else " | INTENT LAYER KIKAPCSOLVA"))
 
@@ -1417,6 +1575,7 @@ def generate_comment(config: dict, post_text: str, author_name: str = "",
             intent=intent if intent_layer else "",
             discourse_level=level if intent_layer else "",
             human_temperature=human_temperature if intent_layer else "",
+            image_attached=use_image,
         )
         if not issues:
             break
@@ -1459,6 +1618,10 @@ def generate_comment(config: dict, post_text: str, author_name: str = "",
         "expected_responder_role": responder_role,
         "response_mode": response_mode,
         "human_temperature": human_temperature,
+        # Kep-bemenet: `image_attached` az ELKULDOTT kepet jelenti, nem a kapottat
+        # (kikapcsolt layer / image_input=off eseten false, holott jott kep).
+        "image_attached": use_image,
+        "image_role": image_role,
         "topic_gravity": reasoning.get("topic_gravity", ""),
         "intent_layer": intent_layer,
         "strategy_scores": strategy_scores,          # sulyozott pontszamok

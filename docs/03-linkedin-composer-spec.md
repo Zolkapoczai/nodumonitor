@@ -81,6 +81,81 @@
 > (`conversation_intent`, `discourse_level`, `topic_gravity`, `strategy_scores`,
 > `strategy_vetoed`, `intent_layer`) additívak. DB-séma nem változott.
 
+> ## ⚙️ KIEGÉSZÍTVE (2026-07-31) — engine v3/v4: conversation shaping + kép-bemenet
+>
+> ### v3 — response shaping (a hang és a konkrétság)
+> A benchmark maradék hibái nem a stratégia-választásból jöttek, hanem abból, hogy
+> a motor mindig ugyanabban a szerepben és formában válaszolt. Három új REASON-mező,
+> **új LLM-hívás nélkül** (mind ugyanabban a REASON-válaszban):
+> - `expected_responder_role` (7 ág) — milyen szerepet vár el a szerző
+> - `response_mode` (5 ág) — milyen formájú válasz szolgálja azt a szerepet
+> - `human_temperature` (8 ág) — a megőrzendő emberi regiszter
+>
+> Új intent: `personal_experience` (a `reflection` mellé), mert egy megélt
+> pillanatot a motor process- és governance-nyelvre fordított.
+>
+> Új determinisztikus kapuk: sablonos nyitás (`We often see`, `In practice`, …),
+> sablonos „hatékonyság"-zárás, és egy **kontextushoz kötött** AI-ujjlenyomat-lánc
+> (governance / framework / standardisation / …). Az utóbbi csak akkor sért, ha
+> **legalább két** olyan kifejezés szerepel, amit a szerző maga NEM használt —
+> a szerző saját governance-szavaira válaszolni teljesen jogos.
+>
+> ### v4 — a párhuzamos válaszforma-skála összevonása
+> A v3 `RESPONSE_MODES` és egy időközben bevezetett `CONVERSATION_RESPONSE_STRATEGIES`
+> **ugyanazt a döntést** kérte két, egymást átfedő skálán, kódbeli egyeztetés nélkül:
+> két LLM-választás mutathatott ellentétes irányba, és semmi nem oldotta fel. Ez
+> szembemegy a §4/16-os elvvel (az LLM a szenzor, a kód a bíró). Egy skála maradt,
+> 5 ággal, `response_mode` néven — a „strategy" szó ugyanis már foglalt a 7 elemű
+> `STRATEGIES`-re, és épp az ilyen névütközés okozta a v2-ben az `intent` változó
+> elárnyékolását. Egyik ág sem veszett el.
+>
+> Ugyanitt megszűnt egy kétszer elkövetett hibaosztály: a REASON-prompt számozott
+> listája **számra** mutató kereszthivatkozásokat tartalmazott, amiket minden új
+> mező elcsúsztatott. A hivatkozás mostantól mezőnévre mutat, és teszt tiltja a
+> `step N` alakot.
+>
+> ### Kép-bemenet — a poszt képe mint BESOROLÁSI kontextus
+> **Miért:** a render-, fotó- és screenshot-alapú posztok (`portfolio_showcase`,
+> `craftsmanship`, `technical_tutorial`) jellemzően **főleg képből** állnak — pont az
+> a halmaz, amelyik a benchmarkon a legrosszabbul teljesített. A motor eddig csak a
+> szöveget látta, tehát egy render-poszton gyakorlatilag a caption alapján sorolt be.
+>
+> **A kép CSAK a REASON-hívásba megy.** A COMPOSE a reasoning-objektumból ír, ezért
+> a „csak kontextus" nagyrészt **szerkezetileg** áll, nem prompt-kérésen. Ez egyben
+> a token-takarékosság magja: a kép tokenjeit egyszer fizetjük, és az újraíró kör
+> sem fizeti újra. A hívás-szám változatlan: 2, legfeljebb 3.
+>
+> | Tétel | Token |
+> |---|---|
+> | kép ≤384 px, a REASON-ben | 258 (fix) |
+> | kép-utasítás + `image_role`, **csak ha van kép** | ~65 |
+> | COMPOSE / újraírás | 0 |
+> | **kép nélkül** | **0** — a prompt és a séma bájtra a korábbi |
+>
+> **A szivárgási út zárása:** a REASON `insight`/`core_thesis` szabad szöveg, oda
+> beszivároghat egy csak-képen-látszó részlet. A kimeneten ezért determinisztikus
+> kapu (`_VISUAL_REFERENCE_PATTERNS`, EN+HU) sérésnek jelöli, ha a komment a képre
+> hivatkozik — mert az az állítás **kódban nem ellenőrizhető**, ellentétben a
+> `tool_request_quote`-tal, amit a posztban megkeresünk (§4/18).
+>
+> **Átméretezés a böngészőben** (canvas, 384 px): nincs Pillow-függőség, nincs
+> szerver-CPU, kisebb feltöltés. A canvas mindig JPEG-et ad, ezért a szerver **csak
+> JPEG-et** fogad — magic-byte ellenőrzéssel, tehát a kliens hamis `image/jpeg`
+> MIME-fejlece sem segít. 2 MB-os plafon, a dekódolás ELŐTT. A kép **sosem kerül
+> lemezre és sosem kerül logba**.
+>
+> **Config:** `linkedin.image_input: 'on' | 'off'`, `linkedin.image_max_px: 384`.
+> Ha az `intent_layer` `off`, a kép **akkor sem megy el**: a besorolás eredményét a
+> kikapcsolt layer eldobná, elküldeni tiszta token-veszteség lenne.
+>
+> **UI:** fájlválasztó + **vágólap-beillesztés** (screenshot → Ctrl+V, csak az aktív
+> LinkedIn-szekcióban), előnézeti bélyegkép a valódi mérettel és a token-költséggel.
+>
+> **Válasz-szerződés:** a 8 legacy mező változatlan; az új mezők
+> (`expected_responder_role`, `response_mode`, `human_temperature`,
+> `image_attached`, `image_role`, `ai_fingerprint_terms`) additívak. DB-séma nem
+> változott.
+
 ## Cél
 Egy dashboard-fül, ahova egy LinkedIn-poszt szövege bemásolható, és a rendszer egyetlen Gemini-hívással eldönti, melyik válasz-mód illik rá, majd megírja a választ.
 

@@ -346,10 +346,44 @@ textarea { resize: vertical; min-height: 80px; }
 }
 .opp-card:has(.sev-hot)  { border-left-color: var(--accent); }
 .opp-card:has(.sev-warm) { border-left-color: var(--blue); }
-.opp-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.opp-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
 .opp-title { font-family: var(--font-heading); font-size: 16px; font-weight: 700; color: var(--text); margin-bottom: 8px; line-height: 1.35; }
 .opp-pain { font-size: 13.5px; color: var(--text-dark); line-height: 1.6; margin-bottom: 8px; }
-.opp-tech { font-size: 12.5px; color: var(--text-muted); line-height: 1.5; margin-bottom: 12px; background: var(--bg); padding: 8px 12px; border-radius: 6px; }
+.opp-tech { font-size: 12.5px; color: var(--text-muted); line-height: 1.5; margin-bottom: 0; background: var(--bg); padding: 9px 12px; border-radius: 6px; }
+
+/* A ket szoftver-valoszinuseg a FEJLECBE, jobbra zarva kerul: eddig a
+   szerzo-sorba volt beszorva, ahol harom kulonbozo adattipus (szerzo, szazalekok,
+   issue-chipek) egyetlen tordelo szovegfolyammal olvadt ossze. Tabularis szamok,
+   hogy a kartyak szazalekai egymas alatt szamoszlopot adjanak. */
+.opp-metrics {
+  margin-left: auto; font-size: 11.5px; color: var(--text-muted);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+
+/* Lablec: hajszalvonallal elvalasztott zona a szerzonek, a cimkeknek es a
+   gomboknak. Eddig sem az .opp-meta, sem az .opp-actions nem volt stilizalva,
+   ezert a gombok kozvetlenul a szoveghez tapadtak. */
+/* NOWRAP, es ez MERT dontes: `flex-wrap: wrap` mellett a bongeszo inkabb uj sorba
+   tolta a gombokat, mint hogy a szerzo-sort zsugoritsa — ezert a csonkolas SOHA nem
+   aktivalodott, es 217 kartyabol 67 lablece ket soros maradt. Nowrap eseten a
+   deficitet a szerzo-sor nyeli el (flex-basis 0), a cimkek es a gombok tartjak a
+   meretuket. */
+.opp-foot {
+  display: flex; align-items: center; gap: 10px; flex-wrap: nowrap;
+  border-top: 1px solid var(--border); margin-top: 14px; padding-top: 12px;
+}
+.opp-foot .issue-chip { flex-shrink: 0; }
+/* A `role_hypothesis` a valos adatban EGESZ MONDAT (elesben mert leghosszabb
+   szerzo-sor: 119 karakter), ezert a lablec 217 kartyabol 67-nel ket sorra tordelt.
+   Egy sorra csonkoljuk, a teljes szoveg a title-attributumban marad (hover). A
+   szerep masodlagos informacio: a dontest a cim es a fajdalom-osszefoglalo hozza. */
+.opp-author {
+  font-size: 12px; color: var(--text-muted); line-height: 1.45;
+  flex: 1 1 0; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.opp-actions { display: flex; gap: 8px; flex-wrap: wrap; flex-shrink: 0; }
+.opp-foot .opp-actions { margin-left: auto; }
 
 .sev-badge {
   display: inline-block; padding: 3px 10px; border-radius: 4px;
@@ -395,6 +429,23 @@ textarea { resize: vertical; min-height: 80px; }
   display: inline-block; padding: 2px 10px; border-radius: 4px;
   font-family: var(--font-heading); font-size: 11px; font-weight: 700;
   background: var(--accent-light); color: var(--accent); border: 1px solid var(--accent-border);
+}
+
+/* ===== LinkedIn: a poszt kepe (besorolasi kontextus) ===== */
+.li-image-row {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border);
+}
+.li-image-row > div:first-child { flex: 1 1 260px; min-width: 0; }
+.li-image-help { font-size: 12px; color: var(--text-muted); line-height: 1.5; margin-top: 2px; }
+.li-image-preview { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.li-image-preview img {
+  width: 56px; height: 56px; object-fit: cover;
+  border: 1px solid var(--border); border-radius: 6px; display: block;
+}
+.li-image-info {
+  font-size: 11.5px; color: var(--text-muted);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
 }
 
 /* Run Row (in Admin and Tables) */
@@ -748,10 +799,10 @@ textarea { resize: vertical; min-height: 80px; }
   background: linear-gradient(90deg, var(--accent-light) 0%, #ffffff 5%);
   box-shadow: 0 4px 12px rgba(255, 90, 31, 0.08);
 }
-.opp-card.hot-opp .opp-title {
-  color: var(--accent);
-  font-weight: 700;
-}
+/* A cim NEM lesz narancs a hot kartyan: a narancs elsodleges gombbal versenyzett
+   ugyanazon a kartyan (ket egymassal vetelkedo narancs), es a hosegjelzest mar
+   hordozza a bal szegely, a hatter es a jelvenyek. A cim marad a szoveg-szinen. */
+.opp-card.hot-opp .opp-title { font-weight: 700; }
 
 /* ================= Tartalom Pipeline (kiemelt kartya, Attekinto) ================= */
 .content-pipeline-card {
