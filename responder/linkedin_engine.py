@@ -93,7 +93,7 @@ from google.genai import types
 
 from env_secrets import get_secret
 
-ENGINE_VERSION = "linkedin-tle-v3"
+ENGINE_VERSION = "linkedin-tle-v4"
 
 # --- Stage 4: strategiak -----------------------------------------------------
 # Pontosan EGY strategia valasztodik kommentenkent. A `directive` a compose-
@@ -402,12 +402,37 @@ RESPONDER_ROLES: dict[str, str] = {
     "professional_peer": "Respond as an experienced equal at the author's chosen level.",
 }
 
+# EGYETLEN valaszforma-skala (2026-07-31 osszevonas).
+#
+# Korabban ketto volt: a `RESPONSE_MODES` (5 ag) es a `CONVERSATION_RESPONSE_
+# STRATEGIES` (4 ag) UGYANAZT a dontest kerte a modelltol ket, egymast atfedo
+# skalan (direct_answer ~ answer_the_question, experience_connection ~
+# share_experience, technical_extension ~ extend_one_insight, analytical_response
+# ~ take_a_position; a `concrete_suggestion`-nek nem volt parja). Mindketto
+# bekerult a compose-promptba, KODBELI EGYEZTETES NELKUL — tehat ket LLM-valasztas
+# mutathatott ellentetes iranyba, es semmi nem oldotta fel. Ez ellentmond a projekt
+# sajat elvenek (§4/16: az LLM a szenzor, a kod a biro; a `strategy_fit` ->
+# `pick_strategy` minta), ezert egy skala maradt.
+#
+# MIERT a `response_mode` NEV maradt: a "strategy" szo ebben a modulban MAR jelent
+# valamit (a 7 elemu `STRATEGIES`). Egy masodik, mas ertelmu "strategy" pontosan az
+# a nevutkozes, ami a v2-ben az `intent` valtozo elarnyekolasat okozta.
+#
+# MIERT a v4 KULCSNEVEI maradtak: imperativabbak es pontosabbak. A
+# `technical_extension` kulonosen felrevezeto volt, mert mesterseg- vagy emberi
+# poszton sem "technikai" a kiterjesztes — az `extend_one_insight` altalanosabb es
+# egyben az "pontosan EGY lepes" fegyelmet is kimondja.
 RESPONSE_MODES: dict[str, str] = {
-    "direct_answer": "Answer the explicit question directly in the opening sentence.",
-    "concrete_suggestion": "Give one concrete feature, example, alternative or practical idea first.",
-    "technical_extension": "Extend the technique with one near implementation trade-off or common failure mode.",
-    "analytical_response": "Engage the stated argument with one specific implication or limitation.",
-    "experience_connection": "Connect through one closely related field observation; preserve the human focus.",
+    "answer_the_question": "Answer the question asked, directly, in the opening "
+                           "sentence — before adding any context.",
+    "concrete_suggestion": "Give one concrete feature, example or alternative "
+                           "first, not a principle.",
+    "extend_one_insight": "Extend exactly one insight by its nearest meaningful "
+                          "implication, trade-off or common failure mode.",
+    "take_a_position": "Take one clear, respectful position on the stated "
+                       "argument, and name its limit.",
+    "share_experience": "Share one closely related practitioner observation; "
+                        "preserve the human focus.",
 }
 
 HUMAN_TEMPERATURES = [
@@ -459,9 +484,15 @@ def _responder_role_key(raw) -> str:
 
 
 def _response_mode_key(raw) -> str:
-    """Modell-mezo -> ervenyes valaszforma; ismeretlenul kozel marad a munkahoz."""
+    """Modell-mezo -> ervenyes valaszforma; ismeretlenul kozel marad a munkahoz.
+
+    A default `extend_one_insight`: ez a legkevesbe invaziv valaszforma — egy
+    lepes a poszt sajat gondolatan tul, temavaltas es tanacsadoi keretezes nelkul.
+    (Az osszevonas elott a ket skala defaultja `technical_extension` es
+    `extend_one_insight` volt: ugyanez a dontes, ket neven.)
+    """
     key = str(raw or "").strip().lower()
-    return key if key in RESPONSE_MODES else "technical_extension"
+    return key if key in RESPONSE_MODES else "extend_one_insight"
 
 
 def _human_temperature_key(raw) -> str:
@@ -528,11 +559,14 @@ Fill the JSON fields in this order:
    A direct question normally needs technical_advisor; a request for feature
    ideas needs product_reviewer; a personal story needs experience_sharer. Do
    not default to an industry analyst when the post assigns a narrower role.
-5. response_mode — WHAT SHAPE will serve that role. Exactly one value:
+5. response_mode — HOW you join this conversation: exactly ONE shape that serves
+   that role. This is the only place the response shape is decided.
 {chr(10).join(f'   - {k}: {v}' for k, v in RESPONSE_MODES.items())}
-   When the author explicitly asks for suggestions, select concrete_suggestion.
-   When the author asks a question, select direct_answer unless they specifically
-   ask for feature ideas or alternatives.
+   Follow the author's move. When they explicitly ask for suggestions, select
+   concrete_suggestion. When they ask a question, select answer_the_question
+   unless they specifically ask for feature ideas or alternatives. Do not slip
+   into a consultant, architect or solution-designer shape unless the post
+   explicitly asks for advice.
 6. human_temperature — the human register to preserve. Exactly one value:
    matter_of_fact | practical | curious | reflective | celebratory | personal |
    frustrated | provocative. Preserve a human story as a human story: do not
@@ -547,15 +581,15 @@ Fill the JSON fields in this order:
 9. audience — who the post is written for.
 10. technical_depth — surface | practitioner | expert.
 11. emotional_tone — the author's register (neutral, frustrated, promotional,
-   celebratory, reflective, provocative...).
+    celebratory, reflective, provocative...).
 12. core_thesis — the ONE central claim, in one sentence. Ignore supporting
-   arguments and examples. If the post has several, pick the load-bearing one.
+    arguments and examples. If the post has several, pick the load-bearing one.
 13. missing_perspective — the STRONGEST dimension the post does not address,
     from the allowed list. Exactly one. Never a list.
 14. missing_perspective_reason — one sentence: why this omission matters here.
 15. strategy_fit — score EVERY strategy 0-10 on how much professional value it
     would add to THIS post. Do not pick a winner; score them all honestly, and
-    let the scores differ. The missing perspective from step 10 is an input to
+    let the scores differ. The `missing_perspective` you gave above is an input to
     this scoring, not the answer to it.
 {chr(10).join(f'    - {k}: fits when {v["wins_when"]}' for k, v in STRATEGIES.items())}
     Score on professional value ALONE. Do NOT down-score a strategy because it
@@ -578,7 +612,7 @@ Fill the JSON fields in this order:
 19. insight — ONE original, specific claim that is NOT stated in the post and is
     not a restatement of it. This is the substance of the comment. Go deeper,
     not wider. No hedging, no generalities like "communication is important".
-    The insight must sit at the discourse_level you reported in step 3 — on a
+    The insight must sit at the `discourse_level` you reported above — on a
     technical post, a deeper technical claim, NOT a business consequence.
 20. confidence — 0.0-1.0, your confidence in this reasoning.
 
@@ -589,6 +623,9 @@ Hard rules:
 - No invented statistics, customer names or personal anecdotes.
 - Depth is not abstraction. Going deeper into the author's own subject is worth
   more than moving up a level away from it.
+- Stay exactly ONE conceptual step beyond the post: the immediate implication,
+  constraint, trade-off or consequence — never a distant framework or a new
+  problem the author did not raise.
 """.strip()
 
 _REASON_SCHEMA = {
@@ -1219,6 +1256,14 @@ def _compose_user_msg(post_text: str, author_line: str, reasoning: dict,
             "project delivery or organisational scale. End on the concrete "
             "engineering, human or practical point instead."
         )
+        parts.append(
+            "Stay exactly ONE conceptual step beyond the post: make only the "
+            "nearest meaningful implication. Join the conversation; do not switch "
+            "into consultant, architect or solution-designer mode unless the post "
+            "explicitly asks for advice. Prefer practitioner language over "
+            "whitepaper language. End with one memorable insight, not a "
+            "recommendation."
+        )
         if gravity:
             parts.append(f"CENTRE OF GRAVITY: {gravity}. Stay close to this subject.")
     parts += [
@@ -1297,12 +1342,13 @@ def generate_comment(config: dict, post_text: str, author_name: str = "",
         reasoning = _call_json(
             client, model, _REASON_PROMPT,
             f"{author_line}POST:\n{post_text[:2000]}",
-            # 900 -> 1100: a semaba harom uj mezo kerult (conversation_intent,
-            # discourse_level, topic_gravity). A ket enum nehany token, a
+            # 900 -> 1200: a semaba a Conversation Intent es Conversation Response
+            # Layer mezojei kerultek (intent, response strategy, szint, gravity,
+            # szerep, valaszforma, human temperature). Az enumok nehany token, a
             # topic_gravity 2-5 szo — de a csonka-JSON hiba (§4/1) itt a TELJES
             # valaszt viszi, ezert a keret inkabb bo. A fel nem hasznalt keret nem
             # kerul semmibe: a szamlazas a tenyleges output-tokenre megy.
-            _REASON_SCHEMA, max_tokens=1100,
+            _REASON_SCHEMA, max_tokens=1200,
         )
     except Exception as e:
         print(f"[linkedin-tle] reasoning HIBA: {e}")
@@ -1325,7 +1371,7 @@ def generate_comment(config: dict, post_text: str, author_name: str = "",
     else:
         intent, level = _LAYER_OFF
         responder_role = "peer_practitioner"
-        response_mode = "technical_extension"
+        response_mode = "extend_one_insight"
         human_temperature = "practical"
     # A normalizalt ertekeket visszairjuk: innentol a compose es a kapu is a
     # KODBAN ervenyesnek elfogadott erteket lassa, nem a modell nyers stringjet.

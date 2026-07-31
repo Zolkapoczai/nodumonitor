@@ -27,11 +27,13 @@ def check(name, cond, detail=""):
     results.append((name, bool(cond), detail))
 
 
+import responder.linkedin_engine as _eng_mod  # noqa: E402
 from responder.linkedin_engine import (  # noqa: E402
     CONVERSATION_INTENTS, STRATEGIES, ENGINE_VERSION, _DISCOURSE_LEVELS,
     RESPONDER_ROLES, RESPONSE_MODES, HUMAN_TEMPERATURES,
     _LEVEL_VETO, _LEVEL_STRATEGY_BIAS, _STRATEGY_BIAS, _LAYER_OFF,
-    _REASON_SCHEMA, _NO_EXEC_ABSTRACTION_INTENTS, _EXEC_ABSTRACTION_PATTERNS,
+    _REASON_PROMPT, _REASON_SCHEMA, _NO_EXEC_ABSTRACTION_INTENTS,
+    _EXEC_ABSTRACTION_PATTERNS,
     _intent_key, _level_key, _responder_role_key, _response_mode_key,
     _human_temperature_key, _intent_layer_enabled, _compose_user_msg,
     effective_bias, score_strategies, pick_strategy, check_quality,
@@ -72,11 +74,57 @@ check("A7 a sema enum == a taxonomia kulcsai",
       and props["expected_responder_role"]["enum"] == list(RESPONDER_ROLES)
       and props["response_mode"]["enum"] == list(RESPONSE_MODES)
       and props["human_temperature"]["enum"] == HUMAN_TEMPERATURES)
-check("A8 az engine-verzio bumpolva", ENGINE_VERSION.endswith("v3"), ENGINE_VERSION)
+check("A8 az engine-verzio bumpolva", ENGINE_VERSION.endswith("v4"), ENGINE_VERSION)
 check("A9 a legacy post_type mezo MEGMARADT (dashboard-szerzodes)",
       "post_type" in props and "post_type" in req)
 check("A10 personal_experience intent letezik (human temperature vedelme)",
       "personal_experience" in CONVERSATION_INTENTS)
+
+# A11-A13: a ket eddig KETSZER elkovetett hibaosztaly kod-szintu zara.
+#
+# A11 — DUPLA VALASZFORMA-SKALA. A v3 `RESPONSE_MODES`-a es a v4
+# `CONVERSATION_RESPONSE_STRATEGIES`-e ugyanazt a dontest kerte ket atfedo skalan,
+# kodbeli egyeztetes nelkul (2026-07-31-i osszevonas). Ez a teszt megbukik, ha
+# barmelyik masodik "hogyan valaszolunk" enum visszakerul a modulba.
+check("A11.0 a megszunt dupla-skala szimbolumai eltuntek",
+      not hasattr(_eng_mod, "CONVERSATION_RESPONSE_STRATEGIES")
+      and not hasattr(_eng_mod, "_conversation_response_strategy_key"))
+
+# Barmely MAS publikus direktiva-dict, ami a RESPONSE_MODES kulcsaibol tartalmaz,
+# definicio szerint ugyanazt a dontest kerdezi meg masodszor.
+_directive_dicts = {n: getattr(_eng_mod, n) for n in dir(_eng_mod)
+                    if not n.startswith("_") and n.isupper()
+                    and isinstance(getattr(_eng_mod, n), dict)
+                    and all(isinstance(v, str) for v in getattr(_eng_mod, n).values())}
+_dupes = {n: sorted(set(d) & set(RESPONSE_MODES))
+          for n, d in _directive_dicts.items()
+          if n != "RESPONSE_MODES" and set(d) & set(RESPONSE_MODES)}
+check("A11 nincs masodik, parhuzamos valaszforma-skala a modulban",
+      not _dupes, str(_dupes))
+check("A11.1 a valaszforma-skala az osszevont 5 agu",
+      set(RESPONSE_MODES) == {"answer_the_question", "concrete_suggestion",
+                              "extend_one_insight", "take_a_position",
+                              "share_experience"},
+      str(sorted(RESPONSE_MODES)))
+
+# A12/A13 — ELCSUSZOTT LEPES-HIVATKOZAS. A REASON-prompt szamozott listaja ket
+# egymast koveto commitban is elcsuszott az uj mezok beszurasakor ("step 10" ->
+# valojaban 13., "step 3" -> valojaban 4.), mert a hivatkozas SZAMRA mutatott. A
+# szamokra mutato kereszthivatkozas ezert tilos: mezonevre kell hivatkozni.
+import re as _re  # noqa: E402
+
+check("A12 a promptban NINCS szamra mutato lepes-kereszthivatkozas",
+      not _re.search(r"\bstep\s+\d+", _REASON_PROMPT, _re.IGNORECASE),
+      str(_re.findall(r"\bstep\s+\d+", _REASON_PROMPT, _re.IGNORECASE)))
+
+_steps = [int(m.group(1)) for m in _re.finditer(r"^(\d+)\. ", _REASON_PROMPT, _re.M)]
+check("A13 a prompt lepes-szamozasa hezag- es duplikatummentes (1..N)",
+      _steps == list(range(1, len(_steps) + 1)), str(_steps))
+# Minden KOTELEZO sema-mezot nevvel ki kell mondani a promptban: enelkul a modell
+# kap egy kotelezo mezot, amirol nem tudja, mit kell bele irni.
+_undocumented = [f for f in req if f not in _REASON_PROMPT]
+check("A13.1 minden kotelezo sema-mezo szerepel a promptban is",
+      not _undocumented, str(_undocumented))
 
 
 # --- B) nincs regresszio a mukodo eseten ------------------------------------
@@ -253,14 +301,26 @@ check("G10 a munkaparancs 'Avoid' listaja mind a harom intentre all",
 # --- G2) response shaping: emberi hang, konkretseg, stilus -----------------
 check("G2.1 ismeretlen szerep konzervativ peer default",
       _responder_role_key("nonsense") == "peer_practitioner")
-check("G2.2 ismeretlen response mode technikai kozelseg default",
-      _response_mode_key("nonsense") == "technical_extension")
+check("G2.2 ismeretlen response mode a legkevesbe invaziv default",
+      _response_mode_key("nonsense") == "extend_one_insight")
 check("G2.3 ismeretlen temperature gyakorlati default",
       _human_temperature_key("nonsense") == "practical")
 check("G2.4 ervenyes role/mode/temperature normalizalva marad",
       _responder_role_key("PRODUCT_REVIEWER") == "product_reviewer"
-      and _response_mode_key("direct_answer") == "direct_answer"
+      and _response_mode_key("ANSWER_THE_QUESTION") == "answer_the_question"
+      and _response_mode_key(" share_experience ") == "share_experience"
       and _human_temperature_key("reflective") == "reflective")
+check("G2.4.1 az osszevonas utan MINDEN korabbi ag lefedve (a v3 es a v4 kulcsai)",
+      all(k in RESPONSE_MODES for k in
+          ("answer_the_question",     # v3 direct_answer
+           "share_experience",        # v3 experience_connection
+           "extend_one_insight",      # v3 technical_extension
+           "take_a_position",         # v3 analytical_response
+           "concrete_suggestion")))   # csak a v3-ban volt, parja nem volt
+check("G2.4.2 a megszunt v3/v4 kulcsok mar nem ervenyesek",
+      all(_response_mode_key(old) == "extend_one_insight" for old in
+          ("direct_answer", "technical_extension", "analytical_response",
+           "experience_connection")))
 
 stock = "We often see the parameter GUID become the real failure point after handover. " + TECH_OK
 check("G2.5 sablonos nyitas SERTES", any("ismetlodo nyitas" in i for i in
@@ -299,7 +359,7 @@ REASONING = {
     "conversation_intent": "craftsmanship",
     "discourse_level": "technical",
     "expected_responder_role": "peer_practitioner",
-    "response_mode": "technical_extension",
+    "response_mode": "share_experience",
     "human_temperature": "practical",
     "topic_gravity": "Revit family authoring",
     "core_thesis": "Nested families are overused.",
@@ -318,12 +378,17 @@ check("I4 bekapcsolva: technikai sikon a ROI-tilalom kimondva",
       "no ROI" in on and "executive framing" in on)
 check("I5 bekapcsolva: szerep, response shape es human temperature atmegy",
       "YOUR EXPECTED ROLE: peer_practitioner" in on
-      and "RESPONSE SHAPE: technical_extension" in on
-      and "HUMAN TEMPERATURE: practical" in on)
+      and "RESPONSE SHAPE: share_experience" in on
+      and "HUMAN TEMPERATURE: practical" in on
+      and "exactly ONE conceptual step" in on
+      and "practitioner language over whitepaper language" in on)
+check("I5.1 a valaszforma PONTOSAN EGYSZER szerepel a promptban (nincs dupla skala)",
+      on.count("RESPONSE SHAPE") == 1 and "CONVERSATION RESPONSE STRATEGY" not in on)
 check("I6 KIKAPCSOLVA: egyik uj sor sem kerul be (v1-es prompt)",
       not any(s in off for s in ("CONVERSATION TYPE", "PLANE", "CENTRE OF GRAVITY",
                                  "YOUR EXPECTED ROLE", "RESPONSE SHAPE",
-                                 "HUMAN TEMPERATURE", "stock consultant opening",
+                                 "HUMAN TEMPERATURE",
+                                 "exactly ONE conceptual step", "stock consultant opening",
                                  "generic payoff", "no ROI", "Do not reframe")))
 check("I7 a reasoning-mezok mindket agban benne vannak",
       "core thesis" in on and "core thesis" in off
@@ -360,7 +425,7 @@ REASON_OUT = {
     "topic": "revit", "post_type": "experience",
     "conversation_intent": "craftsmanship", "discourse_level": "technical",
     "expected_responder_role": "peer_practitioner",
-    "response_mode": "technical_extension", "human_temperature": "practical",
+    "response_mode": "share_experience", "human_temperature": "practical",
     "topic_gravity": "Revit family authoring",
     "author_objective": "share craft", "audience": "BIM practitioners",
     "technical_depth": "expert", "emotional_tone": "reflective",
@@ -432,8 +497,11 @@ check("J4 a discourse_level es a gravity atkerult",
       and res_on.get("topic_gravity") == "Revit family authoring")
 check("J4.1 role, response shape es human temperature atkerult",
       res_on.get("expected_responder_role") == "peer_practitioner"
-      and res_on.get("response_mode") == "technical_extension"
+      and res_on.get("response_mode") == "share_experience"
       and res_on.get("human_temperature") == "practical")
+check("J4.2 a megszunt dupla-skala mezoi NEM kerulnek a valaszba",
+      "conversation_response_strategy" not in res_on
+      and "conversation_response_strategy_label" not in res_on)
 check("J5 VEGPONTTOL VEGPONTIG: a top-pontszamu business_impact NEM nyert",
       res_on.get("strategy") != "business_impact", str(res_on.get("strategy")))
 check("J6 helyette mesterseg-strategia nyert",
@@ -453,7 +521,7 @@ check("J9 a DASHBOARD-SZERZODES all: mind a 8 legacy mezo megvan",
 check("J10 a kapu atengedte a kommentet (nincs uzleti absztrakcio benne)",
       res_on.get("quality_issues") == [] and res_on.get("rewrites") == 0,
       str(res_on.get("quality_issues")))
-check("J11 az engine-verzio a valaszban v3", res_on.get("engine") == "linkedin-tle-v3")
+check("J11 az engine-verzio a valaszban v4", res_on.get("engine") == "linkedin-tle-v4")
 check("J12 KIKAPCSOLVA: ugyanezen a bemeneten a v1-es dontes (business_impact)",
       res_off.get("strategy") == "business_impact" and res_off.get("intent_layer") is False,
       str(res_off.get("strategy")))
