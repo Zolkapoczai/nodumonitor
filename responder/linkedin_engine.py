@@ -856,6 +856,28 @@ into a non-English comment — a half-translated sentence is the clearest sign o
 machine writing.
 Never invent personal stories, numbers, customer names or project details.
 
+YOU ARE A PEER, NOT A CONSULTANT.
+Never write as any of these: a consultant, a standards committee,
+a solution architect, a whitepaper, a conference speaker.
+Join the discussion; do not try to solve it. Prefer observations over
+recommendations, concrete language over abstract nouns, experience over
+explanation.
+
+OPENING. The gate rejects stock consultant openings, so open the way a
+practitioner actually would. Use one of these shapes, in the post's own language:
+  "I've found..."
+  "I've run into..."
+  "One thing that stood out..."
+  "What strikes me..."
+  "We've learned..."
+  "One pattern I've noticed..."
+Never open with: "We often see", "We frequently observe", "One approach",
+"Best practice", "Organizations should", "Implementation requires",
+"Establishing...", "Ensuring...", "It is critical to".
+
+ENDING. Do not end with advice, a recommendation or a solution. End on a concrete
+observation that leaves room for the other person to answer.
+
 Hard limits:
 - 80-150 words. Never more than two paragraphs.
 - First person, professional, plain. No emoji, no exclamation marks, no hashtags.
@@ -867,13 +889,94 @@ Hard limits:
 - Do not reuse the author's distinctive phrasing; use your own words.
 - No marketing language. Nothing that sounds like selling.
 - Write in the SAME language as the post.
+
+AFTER writing the comment, score it on five axes, 0-2 each. Score the text you
+just wrote, honestly — a low score triggers one targeted rewrite, so an inflated
+score only produces a worse comment.
+- voice_professional: 2 = reads as a practitioner; 0 = reads as a consultant.
+- conversation_fit: 2 = answers the conversation the author started; 0 = answers
+  a different one.
+- one_step_insight: 2 = exactly one idea beyond the post; 0 = no new idea, or a
+  whole theory.
+- no_implementation_drift: 2 = NO drift, you stayed at the author's level;
+  0 = drifted into implementation, governance, architecture or transformation.
+  Higher is always better on every axis, including this one.
+- natural_language: 2 = plain professional speech; 0 = enterprise vocabulary the
+  author never used.
 """.strip()
+
+# --- Authenticity rubrika (2026-08-01) --------------------------------------
+# A munkaparancs "Authenticity Score"-ja MEGFORDITVA: a modell nem dont es nem ir
+# ujra sajat magatol — csak PONTOZ (szenzor), a kuszobot es az ujrairast a kod
+# vegzi (biro). Ez a projekt sajat elve (§4/16), es azert kell igy, mert:
+#   1. a COMPOSE strukturalt kimenetet ad `thinking_budget=0`-val, tehat nincs hol
+#      egy belso "self-check" kort futtatni — a modell egyszeruen kiirja a JSON-t;
+#   2. az LLM-nek feltett "eleg jo ez?" kerdesre a valasz gyakorlatilag mindig igen,
+#      ezert az onertekelesre alapozott ujrairas nem megbizhato kapu.
+# Amit a rubrika IGY is ad: a modell a vegleges szoveget ot MEGNEVEZETT tengely
+# szerint ujraolvassa a lezaras elott, es kapunk egy szamot, ami Zoltan kezi
+# benchmark-pontjaival korrelaltathato. A korrelacio maga a proba: ha nincs, a
+# rubrika torolheto (10 kimeneti token).
+#
+# MINDEN tengelyen a NAGYOBB a jobb — a `no_implementation_drift` ezert van
+# tagadva megfogalmazva (a munkaparancs "Implementation Drift"-je forditott
+# iranyu lett volna, es az osszeg ertelmetlen).
+_AUTHENTICITY_DIMENSIONS = [
+    "voice_professional", "conversation_fit", "one_step_insight",
+    "no_implementation_drift", "natural_language",
+]
+AUTHENTICITY_MAX = 2 * len(_AUTHENTICITY_DIMENSIONS)      # 10
 
 _COMPOSE_SCHEMA = {
     "type": "OBJECT",
-    "properties": {"comment": {"type": "STRING"}},
-    "required": ["comment"],
+    # A `comment` ELOL all: a modell a mar megirt szoveget pontozza, nem a
+    # semmit. A dict-sorrend szandekos.
+    "properties": {
+        "comment": {"type": "STRING"},
+        **{d: {"type": "INTEGER"} for d in _AUTHENTICITY_DIMENSIONS},
+    },
+    "required": ["comment", *_AUTHENTICITY_DIMENSIONS],
 }
+
+
+def authenticity_score(out: dict) -> tuple[int | None, dict]:
+    """(osszeg vagy None, tengelyenkenti pontszamok) a COMPOSE valaszabol.
+
+    KET KULONBOZO HIBA, ket kulonbozo valasz — es ez MERT dontes:
+
+      RESZBEN hianyzo pontszam -> a hianyzo tengely 0. A modell nem tudja
+      megkerulni a kaput azzal, hogy a rossz tengelyt kihagyja.
+
+      TELJESEN hianyzo pontszam -> None, es a kapu KIHAGYJA a rubrikat. Ez nem
+      minosegi jel, hanem sema-/vezetekezesi hiba: ha 0-nak vennenk, MINDEN hivas
+      a kuszob ala esne, tehat mindegyik ujrairast kapna — a masodik hivas
+      ugyanugy nem adna pontszamot, tehat a plusz kor semmit nem javitana, csak
+      csendben megduplazna a compose-koltseget. Ezt a hibat a v2/v4 tesztek
+      stubjai fedtek fel (azok nem pontoznak), es eles uzemben ugyanigy jelentkezne
+      egy sema-valtozas utan.
+    """
+    per = {}
+    present = 0
+    for d in _AUTHENTICITY_DIMENSIONS:
+        raw = (out or {}).get(d)
+        if isinstance(raw, (int, float)):
+            present += 1
+            per[d] = max(0, min(2, int(raw)))
+        else:
+            per[d] = 0
+    if not present:
+        return None, per
+    return sum(per.values()), per
+
+
+def authenticity_min_score(config: dict) -> int:
+    """`linkedin.authenticity_min_score` — ez alatt egy celzott ujrairas. 0 = ki."""
+    raw = (config.get("linkedin", {}) or {}).get("authenticity_min_score", 8)
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return 8
+    return value if 0 <= value <= AUTHENTICITY_MAX else 8
 
 # --- Stage 9: deterministikus quality gate ----------------------------------
 # Angol ES magyar mintak: a komment a poszt nyelven keszul (a nyelvi sodras
@@ -908,7 +1011,28 @@ _STOCK_OPENING_PATTERNS: list[tuple[str, str]] = [
     (r"^\s*one consideration(?: is)?\b", "ismetlodo nyitas (One consideration)"),
     (r"^\s*in practice\b", "ismetlodo nyitas (In practice)"),
     (r"^\s*one recurring (?:challenge|pattern)\b", "ismetlodo nyitas (One recurring)"),
+    # 2026-08-01: a benchmark tovabbi tanacsadoi nyitasai. Mind mondat-eleji
+    # egyezes, tehat a kifejezes kesobbi, tartalmilag indokolt hasznalata nem serul
+    # (pl. "...ami best practice lett" a komment kozepen atmegy).
+    (r"^\s*we (?:frequently|commonly|typically|usually) (?:see|observe|find)\b",
+     "ismetlodo nyitas (We frequently observe)"),
+    (r"^\s*one approach\b", "tanacsadoi nyitas (One approach)"),
+    (r"^\s*(?:the )?best practice\b", "tanacsadoi nyitas (Best practice)"),
+    (r"^\s*organi[sz]ations? (?:should|need|must)\b", "tanacsadoi nyitas (Organizations should)"),
+    (r"^\s*implementation requires\b", "tanacsadoi nyitas (Implementation requires)"),
+    (r"^\s*establishing\b", "tanacsadoi nyitas (Establishing)"),
+    (r"^\s*ensuring\b", "tanacsadoi nyitas (Ensuring)"),
+    (r"^\s*it (?:is|'s) critical to\b", "tanacsadoi nyitas (It is critical to)"),
+    (r"^\s*a (?:legjobb|bevalt) gyakorlat\b", "tanacsadoi nyitas (HU: best practice)"),
+    (r"^\s*a (?:cegeknek|szervezeteknek) (?:erdemes|kell)\b",
+     "tanacsadoi nyitas (HU: organizations should)"),
 ]
+
+# Gondolatjel ANGOL kommentben: a LinkedIn-en ma az egyik legismertebb AI-jel.
+# CSAK angolra mer, mert a magyar tipografiaban a gondolatjel legitim irasjel —
+# ugyanaz az elv, amiert az "architecture" sem kerult kemeny tiltolistara (egy
+# AEC-eszkozben az maga az iparag).
+_EM_DASH_PATTERN = re.compile(r"[—]")
 
 # Csak a komment VEGEN vizsgaljuk: onmagukban ezek a szavak lehetnek igazak, de
 # konkluziokent nem mondanak tobbet, mint az alapertelmezett LLM-payoff. A modell
@@ -1078,7 +1202,9 @@ def ai_fingerprint_terms(comment: str, post_text: str) -> list[str]:
 def check_quality(comment: str, post_text: str, brand_allowed: bool = False,
                   intent: str = "", discourse_level: str = "",
                   human_temperature: str = "",
-                  image_attached: bool = False) -> list[str]:
+                  image_attached: bool = False,
+                  auth_score: int | None = None,
+                  auth_min: int = 0) -> list[str]:
     """Stage 9 — deterministikus kapu. Visszaadja a KONKRET serteseket.
 
     A lista uressege a "mehet" jel. A hivo ezt a listat adja at az ujrairo
@@ -1169,6 +1295,16 @@ def check_quality(comment: str, post_text: str, brand_allowed: bool = False,
         if leaked:
             issues.append(f"angol frazis nem-angol kommentben ({leaked[0]})")
 
+    # Authenticity-rubrika: a modell PONTOZ, a kuszob a KODBAN van. auth_min=0
+    # kikapcsolja, es a regi (parameter nelkuli) hivasok igy valtozatlanok.
+    if auth_min and auth_score is not None and auth_score < auth_min:
+        issues.append(f"authenticity-pontszam {auth_score}/{AUTHENTICITY_MAX} "
+                      f"(min {auth_min})")
+
+    # Gondolatjel csak ANGOL kommentben (ld. `_EM_DASH_PATTERN`).
+    if looks_english(post_text) and _EM_DASH_PATTERN.search(text):
+        issues.append("gondolatjel angol kommentben (AI-jel)")
+
     if "!" in text:
         issues.append("felkialtojel")
     if re.search(r"#\w+", text):
@@ -1181,17 +1317,68 @@ def check_quality(comment: str, post_text: str, brand_allowed: bool = False,
 
 # --- Orchesztracio ----------------------------------------------------------
 
+DEFAULT_MODEL = "gemini-2.5-flash"
+
+
+def linkedin_model(config: dict) -> str:
+    """A LinkedIn-komment motor modellje: `linkedin.model`, kulonben orokli
+    a `scoring.gemini_model`-t.
+
+    MIERT KELL SZETVALASZTANI: a `scoring.gemini_model` EGYETLEN ertek, amit HAT
+    hivasi hely oszt — a Pain Classifier (napi tobb szaz hivas), a negy
+    draft_generator-ut es ez a motor. A ket veglet ellentetes koveteleseu:
+
+      classifier      — nagy volumen, strukturalt JSON a kimenet -> a KOLTSEG szamit
+      LinkedIn compose — par kezi hivas naponta, nyilvanos szoveg -> a MINOSEG szamit
+
+    Egy modellvalasztas nem szolgalhatja mindkettot: a compose-utat felvinni egy
+    dragabb modellre nehany centet jelent, ugyanezt a classifierre ravinni a
+    3.6 Flash arazasan (input 5x, output 3x a 2.5 Flash-hez kepest) tobbszorozi a
+    havi szamlat egy olyan uton, ahol a kimenet nem is proza.
+
+    Ures/hianyzo ertek eseten a viselkedes VALTOZATLAN — orokli a globalis modellt,
+    tehat a szetvalasztas onmagaban nem valtoztat semmit, csak lehetove teszi a
+    kulon hangolast.
+    """
+    raw = (config.get("linkedin", {}) or {}).get("model")
+    own = str(raw).strip() if raw is not None else ""
+    if own and own.lower() not in ("inherit", "none", "default"):
+        return own
+    return (config.get("scoring", {}) or {}).get("gemini_model") or DEFAULT_MODEL
+
+
 def _client(config: dict) -> tuple[genai.Client | None, str, str | None]:
     sc = config.get("scoring", {})
     api_key = get_secret("GEMINI_API_KEY", sc.get("gemini_api_key"))
     if not sc.get("gemini_enabled", False) or not api_key:
         return None, "", "Gemini API nincs beállítva (GEMINI_API_KEY a .env-ben)."
-    model = sc.get("gemini_model", "gemini-2.5-flash")
-    return genai.Client(api_key=api_key), model, None
+    return genai.Client(api_key=api_key), linkedin_model(config), None
+
+
+def temperature(config: dict) -> float | None:
+    """`linkedin.temperature` — a hullamzas elleni legkozvetlenebb kar.
+
+    2026-08-01-ig ez a kodbazis SOHA nem allitotta a temperature-t, tehat mindket
+    hivas az API-defaulton futott (gemini-2.5-flash: 1.0). A benchmark ingadozasa
+    reszben egyszeruen ez. 0.3 a default: eleg alacsony a szoveg-varianciahoz, es
+    a REASON osztalyozasnak is jot tesz (konzisztensebb intent/szint dontes).
+
+    `null`/'default' -> nem allitjuk be (visszateres az API-defaultra), igy a
+    korabbi viselkedes egy config-sorral reprodukalhato.
+    """
+    raw = (config.get("linkedin", {}) or {}).get("temperature", 0.3)
+    if raw is None or str(raw).strip().lower() in ("default", "none", ""):
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return 0.3
+    return value if 0.0 <= value <= 2.0 else 0.3
 
 
 def _call_json(client, model: str, system: str, user: str, schema: dict,
-               max_tokens: int, image: tuple[bytes, str] | None = None) -> dict | None:
+               max_tokens: int, image: tuple[bytes, str] | None = None,
+               temp: float | None = None) -> dict | None:
     """Strukturalt hivas. thinking_budget=0 — a HANDOFF §4/1 lecke: a
     gemini-2.5-flash kulonben a max_output_tokens keretbol "gondolkodik", es
     csonka JSON-t ad.
@@ -1205,16 +1392,21 @@ def _call_json(client, model: str, system: str, user: str, schema: dict,
         types.Part.from_bytes(data=image[0], mime_type=image[1]),
         user,
     ]
+    cfg = dict(
+        system_instruction=system,
+        response_mime_type="application/json",
+        response_schema=schema,
+        max_output_tokens=max_tokens,
+        thinking_config=types.ThinkingConfig(thinking_budget=0),
+    )
+    # Csak akkor adjuk at, ha van ertek: `temperature=None`-t nem kuldunk, hogy a
+    # 'default' beallitas tenylegesen az API-defaultot jelentse.
+    if temp is not None:
+        cfg["temperature"] = temp
     resp = client.models.generate_content(
         model=model,
         contents=contents,
-        config=types.GenerateContentConfig(
-            system_instruction=system,
-            response_mime_type="application/json",
-            response_schema=schema,
-            max_output_tokens=max_tokens,
-            thinking_config=types.ThinkingConfig(thinking_budget=0),
-        ),
+        config=types.GenerateContentConfig(**cfg),
     )
     if not resp.text:
         return None
@@ -1483,6 +1675,8 @@ def generate_comment(config: dict, post_text: str, author_name: str = "",
     # kikapcsolt layer eseten az intent/szint a `_LAYER_OFF` par, tehat a kep
     # osztalyozasi eredmenye eldobodna — elkuldeni tiszta token-veszteseg lenne.
     intent_layer = _intent_layer_enabled(config)
+    temp = temperature(config)
+    auth_min = authenticity_min_score(config)
     use_image = bool(image_bytes) and intent_layer and image_input_enabled(config)
     if image_bytes and not use_image:
         why = ("linkedin.image_input=off" if not image_input_enabled(config)
@@ -1502,6 +1696,7 @@ def generate_comment(config: dict, post_text: str, author_name: str = "",
             # kerul semmibe: a szamlazas a tenyleges output-tokenre megy.
             reason_schema_for(use_image), max_tokens=1200,
             image=(image_bytes, image_mime) if use_image else None,
+            temp=temp,
         )
     except Exception as e:
         print(f"[linkedin-tle] reasoning HIBA: {e}")
@@ -1556,6 +1751,7 @@ def generate_comment(config: dict, post_text: str, author_name: str = "",
 
     # --- Stage 6-7: compose, + Stage 9: kapu, legfeljebb egy ujrairassal ---
     comment, issues, rewrites = "", ["nem futott le"], 0
+    auth_total, auth_per = None, {d: 0 for d in _AUTHENTICITY_DIMENSIONS}
     for attempt in range(2):
         user_msg = _compose_user_msg(
             post_text, author_line, reasoning, brand_allowed,
@@ -1563,11 +1759,12 @@ def generate_comment(config: dict, post_text: str, author_name: str = "",
         )
         try:
             out = _call_json(client, model, _COMPOSE_PROMPT, user_msg,
-                             _COMPOSE_SCHEMA, max_tokens=700)
+                             _COMPOSE_SCHEMA, max_tokens=700, temp=temp)
         except Exception as e:
             print(f"[linkedin-tle] compose HIBA: {e}")
             return {"error": f"Gemini API hiba (compose): {e}"}
         comment = _normalise(((out or {}).get("comment") or ""))
+        auth_total, auth_per = authenticity_score(out or {})
         # A kapu csak akkor meri az absztrakcio-szivargast, ha a layer be van
         # kapcsolva — kikapcsolva a v1-es kapu fut.
         issues = check_quality(
@@ -1576,6 +1773,7 @@ def generate_comment(config: dict, post_text: str, author_name: str = "",
             discourse_level=level if intent_layer else "",
             human_temperature=human_temperature if intent_layer else "",
             image_attached=use_image,
+            auth_score=auth_total, auth_min=auth_min,
         )
         if not issues:
             break
@@ -1640,6 +1838,14 @@ def generate_comment(config: dict, post_text: str, author_name: str = "",
         "audience": reasoning.get("audience", ""),
         "technical_depth": reasoning.get("technical_depth", ""),
         "quality_issues": issues,          # ures = a kapu atengedte
+        # Authenticity-rubrika: a modell pontszamai + a KODBELI kuszob, hogy a
+        # dontes utolag megmagyarazhato es a kezi benchmark-pontokkal
+        # korrelaltathato legyen.
+        "authenticity_score": auth_total,
+        "authenticity_max": AUTHENTICITY_MAX,
+        "authenticity_min": auth_min,
+        "authenticity_detail": auth_per,
+        "temperature": temp,
         "ai_fingerprint_terms": ai_fingerprint_terms(comment, post_text),
         "rewrites": rewrites,
         "post_overlap": round(overlap_ratio(comment, post_text), 3),

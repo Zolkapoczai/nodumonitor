@@ -523,6 +523,58 @@ linkedin:
   # olvasni viszont nem elég. Ha az kell, 768 a következő értelmes érték.
   # Az átméretezés a kliensen történik: nincs Pillow-függőség és nincs szerver-CPU.
   image_max_px: 384
+  # model — CSAK a LinkedIn-komment motor modellje (2026-08-01).
+  # Üres/hiányzó -> örökli a scoring.gemini_model-t, tehát a viselkedés
+  # VÁLTOZATLAN. A szétválasztás önmagában nem változtat semmit, csak lehetővé
+  # teszi a külön hangolást.
+  #
+  # MIÉRT: a scoring.gemini_model EGYETLEN érték, amit HAT hívási hely oszt — a
+  # Pain Classifier (napi több száz hívás), a négy draft_generator-út és ez a
+  # motor. A két véglet ellentétes követelményű:
+  #   classifier       nagy volumen, strukturált JSON a kimenet  -> a KÖLTSÉG számít
+  #   LinkedIn compose pár kézi hívás/nap, nyilvános szöveg      -> a MINŐSÉG számít
+  # A compose-utat drágább modellre vinni néhány cent; ugyanezt a classifierre
+  # rávinni a 3.6 Flash árazásán (input 5x, output 3x a 2.5 Flash-hez képest)
+  # nagyságrendi becslés szerint ~3,7x-re emeli annak az útnak a havi számláját.
+  #
+  # Árak (paid tier, 1M token, a 2026-07-30-i doksi szerint):
+  #   2.5 Flash        $0.30 / $2.50   (jelenlegi, stabil, nincs kivezetés bejelentve)
+  #   3.5 Flash-Lite   $0.30 / $2.50   (azonos ár, újabb generáció — A/B jelölt)
+  #   3.6 Flash        $1.50 / $7.50   (a compose-út jelöltje)
+  #   3.5 Flash        $1.50 / $9.00   SZIGORÚAN DOMINÁLT — azonos input, drágább
+  #                                    output, mint a 3.6 Flash. Soha ne ezt.
+  # A thinking-tokenek az output-tarifán számláznak, felár nélkül.
+  #
+  # FIGYELEM a modellváltás előtt: a kód mindenhol thinking_budget=0-t küld, mert a
+  # projekt KÉTSZER mérte, hogy a thinking a max_output_tokens keretből fogyaszt és
+  # csonka JSON-t okoz (§4/1). A telepített SDK (2.10.0) a thinking_level-t is
+  # támogatja, és a mai doksi már azt dokumentálja — 3.x modellen ez a valószínűleg
+  # helyes felület, de ezt élesben kell igazolni, nem doksiból eldönteni.
+  model: ''
+  # temperature — a szöveg-variancia legközvetlenebb kara (2026-08-01).
+  # TÉNY: a kódbázis eddig SOHA nem állította, tehát mindkét hívás a szerver-oldali
+  # defaulton futott. Hogy az pontosan mennyi, az NEM DOKUMENTÁLT: a google-genai
+  # SDK-ban a mező default értéke None (tehát nem küldjük), és a Gemini
+  # text-generation doksi sem közöl default értéket. Csak az irány biztos: a
+  # dokumentáció szerint az alacsonyabb érték kevésbé nyitott/kreatív kimenetet ad.
+  # NEM IGAZOLT: hogy a 0.3 EZEN a motoron csökkenti a hullámzást. A 0.3-as javaslat
+  # egy ChatGPT-n futtatott benchmarkból jön, nem gemini-2.5-flash mérésből — a
+  # gyártó-motoron nincs alapvonal. Kockázat mindkét irányban: túl alacsony érték
+  # lapos, általános felismeréseket adhat, ami maga is pontlevonás.
+  # 'default' vagy üres -> nem állítjuk be, tehát visszatérés a korábbi
+  # viselkedésre; ez az A/B másik ága.
+  temperature: 0.3
+  # authenticity_min_score — a modell a megírt kommentet ÖT megnevezett tengelyen
+  # pontozza (0-2 mind): voice_professional, conversation_fit, one_step_insight,
+  # no_implementation_drift, natural_language. Összeg 0-10. Ez alatt a kód EGY
+  # célzott újraírást kér a már meglévő újraíró körben.
+  # FONTOS: a modell csak PONTOZ (szenzor), a küszöböt és az újraírást a KÓD végzi
+  # (bíró) — §4/16. Az önértékelésre alapozott döntést a motor tudatosan nem
+  # használja, mert az LLM a saját szövegét gyakorlatilag mindig elfogadja.
+  # A pontszám minden válaszban ott van (`authenticity_detail`), hogy a kézi
+  # benchmark-pontokkal korreláltatható legyen. Ha nincs korreláció, törölhető.
+  # 0 = kikapcsolva.
+  authenticity_min_score: 8
 linkedin_content:
   enabled: true
   posts_per_week: 2

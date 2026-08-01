@@ -156,6 +156,66 @@
 > `image_attached`, `image_role`, `ai_fingerprint_terms`) additívak. DB-séma nem
 > változott.
 
+> ## ⚙️ KIEGÉSZÍTVE (2026-08-01) — Authenticity Layer
+>
+> Külső munkaparancs („AUTHENTICITY LAYER v1"). A spec kétharmada már élt
+> (intent-besorolás, discourse-szint + vétó, One-Step Rule, kérdés-megválaszolás,
+> nyitás- és zárás-kapuk), ezért csak a valóban új rész került be.
+>
+> ### Bekerült
+> - **Természetes nyitások whitelistje** a compose-promptban. Eddig a kapu csak
+>   *tiltott*, de nem ajánlott helyettesítést — ez volt a legnagyobb kihasználatlan
+>   tartalék a specben.
+> - **Bővített tanácsadói tiltólista** a determinisztikus kapuban (`We frequently
+>   observe`, `One approach`, `Best practice`, `Organizations should`,
+>   `Implementation requires`, `Establishing`, `Ensuring`, `It is critical to`,
+>   plusz két magyar megfelelő). Mind **mondat-eleji** egyezés, tehát a kifejezés
+>   későbbi, tartalmilag indokolt használata nem sérül.
+> - **Megnevezett anti-szerepek:** consultant, standards committee, solution
+>   architect, whitepaper, conference speaker.
+> - **`linkedin.temperature: 0.3`** — a kódbázis eddig **soha** nem állította a
+>   temperature-t, tehát mindkét hívás API-defaulton (1.0) futott. A hullámzás
+>   részben egyszerűen ez volt. `'default'` visszaadja a korábbi viselkedést, így
+>   A/B-zhető.
+> - **Gondolatjel-kapu, CSAK angol kommentben.** LinkedIn-en ismert AI-jel, de a
+>   magyar tipográfiában legitim írásjel — ugyanaz az elv, amiért az „architecture"
+>   sem került kemény tiltólistára.
+>
+> ### Authenticity Score — MEGFORDÍTVA
+> A spec belső self-checket és önértékelés-alapú újraírást kért. Az így nem tud
+> működni: a COMPOSE strukturált kimenetet ad `thinking_budget=0`-val, tehát nincs
+> hol egy belső kört futtatni, és az LLM a saját szövegét gyakorlatilag mindig
+> elfogadja.
+>
+> Ezért a rubrika **séma-mező**: a modell öt megnevezett tengelyen pontoz (0-2),
+> a küszöböt (`linkedin.authenticity_min_score`, default 8) és az újraírást a **kód**
+> végzi, a már létező egy-körös újraíró gépezetben. A modell szenzor, a kód bíró
+> (§4/16). Költség: ~10 kimeneti token.
+>
+> A `no_implementation_drift` tagadva van megfogalmazva, mert a spec
+> „Implementation Drift"-je fordított irányú lett volna, és az összeg értelmetlen.
+> Minden tengelyen a nagyobb a jobb.
+>
+> **Kétféle hiányzó pontszám, kétféle válasz** (mért döntés): *részben* hiányzó
+> pontszám -> a hiányzó tengely 0, a kapu mér (a modell nem kerülheti meg a kaput a
+> rossz tengely kihagyásával). *Teljesen* hiányzó -> `None`, és a kapu **kihagyja** a
+> rubrikát, mert az séma-hiba, nem minőségi jel: 0-nak venni azt jelentené, hogy
+> minden hívás újraírást kap, a második kör ugyanúgy nem pontozna, tehát a plusz kör
+> semmit nem javítana, csak csendben megduplázná a compose-költséget.
+>
+> ### Szándékosan KIMARADT
+> | Amit a spec kért | Miért nem |
+> |---|---|
+> | Claude Opus 5 Max, „reasoning: high" | Ez a motor `gemini-2.5-flash`-en fut, `thinking_budget=0`-val. A beállítás nem létezik ebben a rendszerben. |
+> | 220-250 token kimeneti plafon | A COMPOSE ma 700, a kapu 175 szóig engedi a kommentet. A projektben **kétszer** volt csonkolás-hiba, és a fórum-úton pont ezért emelték 200-ról 320-ra: egy ugyanolyan szóhosszú magyar/német válasz a régi kereten már túlfutott (§4/3). A fel nem használt keret nem kerül semmibe. |
+> | `architecture`, `protocol`, `pipeline`, `repository` kemény tiltólistára | Egy AEC-eszközben az „architecture" az iparág neve; a többi legitim technikai szó BIM-beszélgetésben. Ezek helye a már meglévő, szerzőhöz relativizált, legalább-kettő mechanizmus (`_AI_FINGERPRINT_PATTERNS`). |
+>
+> ### Nyitott kérdés
+> A rubrika értéke **nem igazolt**: egy önértékelés önértékelés marad. Az egyetlen
+> valódi próba, hogy az `authenticity_detail` korrelál-e a kézi benchmark-pontokkal.
+> Ha nem, a rubrika törölhető. A spec 80-85 -> 90-93 pontos becslése a szerző
+> projekciója, nem mérés.
+
 ## Cél
 Egy dashboard-fül, ahova egy LinkedIn-poszt szövege bemásolható, és a rendszer egyetlen Gemini-hívással eldönti, melyik válasz-mód illik rá, majd megírja a választ.
 
