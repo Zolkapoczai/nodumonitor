@@ -563,7 +563,7 @@ linkedin:
   # lapos, általános felismeréseket adhat, ami maga is pontlevonás.
   # 'default' vagy üres -> nem állítjuk be, tehát visszatérés a korábbi
   # viselkedésre; ez az A/B másik ága.
-  temperature: 0.3
+  temperature: 'default'
   # authenticity_min_score — a modell a megírt kommentet ÖT megnevezett tengelyen
   # pontozza (0-2 mind): voice_professional, conversation_fit, one_step_insight,
   # no_implementation_drift, natural_language. Összeg 0-10. Ez alatt a kód EGY
@@ -574,7 +574,7 @@ linkedin:
   # A pontszám minden válaszban ott van (`authenticity_detail`), hogy a kézi
   # benchmark-pontokkal korreláltatható legyen. Ha nincs korreláció, törölhető.
   # 0 = kikapcsolva.
-  authenticity_min_score: 8
+  authenticity_min_score: 0
 linkedin_content:
   enabled: true
   posts_per_week: 2
