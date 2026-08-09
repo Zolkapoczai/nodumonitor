@@ -74,7 +74,7 @@ check("A7 a sema enum == a taxonomia kulcsai",
       and props["expected_responder_role"]["enum"] == list(RESPONDER_ROLES)
       and props["response_mode"]["enum"] == list(RESPONSE_MODES)
       and props["human_temperature"]["enum"] == HUMAN_TEMPERATURES)
-check("A8 az engine-verzio bumpolva", ENGINE_VERSION.endswith("v4"), ENGINE_VERSION)
+check("A8 az engine-verzio bumpolva", ENGINE_VERSION.endswith("v5"), ENGINE_VERSION)
 check("A9 a legacy post_type mezo MEGMARADT (dashboard-szerzodes)",
       "post_type" in props and "post_type" in req)
 check("A10 personal_experience intent letezik (human temperature vedelme)",
@@ -521,7 +521,7 @@ check("J9 a DASHBOARD-SZERZODES all: mind a 8 legacy mezo megvan",
 check("J10 a kapu atengedte a kommentet (nincs uzleti absztrakcio benne)",
       res_on.get("quality_issues") == [] and res_on.get("rewrites") == 0,
       str(res_on.get("quality_issues")))
-check("J11 az engine-verzio a valaszban v4", res_on.get("engine") == "linkedin-tle-v4")
+check("J11 az engine-verzio a valaszban v5", res_on.get("engine") == "linkedin-tle-v5")
 check("J12 KIKAPCSOLVA: ugyanezen a bemeneten a v1-es dontes (business_impact)",
       res_off.get("strategy") == "business_impact" and res_off.get("intent_layer") is False,
       str(res_off.get("strategy")))

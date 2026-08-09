@@ -78,6 +78,56 @@ MERHETO — regexszel es n-gram-atfedessel, ingyen, 100%-ban reprodukalhatoan es
 teszthetoen. Ezert a kapu kodban van; az LLM csak akkor kap munkat (egyetlen
 celzott ujrairas), ha a kapu konkret sertest talalt.
 
+NYITAS-ROTACIO (2026-08-09, v5)
+A 2026-08-01-i Authenticity Layer hat termeszetes nyito-formát AJANLOTT a
+compose-promptban, de a determinisztikus kapu csak a TANACSADOI nyitasokat
+tiltja (`_STOCK_OPENING_PATTERNS`). A motor sajat whitelistjenek ismetlodese
+ellen semmi nem vedett.
+
+Ez a hiba a kommentek KOZOTT keletkezik: ket komment kulon-kulon hibatlan, a
+sorozatuk megis felismerheto. Egy kommenten beluli regex tehat ELVILEG sem
+lathatja — ezert nem uj kapu a valasz, hanem kodbeli rotacio a BEMENETEN.
+LinkedIn-en ez szamit igazan, mert ugyanaz a kozonseg latja a hozzaszolasaidat
+egymas utan; a nyitasok egyformasaga ott AZ AI-ujjlenyomat.
+
+  1. `pick_opening` — a kod valaszt EGY formát a nyolcbol, kizarva a legutobbi
+     negyet (`_recent_openings`). A valasztas a poszt-szoveg sha256-hasheból
+     jon: determinisztikus (tehat teszthető es utolag megmagyarazhato), es
+     posztonkent szór.
+  2. A kijelolt forma a FELADAT-uzenetbe kerul (§4/2), nem a system-promptba.
+  3. `_OPENING_FREE_MODES` — `answer_the_question` es `concrete_suggestion`
+     eseten NINCS kijeloles: ott a nyitast maga a valaszforma dontotte el, es ele
+     tenni egy tapasztalat-keretezest a v4 MERT viselkedeset rontana el.
+
+Ugyanaz a minta, mint a `strategy_fit` -> `pick_strategy`: az LLM a szenzor, a
+kod a biro (§4/16). A modell nem valaszt nyitast.
+
+Kapcsolat a homersekletttel: alacsonyabb temperature eppen a nyitas-valasztast
+lapitja el a leginkabb. A rotacio az, ami a lehuzast biztonsagossa teszi, mert a
+varianciat nem a mintavetelre bizza — ld. a kovetkezo szakaszt.
+
+Kill switch: `linkedin.opening_variety: 'on' | 'off'`. Kikapcsolva a
+compose-prompt BAJTRA a v4-es (`_V4_OPENING_KEYS` a system-prompt katalogusa; a
+ket uj forma csak a per-hivas kijelolesen keresztul jut be), tehat a rotacio
+ugyanezen a kodon A/B-zheto, git-revert nelkul.
+
+HIVASONKENTI HOMERSEKLET (2026-08-09, v5)
+2026-08-09-ig EGYETLEN `linkedin.temperature` hajtotta mindket hivast, holott a
+kovetelmenyuk ellentetes: a REASON osztalyoz (enum + pontszam, ott a
+STABILITAS a cel), a COMPOSE nyilvanos prozat ir (ott az alacsony homerseklet a
+modalis, legaltalanosabb fogalmazas fele huz — vagyis eppen az "LLM-hang" fele,
+ami ellen az egesz motor epult). Ezert `stage_temperature`: ket kulon config-
+ertek, a `linkedin.temperature`-bol OROKOLVE, tehat egy regi config viselkedese
+bitre valtozatlan. A reszletes indoklas — es hogy miert nem 0.0 a REASON — a
+`stage_temperature` docstringjeben van.
+
+TELEMETRIA (2026-08-09, v5)
+A motor minden dontest visszaad a valaszban, de a valasz a HTTP-korrel eltunik.
+A `generate_comment` ezert vekony wrapper a `_generate_comment` korul, ami minden
+kimenetet — a HAT korai hiba-visszaterest is — egy soronkenti JSONL-be ir
+(`responder/linkedin_telemetry.py`). Alapbol KIKAPCSOLVA; a `config.yaml`
+kapcsolja be. A naplozas hibaja sosem veszi el a mar kifizetett hivas eredmenyet.
+
 TOKEN-HATEKONYSAG
 A legnagyobb nyeresег nem a promptok rovidítése volt: a korabbi implementacio a
 teljes NODU tudasbazist (`storage/nodu_knowledge_base.md`, ~274 KB ≈ 70k token)
@@ -85,15 +135,18 @@ beforditotta MINDEN LinkedIn-hivas system-promptjaba. Egy olyan motornak, ami
 alapbol nem is emliti a NODU-t, ez tiszta veszteseg — es aktivan rontja a
 kimenetet, mert termek-dokumentacio fele huzza a modellt. Kivezetve.
 """
+import hashlib
 import json
 import re
+import time
+from collections import deque
 
 from google import genai
 from google.genai import types
 
 from env_secrets import get_secret
 
-ENGINE_VERSION = "linkedin-tle-v4"
+ENGINE_VERSION = "linkedin-tle-v5"
 
 # --- Stage 4: strategiak -----------------------------------------------------
 # Pontosan EGY strategia valasztodik kommentenkent. A `directive` a compose-
@@ -821,8 +874,150 @@ def pick_strategy(fit: dict, intent: str = "general",
             best, best_score = slug, scores[slug]
     return best or "missing_perspective"
 
+# --- Stage 6.5: nyitas-rotacio (2026-08-09, v5) ------------------------------
+# A PROBLEMA, amit ez old meg — es amit egyik meglevo kapu sem tud elkapni:
+# a 2026-08-01-i whitelist hat nyito-format ajanlott a COMPOSE-promptban, a
+# `_STOCK_OPENING_PATTERNS` viszont csak a TANACSADOI nyitasokat tiltja. A motor
+# sajat whitelistjenek ismetlodese ellen semmi nem vedett. Ket kommentet kulon
+# vizsgalva mindketto atmegy; a hiba a kommentek KOZOTT keletkezik, egy
+# kommenten beluli regex tehat elvileg sem lathatja. LinkedIn-en viszont
+# ugyanaz a kozonseg latja a hozzaszolasaidat sorozatban — ott az azonos nyitas
+# sorozata AZ AI-ujjlenyomat.
+#
+# MIERT MOST: a `linkedin.temperature` ma 'default' (szerver-oldali ertek), es a
+# 2026-08-01-i doksi 0.3-at javasol a hullamzas ellen. Alacsonyabb temperature
+# eppen a nyitas-valasztast lapositja el a leginkabb. Ez a rotacio az, ami a
+# 0.3-ra allast biztonsagossa teszi: a varianciat nem a mintavetelre bizzuk,
+# hanem kodban allitjuk elo.
+#
+# A MEGOLDAS ILLESZKEDESE: "az LLM a szenzor, a kod a biro" (§4/16) — ugyanaz a
+# minta, mint a `strategy_fit` -> `pick_strategy`-nal. A modell nem valaszt
+# nyitast; a kod valaszt egyet, es azt adja at.
+OPENING_SHAPES: dict[str, dict[str, str]] = {
+    "own_practice": {
+        "example": '"I\'ve found..."',
+        "move": "open with what your own practice taught you",
+    },
+    "encountered": {
+        "example": '"I\'ve run into..."',
+        "move": "open with a situation you have met before",
+    },
+    "stood_out": {
+        "example": '"One thing that stood out..."',
+        "move": "open with the specific detail in the post that caught you",
+    },
+    "strikes": {
+        "example": '"What strikes me..."',
+        "move": "open with what you find notable in the author’s point",
+    },
+    "learned": {
+        "example": '"We\'ve learned..."',
+        "move": "open with a lesson shared practice has produced",
+    },
+    "pattern": {
+        "example": '"One pattern I\'ve noticed..."',
+        "move": "open with a recurring pattern you have observed",
+    },
+    # A ket uj forma NEM diszites. Mindketto olyan retorikai mozdulat, ami a hat
+    # tapasztalat-keretezesbol hianyzott:
+    #   straight  — a `_compose_user_msg` MAR MA is azt kéri, hogy "Begin with the
+    #               contribution itself"; a hat keretezes viszont mind elé tesz egy
+    #               fel mondatot. Ez a forma feloldja ezt a belso ellentmondast.
+    #   condition — a gyakorlo ember jellegzetes nyitasa: nem magaval kezdi, hanem
+    #               a feltetellel, ami mellett a dolog szamitani kezd.
+    # Egyik sem utkozik a `_STOCK_OPENING_PATTERNS` egyetlen mintajaval sem.
+    "straight": {
+        "example": "no framing at all — begin with the claim itself",
+        "move": "state the substantive claim directly, with no experience framing",
+    },
+    "condition": {
+        "example": '"Once the model leaves the design team..."',
+        "move": "open with the condition under which the point starts to matter",
+    },
+}
+
+# Hany LEGUTOBBI forma van kizarva a valasztasbol. 4 a 8-bol: eleg szeles ahhoz,
+# hogy ne legyen eszrevehetó ismetlodés, es marad 4 jelolt, tehat a valasztas nem
+# szűkul egyetlen kényszerpályára.
+_OPENING_RING_SIZE = 4
+
+# MIERT MEMORIABAN: ez varianciа-allapot, nem adat. Az elvesztese egy
+# ujraindulaskor teljesen artalmatlan (legfeljebb egy komment nyitasa ismetlodhet),
+# ezert nem indokol sem DB-tablat, sem fajlt — a 03-composer-spec §Hatokor
+# "nincs perzisztencia/history-tabla" kikotese igy serthetetlen marad.
+# Szalbiztonsag: a `deque.append` maxlen mellett atomi a GIL alatt. Tobb worker-
+# processz eseten processzenkent kulon gyűrű van, ami csak a szorast csokkenti
+# kisse — helytelen viselkedest nem okoz.
+_recent_openings: deque = deque(maxlen=_OPENING_RING_SIZE)
+
+# Az a ket valaszforma, aminel a NYITAST MAR A FORMA eldontotte. A
+# `answer_the_question` kifejezetten azt irja elo, hogy a valasz alljon a nyito
+# mondatban, a `concrete_suggestion` pedig azt, hogy a konkretum jojjon eloszor —
+# ele tenni egy tapasztalat-keretezest pontosan azt a viselkedest rontana el,
+# amit a v4 merese jonak talalt. Ilyenkor a kod NEM jelol ki nyitast.
+_OPENING_FREE_MODES = {"answer_the_question", "concrete_suggestion"}
+
+# A v4-es prompt HAT formát sorolt fel. A ket uj forma szandekosan NEM kerul be a
+# system-prompt katalogusaba: igy `opening_variety: 'off'` mellett a COMPOSE-prompt
+# BAJTRA a v4-es marad, tehat a rotacio tiszta A/B-kent merheto. A ket uj forma a
+# PER-HIVAS kijelolesen keresztul jut be, a sajat `move` leirasaval egyutt — ahhoz
+# a modellnek nem kell katalogus-bejegyzés.
+_V4_OPENING_KEYS = ("own_practice", "encountered", "stood_out", "strikes",
+                    "learned", "pattern")
+
+
+def opening_variety_enabled(config: dict) -> bool:
+    """`linkedin.opening_variety`: on (default) | off. YAML-boolean kezelve (§4/17).
+
+    Kikapcsolva a compose-prompt BAJTRA a 2026-08-01-i (v4) valtozat, tehat a
+    rotacio A/B-zheto git-revert nelkul — ugyanaz az elv, mint az `intent_layer`-nel.
+    """
+    raw = (config.get("linkedin", {}) or {}).get("opening_variety", "on")
+    if isinstance(raw, bool):
+        return raw
+    return str(raw).strip().lower() not in ("off", "false", "0", "no", "none")
+
+
+def pick_opening(post_text: str, response_mode: str = "extend_one_insight",
+                 recent=None) -> str:
+    """Egy nyitó-forma kulcsa, vagy "" ha nem jelolunk ki.
+
+    HAROM KOVETELMENY egyszerre, ezert nem eleg sem a puszta round-robin, sem a
+    veletlen:
+      1. NE ISMETLODJON — a legutobbi `_OPENING_RING_SIZE` forma ki van zarva.
+      2. REPRODUKALHATO — ugyanaz a poszt ugyanazt a formát kapja, kulonben a
+         dontes nem teszthetó es nem magyarazhato meg utolag (ugyanaz az elv,
+         mint a `pick_strategy` determinisztikus argmaxánál).
+      3. SZORODJON — kulonbozo posztok kulonbozo formára essenek.
+    A poszt-szoveg hash-e mindharmat teljesiti: determinisztikus es egyenletes.
+
+    MIERT sha256 ES NEM a beepitett `hash()`: a CPython a string-hash-t
+    processzenkent randomizalja (PYTHONHASHSEED), tehat a `hash()` ugyanarra a
+    posztra ujraindulas utan MAS erteket adna — a 2. kovetelmeny bukna, es a
+    teszt hol atmenne, hol nem.
+    """
+    if _response_mode_key(response_mode) in _OPENING_FREE_MODES:
+        return ""
+    used = set(_recent_openings if recent is None else recent)
+    # A `or sorted(...)` vedoszabaly: ha a gyűrű valaha akkorara nőne, hogy minden
+    # formát kizar, a valasztas ne uruljon ki.
+    eligible = sorted(k for k in OPENING_SHAPES if k not in used) or sorted(OPENING_SHAPES)
+    digest = hashlib.sha256((post_text or "").strip().lower().encode("utf-8")).digest()
+    return eligible[int.from_bytes(digest[:8], "big") % len(eligible)]
+
+
+def remember_opening(key: str) -> None:
+    """A kivalasztott formát a gyűrűbe teszi — CSAK sikeres komment utan hivjuk.
+
+    Ha a kapu elutasitotta es a hivas hibaval ér veget, a forma nem ég el: egy
+    meg nem jelent komment nem okoz ismetlodest, tehat nem is kell kizarni.
+    """
+    if key:
+        _recent_openings.append(key)
+
+
 # --- Stage 6-7: COMPOSE -----------------------------------------------------
-_COMPOSE_PROMPT = """
+_COMPOSE_PROMPT = f"""
 You write LinkedIn comments as an experienced AEC/BIM professional. You are given
 finished reasoning; your only job is to turn it into a comment that reads as
 written by a practitioner, not by an assistant.
@@ -865,12 +1060,7 @@ explanation.
 
 OPENING. The gate rejects stock consultant openings, so open the way a
 practitioner actually would. Use one of these shapes, in the post's own language:
-  "I've found..."
-  "I've run into..."
-  "One thing that stood out..."
-  "What strikes me..."
-  "We've learned..."
-  "One pattern I've noticed..."
+{chr(10).join(f'  {OPENING_SHAPES[k]["example"]}' for k in _V4_OPENING_KEYS)}
 Never open with: "We often see", "We frequently observe", "One approach",
 "Best practice", "Organizations should", "Implementation requires",
 "Establishing...", "Ensuring...", "It is critical to".
@@ -1376,6 +1566,65 @@ def temperature(config: dict) -> float | None:
     return value if 0.0 <= value <= 2.0 else 0.3
 
 
+_TEMPERATURE_STAGES = ("reason", "compose")
+
+
+def stage_temperature(config: dict, stage: str) -> float | None:
+    """`linkedin.{stage}_temperature`, oroklodve a `linkedin.temperature`-bol.
+
+    MIERT KELL SZETVALASZTANI — a ket hivas kovetelmenye ELLENTETES, es
+    2026-08-09-ig EGYETLEN ertek hajtotta mindkettot:
+
+      REASON  — a kimenet enum + 0-10 pontszam; nincs benne megorzendo
+                fogalmazas. Az EGESZ architektura ez alatt van (intent -> bias ->
+                veto -> strategia): ha az osztalyozas ingadozik, mas strategia
+                nyer, tehat mas komment szuletik. A v2 elfogadasi kriteriuma
+                ABSZOLUT ("Craftsmanship posts no longer drift toward business
+                value"), nem statisztikai — az stabil besorolast felte­telez.
+                -> ALACSONY a helyes.
+
+      COMPOSE — a kimenet NYILVANOS proza. Alacsony homerseklet = modalis
+                tokenvalasztas = a leggyakoribb, legaltalanosabb fogalmazas —
+                pontosan az az "LLM-hang", ami ellen a v1 ota minden reteg epult.
+                Ezt a config sajat kommentje mar 2026-08-01-en kimondta ("lapos,
+                altalanos felismeréseket adhat, ami maga is pontlevonas").
+                Ráadasul itt van PRECIZEBB kontroll is: a determinisztikus kapu
+                fogja a konkret serteseket es egy celzott ujrairast ker — a
+                temperature ehhez kepest tompa eszkoz.
+                -> NEM kell levinni.
+
+    MIERT NEM 0.0 A REASON: a `strategy_fit` het strategiat pontoz 0-10-en, es a
+    `pick_strategy` holtversenyben a DEKLARACIOS SORRENDET koveti — ott pedig a
+    `constructive_challenge` all elol. Egy ellaposodo pontszam-eloszlas tehat nem
+    "semleges" lenne: csendben a nyilvanos kritikat hozna fel gyakori nyertesse,
+    olyan posztokon is (portfolio_showcase, announcement), ahol az intent-bias
+    kifejezetten lehuzza, mert az a legrosszabb valasz.
+
+    Hianyzo ertek / 'inherit' -> a `linkedin.temperature`, tehat egy REGI config
+    viselkedese bitre valtozatlan. 'default' -> nem allitjuk be (API-default).
+    Ertelmezhetetlen ertek -> szinten orokles: egy elgepelt szam nem valtoztathat
+    csendben viselkedest.
+    """
+    if stage not in _TEMPERATURE_STAGES:
+        raise ValueError(f"ismeretlen stage: {stage!r} (varhato: {_TEMPERATURE_STAGES})")
+
+    li = config.get("linkedin", {}) or {}
+    key = f"{stage}_temperature"
+    if key not in li or li[key] is None:
+        return temperature(config)
+
+    text = str(li[key]).strip().lower()
+    if text in ("inherit", ""):
+        return temperature(config)
+    if text in ("default", "none"):
+        return None
+    try:
+        value = float(li[key])
+    except (TypeError, ValueError):
+        return temperature(config)
+    return value if 0.0 <= value <= 2.0 else temperature(config)
+
+
 def _call_json(client, model: str, system: str, user: str, schema: dict,
                max_tokens: int, image: tuple[bytes, str] | None = None,
                temp: float | None = None) -> dict | None:
@@ -1534,7 +1783,7 @@ def brand_mention_allowed(config: dict, reasoning: dict,
 
 def _compose_user_msg(post_text: str, author_line: str, reasoning: dict,
                       brand_allowed: bool, issues: list[str] | None = None,
-                      intent_layer: bool = True) -> str:
+                      intent_layer: bool = True, opening: str = "") -> str:
     """A compose-hivas feladat-uzenete.
 
     A kritikus megkotesek (nyelv, hossz, tilalmak) a system-promptban IS benne
@@ -1543,6 +1792,11 @@ def _compose_user_msg(post_text: str, author_line: str, reasoning: dict,
 
     `intent_layer=False` eseten az intent/szint/gravity/role sorok kimaradnak —
     igy a kikapcsolt layer a v1-es promptot allitja elo.
+
+    `opening` (v5): a kod altal kijelolt nyito-forma kulcsa, vagy "". Ugyanez a
+    §4/2 lecke miatt kerul a FELADAT-uzenetbe es nem a system-promptba: a
+    per-hivas valtozo megkotes ott hat, ahol a modell a feladatot olvassa.
+    Uresen a mondat BAJTRA a v4-es.
     """
     strat = STRATEGIES[reasoning["strategy"]]
     intent = CONVERSATION_INTENTS[_intent_key(reasoning.get("conversation_intent"))]
@@ -1575,11 +1829,24 @@ def _compose_user_msg(post_text: str, author_line: str, reasoning: dict,
             f"HUMAN TEMPERATURE: {human_temperature}. Match that register; do not "
             "cool a human story into a process discussion."
         )
-        parts.append(
+        # A tiltas valtozatlan; csak a ZARO tagmondat fugg attol, kijelolt-e a kod
+        # formát. Kijeloles nelkul a mondat bajtra a v4-es — ez teszi a rotaciot
+        # tiszta A/B-ve (`linkedin.opening_variety`).
+        opening_rule = (
             "Begin with the contribution itself, not a stock consultant opening "
             "such as 'We often see', 'One consideration', 'In practice' or 'One "
-            "recurring challenge'. Vary the rhetorical shape naturally."
+            "recurring challenge'. "
         )
+        if opening in OPENING_SHAPES:
+            parts.append(
+                opening_rule
+                + f"OPENING SHAPE for this comment: {OPENING_SHAPES[opening]['move']}. "
+                "Use this shape and no other — it overrides the list of shapes in "
+                "your instructions. Render it in the post's own language the way a "
+                "practitioner would actually say it, never as a translated formula."
+            )
+        else:
+            parts.append(opening_rule + "Vary the rhetorical shape naturally.")
         parts.append(
             "Do not end with a generic payoff such as productivity, efficiency, "
             "project delivery or organisational scale. End on the concrete "
@@ -1645,6 +1912,31 @@ def generate_comment(config: dict, post_text: str, author_name: str = "",
                      author_role: str = "",
                      image_bytes: bytes | None = None,
                      image_mime: str = "image/jpeg") -> dict:
+    """A motor NYILVANOS belepesi pontja: `_generate_comment` + telemetria.
+
+    Miert wrapper es nem a nagy fuggveny vegen egy sor: a `_generate_comment` HAT
+    ponton ter vissza korán (ures poszt, nincs API-kulcs, ket API-kivetel,
+    ervenytelen reasoning, ures komment). Pont ezek a HIBAS utak azok, amiket
+    meg akarunk szamolni — egy zaro sor mindet kihagyna. Igy egyetlen helyen
+    fogjuk MINDEN kimenetet, es a `_generate_comment` valtozatlan marad.
+
+    A telemetria alapbol KI van kapcsolva (kod-default); a `config.yaml` kapcsolja
+    be. Hibat sosem dob — ld. `linkedin_telemetry.record`.
+    """
+    from responder.linkedin_telemetry import record
+
+    started = time.monotonic()
+    result = _generate_comment(config, post_text, author_name, author_role,
+                               image_bytes=image_bytes, image_mime=image_mime)
+    record(config, result, post_text,
+           elapsed_ms=int((time.monotonic() - started) * 1000))
+    return result
+
+
+def _generate_comment(config: dict, post_text: str, author_name: str = "",
+                      author_role: str = "",
+                      image_bytes: bytes | None = None,
+                      image_mime: str = "image/jpeg") -> dict:
     """
     Thought Leadership Engine — teljes pipeline egy LinkedIn-poszthoz.
 
@@ -1675,7 +1967,12 @@ def generate_comment(config: dict, post_text: str, author_name: str = "",
     # kikapcsolt layer eseten az intent/szint a `_LAYER_OFF` par, tehat a kep
     # osztalyozasi eredmenye eldobodna — elkuldeni tiszta token-veszteseg lenne.
     intent_layer = _intent_layer_enabled(config)
+    # A ket hivas KULON homersekletet kap (2026-08-09): a REASON osztalyoz, a
+    # COMPOSE nyilvanos prozat ir — ld. `stage_temperature`. A `temp` a bazis-ertek,
+    # ami a valaszban is marad, hogy a korabbi szerzodes ne toljon el.
     temp = temperature(config)
+    reason_temp = stage_temperature(config, "reason")
+    compose_temp = stage_temperature(config, "compose")
     auth_min = authenticity_min_score(config)
     use_image = bool(image_bytes) and intent_layer and image_input_enabled(config)
     if image_bytes and not use_image:
@@ -1696,7 +1993,7 @@ def generate_comment(config: dict, post_text: str, author_name: str = "",
             # kerul semmibe: a szamlazas a tenyleges output-tokenre megy.
             reason_schema_for(use_image), max_tokens=1200,
             image=(image_bytes, image_mime) if use_image else None,
-            temp=temp,
+            temp=reason_temp,
         )
     except Exception as e:
         print(f"[linkedin-tle] reasoning HIBA: {e}")
@@ -1749,17 +2046,30 @@ def generate_comment(config: dict, post_text: str, author_name: str = "",
     print(f"[linkedin-tle] strategia={reasoning['strategy']} | markaemlites="
           f"{'ENGEDVE' if brand_allowed else 'tiltva'} ({brand_reason})")
 
+    # --- Stage 6.5: nyitas-forma (a kod valaszt, nem a modell) ---
+    # A kikapcsolt intent layer itt is v4-es viselkedest ad: a nyitas-sor a
+    # layer-blokkban van, tehat kijeloles nelkul a prompt valtozatlan.
+    opening = ""
+    if intent_layer and opening_variety_enabled(config):
+        opening = pick_opening(post_text, response_mode)
+        print(f"[linkedin-tle] nyitas={opening or '(a valaszforma dontötte el)'}"
+              f" | legutobbiak={list(_recent_openings)}")
+
     # --- Stage 6-7: compose, + Stage 9: kapu, legfeljebb egy ujrairassal ---
     comment, issues, rewrites = "", ["nem futott le"], 0
     auth_total, auth_per = None, {d: 0 for d in _AUTHENTICITY_DIMENSIONS}
     for attempt in range(2):
+        # A nyitas-forma az ujrairo korben is UGYANAZ: az ujrairas a kapu konkret
+        # serteseit javitja, nem a retorikai formát valtoztatja. Uj forma itt
+        # ujabb valtozot vinne egy amugy is celzott javitasba.
         user_msg = _compose_user_msg(
             post_text, author_line, reasoning, brand_allowed,
             issues if attempt else None, intent_layer=intent_layer,
+            opening=opening,
         )
         try:
             out = _call_json(client, model, _COMPOSE_PROMPT, user_msg,
-                             _COMPOSE_SCHEMA, max_tokens=700, temp=temp)
+                             _COMPOSE_SCHEMA, max_tokens=700, temp=compose_temp)
         except Exception as e:
             print(f"[linkedin-tle] compose HIBA: {e}")
             return {"error": f"Gemini API hiba (compose): {e}"}
@@ -1782,6 +2092,10 @@ def generate_comment(config: dict, post_text: str, author_name: str = "",
 
     if not comment:
         return {"error": "A kompozíciós lépés üres kommentet adott."}
+
+    # A gyűrű CSAK itt bővul: egy meg nem jelent (hibara futott) komment nyitasa
+    # nem okoz ismetlodest, tehat nem is kell kizarni a kovetkezo valasztasbol.
+    remember_opening(opening)
 
     # `legacy_intent`, NEM `intent`: a fenti `intent` a Conversation Intent Layer
     # erteke, es ez a sor korabban elarnyekolta (a valasz-osszeallitas ezutan
@@ -1816,6 +2130,12 @@ def generate_comment(config: dict, post_text: str, author_name: str = "",
         "expected_responder_role": responder_role,
         "response_mode": response_mode,
         "human_temperature": human_temperature,
+        # Nyitas-rotacio (v5): a kijelolt forma es a gyűrű pillanatnyi allapota —
+        # ugyanaz az auditalhatosagi elv, mint a `strategy_scores`-nal.
+        # "" = a valaszforma dontotte el a nyitast (`_OPENING_FREE_MODES`), vagy a
+        # rotacio ki van kapcsolva.
+        "opening_shape": opening,
+        "opening_recent": list(_recent_openings),
         # Kep-bemenet: `image_attached` az ELKULDOTT kepet jelenti, nem a kapottat
         # (kikapcsolt layer / image_input=off eseten false, holott jott kep).
         "image_attached": use_image,
@@ -1845,7 +2165,12 @@ def generate_comment(config: dict, post_text: str, author_name: str = "",
         "authenticity_max": AUTHENTICITY_MAX,
         "authenticity_min": auth_min,
         "authenticity_detail": auth_per,
+        # `temperature` a BAZIS-ertek (visszafele-kompatibilis mezo); a ket hivas
+        # tenyleges homerseklete a ket uj, additiv mezoben van — igy utolag
+        # megmagyarazhato, melyik lepes min futott.
         "temperature": temp,
+        "reason_temperature": reason_temp,
+        "compose_temperature": compose_temp,
         "ai_fingerprint_terms": ai_fingerprint_terms(comment, post_text),
         "rewrites": rewrites,
         "post_overlap": round(overlap_ratio(comment, post_text), 3),

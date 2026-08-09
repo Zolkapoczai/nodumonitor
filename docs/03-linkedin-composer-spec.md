@@ -216,6 +216,143 @@
 > Ha nem, a rubrika törölhető. A spec 80-85 -> 90-93 pontos becslése a szerző
 > projekciója, nem mérés.
 
+> ## ⚙️ KIEGÉSZÍTVE (2026-08-09) — Nyitás-rotáció (engine v5)
+>
+> **A rés:** a 2026-08-01-i Authenticity Layer hat természetes nyitó-formát
+> **ajánlott** a compose-promptban, a determinisztikus kapu viszont csak a
+> *tanácsadói* nyitásokat tiltja (`_STOCK_OPENING_PATTERNS`). A motor **saját
+> whitelistjének** ismétlődése ellen semmi nem védett.
+>
+> **Miért nem kapu a válasz:** ez a hiba a kommentek **között** keletkezik. Két
+> komment külön-külön hibátlan, a sorozatuk mégis felismerhető — egy kommenten
+> belüli regex tehát *elvileg* sem láthatja. LinkedIn-en pont ez számít: ugyanaz a
+> közönség látja a hozzászólásaidat egymás után, és a nyitások egyformasága ott az
+> AI-ujjlenyomat. Ezért a javítás a **bemeneten** van, kódbeli rotációként.
+>
+> **Mechanizmus** (`pick_opening`) — ugyanaz a minta, mint a `strategy_fit` →
+> `pick_strategy`: az LLM a szenzor, a kód a bíró (§4/16). A modell **nem** választ
+> nyitást; a kód jelöl ki egyet, és azt adja át a COMPOSE feladat-üzenetében (§4/2).
+>
+> | Követelmény | Hogyan teljesül |
+> |---|---|
+> | ne ismétlődjön | a legutóbbi 4 forma kizárva (`_recent_openings`) |
+> | reprodukálható legyen | a poszt-szöveg **sha256**-hashéből választ |
+> | szórjon | a hash egyenletes: 40 poszton mind a 8 forma előjött |
+>
+> **Miért sha256 és nem `hash()`:** a CPython a string-hasht processzenként
+> randomizálja (`PYTHONHASHSEED`), tehát ugyanaz a poszt újraindulás után **más**
+> formát kapna — a döntés nem lenne megmagyarázható, a teszt pedig hol átmenne, hol
+> nem. Külön teszt méri két processzben, eltérő seeddel (`test_linkedin_opening.py` D).
+>
+> **Két új forma** a hat mellé: `straight` (nincs keretezés, a állítás maga kezd —
+> ez oldja fel, hogy a feladat-üzenet ma is „Begin with the contribution itself"-et
+> kér, miközben mind a hat forma elé tesz egy fél mondatot) és `condition` (a
+> feltétellel kezd, ami mellett a dolog számítani kezd). Egyik sem ütközik a
+> `_STOCK_OPENING_PATTERNS` mintáival — teszt méri (G1).
+>
+> **Ahol NINCS kijelölés** (`_OPENING_FREE_MODES`): `answer_the_question` és
+> `concrete_suggestion`. Ott a nyitást maga a válaszforma döntötte el; elé tenni egy
+> tapasztalat-keretezést pontosan a v4 **mért** viselkedését rontaná el.
+>
+> **Kapcsolat a `temperature`-rel:** alacsonyabb hőmérséklet éppen a
+> nyitás-választást lapítja el a leginkább. Ez a rotáció teszi biztonságossá a
+> `'default'` → `0.3` váltást, mert a varianciát nem a mintavételre bízza.
+>
+> **Kill switch:** `linkedin.opening_variety: 'on' | 'off'`. Kikapcsolva a
+> compose-prompt **bájtra** a v4-es (`_V4_OPENING_KEYS` a system-prompt katalógusa;
+> a két új forma csak a per-hívás kijelölésen keresztül jut be) — tehát ugyanezen a
+> kódon A/B-zhető, git-revert nélkül. A bájtra-azonosságot szó szerinti literál
+> rögzíti a tesztben (B szekció).
+>
+> **Perzisztencia:** a gyűrű memóriában él, nem lemezen. Ez **varianciа-állapot,
+> nem adat** — elvesztése újraindításkor legfeljebb egy ismétlődő nyitást okoz —,
+> így a §Hatókör „nincs perzisztencia/history-tábla" kikötése sértetlen. Több worker
+> esetén processzenként külön gyűrű van: ez a szórást csökkenti kissé, helytelen
+> viselkedést nem okoz.
+>
+> **Válasz-szerződés:** a 8 legacy mező változatlan; az új mezők (`opening_shape`,
+> `opening_recent`) additívak. DB-séma nem változott.
+>
+> **Nyitott kérdés:** a rotáció a *gépi* ismétlődést szünteti meg, azt nem méri,
+> hogy melyik forma teljesít jobban. Ha az `authenticity_detail` korrelációja a kézi
+> pontokkal igazolódik, az `opening_shape` mezővel formánként is bontható.
+>
+> ### Hívásonkénti hőmérséklet (ugyanaz a kör)
+> 2026-08-09-ig **egyetlen** `linkedin.temperature` hajtotta mindkét hívást, holott
+> a követelményük ellentétes:
+>
+> | Hívás | Kimenet | Mit akarunk | Érték |
+> |---|---|---|---|
+> | REASON | enum + 0-10 pontszám | **stabilitás** — az intent → bias → vétó → stratégia lánc ez alatt van; ingadozó besorolás más kommentet ad | `0.2` |
+> | COMPOSE | nyilvános próza | **ne** modális fogalmazás — az alacsony hőmérséklet a leggyakoribb szófordulatok felé húz, vagyis pont az „LLM-hang" felé | `'default'` |
+>
+> **Miért engedhető meg a magasabb COMPOSE-hőmérséklet:** ott már van precízebb
+> kontroll — a determinisztikus kapu fogja a konkrét sértéseket (tiltott fordulat,
+> hossz, n-gram-átfedés, executive-szótár, kép-hivatkozás) és egy célzott újraírást
+> kér. A temperature ehhez képest tompa eszköz. A költségoldal a válasz `rewrites`
+> mezőjében mérhető.
+>
+> **Miért nem 0.0 a REASON:** a `strategy_fit` hét stratégiát pontoz, és a
+> `pick_strategy` holtversenyben a **deklarációs sorrendet** követi — ott pedig a
+> `constructive_challenge` áll elöl. Egy ellaposodó pontszám-eloszlás tehát nem
+> semleges: csendben a nyilvános kritikát hozná fel gyakori nyertessé olyan
+> posztokon is (portfólió, bejelentés), ahol az intent-bias kifejezetten lehúzza.
+>
+> **Visszafelé-kompatibilitás:** mindkét érték a `linkedin.temperature`-ből
+> **öröklődik**, ha nincs megadva (`'inherit'`), tehát egy régi config viselkedése
+> bitre változatlan — teszttel rögzítve (`test_linkedin_temperature.py` B/D6).
+> Értelmezhetetlen vagy tartományon kívüli érték szintén öröklés: egy elgépelt szám
+> nem változtathat csendben viselkedést.
+>
+> **Válasz-szerződés:** a `temperature` (bázis) mező megmarad; a két tényleges érték
+> az additív `reason_temperature` / `compose_temperature` mezőkben.
+>
+> ### Telemetria — a mérés előfeltétele
+> A motor **minden** döntést visszaad a válaszban, de a válasz a HTTP-körrel
+> eltűnik. Emiatt négy, már régóta nyitott kérdésre nem lehetett felelni:
+>
+> | Kérdés | Amiből megválaszolható |
+> |---|---|
+> | Nyer-e valaha a `constructive_challenge`? A bias-terv szerint vélemény- és debate-poszton nyerhetne. | `strategy`, `strategy_scores`, `strategy_fit`, `conversation_intent` |
+> | Korrelál-e az authenticity-rubrika a kézi pontokkal? *(a fenti 2026-08-01-i blokk nyitott kérdése)* | `authenticity_score`, `authenticity_detail` |
+> | Hat-e a hőmérséklet-bontás? | `reason_temperature`, `compose_temperature`, `rewrites` |
+> | Szór-e a nyitás-rotáció, és nő-e tőle az újraírás? | `opening_shape`, `opening_recent`, `rewrites` |
+>
+> Mind a négy **ugyanabból az egy sorból** jön, ezért egy fájl, nem négy külön mérés.
+>
+> **Nem DB-tábla.** A §Hatókör tiltása **állapotra** vonatkozik: approve/reject
+> állapotgép, piszkozat-tárolás, UI-ból olvasott előzmény. Ez append-only ténynapló
+> — az alkalmazás soha nem olvassa vissza, nincs hozzá felület, nincs migráció.
+> JSONL, hogy pandas/jq/Excel közvetlenül olvassa.
+>
+> **Hol csatlakozik:** a `generate_comment` mostantól vékony wrapper a
+> `_generate_comment` körül. Nem záró sor a nagy függvényben, mert az **hat ponton**
+> tér vissza korán (üres poszt, nincs API-kulcs, két API-kivétel, érvénytelen
+> reasoning, üres komment) — és pont ezek a hibás utak azok, amiket számolni akarsz.
+>
+> **Join a benchmarkodhoz:** `post_id` (a poszt szövegének sha256-prefixe, stabil).
+> Ugyanaz a poszt újragenerálva ugyanazt az id-t kapja.
+>
+> **Adatvédelem:** a poszt **teljes** szövege nem kerül bele — más tartalma;
+> helyette `post_id` + 160 karakteres részlet, ami a párosításhoz elég. A kép soha,
+> semmilyen formában (a meglévő szabály szerint). A komment teljes szövege benne
+> van: az a saját kimeneted, és pont az, amit pontozol. Csak **explicit listázott**
+> mezők kerülnek át, hogy egy jövőbeli válasz-mező ne szivárogjon be észrevétlenül.
+>
+> **Config:** `linkedin.telemetry: 'on' | 'off'` (kód-default: **off**, hogy egyetlen
+> teszt- vagy import-út se írjon csendben lemezre), `linkedin.telemetry_path`.
+> A fájl `.gitignore`-ban van: futási adat, nem forrás.
+>
+> **Következő lépés:** ~20-30 valós komment után a napló összevethető a kézi
+> benchmark-pontjaiddal. Az authenticity-rubrika sorsa (marad vagy törölhető) ekkor
+> dönthető el először adatból.
+>
+> **Ténybeli megjegyzés:** a `gemini-2.5-flash` szerver-oldali default hőmérsékletét
+> 1.0-ként szokás megadni, de explicit dokumentált sort erre a modellre a jelenlegi
+> Gemini-doksiban nem találtunk — a `temperature` fenti kommentjének óvatossága
+> („NEM DOKUMENTÁLT") tehát indokolt. A COMPOSE értékét ezért **mérésből** kell
+> eldönteni, nem dokumentációból.
+
 ## Cél
 Egy dashboard-fül, ahova egy LinkedIn-poszt szövege bemásolható, és a rendszer egyetlen Gemini-hívással eldönti, melyik válasz-mód illik rá, majd megírja a választ.
 

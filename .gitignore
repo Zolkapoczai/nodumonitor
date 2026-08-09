@@ -1,4 +1,8 @@
 # Database & runtime
+# A LinkedIn-motor telemetriaja: futasi adat, nem forras. Poszt-reszleteket es
+# generalt kommenteket tartalmaz, es folyamatosan no — nem valo a repoba.
+storage/linkedin_telemetry.jsonl
+storage/*.jsonl
 backups/
 nodu_monitor.db
 nodu_monitor.db-wal
