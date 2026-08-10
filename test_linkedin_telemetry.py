@@ -84,7 +84,7 @@ RESULT = {
     "insight": "The GUID travels with the definition file, not the model.",
     "core_thesis": "Shared parameters drift across linked models.",
     "missing_perspective": "lifecycle",
-    "engine": "linkedin-tle-v7", "strategy": "field_experience",
+    "engine": "linkedin-tle-v8", "strategy": "field_experience",
     "strategy_label": "Field Experience",
     "strategy_fit": {"field_experience": 9, "constructive_challenge": 2},
     "strategy_scores": {"field_experience": 11.0, "constructive_challenge": 2.0},

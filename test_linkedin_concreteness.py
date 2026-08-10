@@ -423,8 +423,16 @@ def band(n):
 
 check("K1 a MIN_WORDS 60 -> 35 (a legkisebb sav ALA)", MIN_WORDS == 35)
 check("K2 rovid poszt -> rovid sav (a Revit-eset: 53 szo)", band(53) == (40, 70), str(band(53)))
-check("K3 kozepes poszt -> a mai viselkedeshez kozeli sav", band(101) == (75, 125), str(band(101)))
+# CSILLAPITAS (masodik iteracio): a padlo feletti resz feleresben szamit, mert a meres
+# szerint minel tobb a hely, annyival tobb a toltelék (108 szavas poszt -> 95 szavas
+# komment, abstract 5, es a zaro mondat mar homalyos volt).
+check("K3 kozepes poszt: a CSILLAPITAS szukiti a savot (108 szo)",
+      band(108) == (60, 100), str(band(108)))
+check("K3.1 a csillapitas tenyleg szukit (nem a regi 80-135)",
+      band(108)[1] < 135)
 check("K4 hosszu poszt -> felso hataron all meg", band(254) == (90, 150), str(band(254)))
+check("K4.1 a plafont csak ~185 szo fole eri el a cel (tehat a csillapitas hat)",
+      band(180)[1] < 150 and band(200) == band(254), f'{band(180)} / {band(200)}')
 check("K5 nagyon hosszu poszt sem visz 150 fole", band(1000)[1] == 150, str(band(1000)))
 check("K6 ures/rovid poszt sem megy a padlo ala", band(0) == band(10) == (40, 70), str(band(0)))
 
@@ -435,9 +443,17 @@ bad = [(n, band(n)) for n in range(0, 600, 7)
 check("K7 INVARIANS: a sav minden poszt-hosszra a kapun BELUL van", not bad, str(bad[:3]))
 check("K8 a sav monoton no a poszt hosszaval",
       all(band(n)[0] <= band(n + 10)[0] for n in range(0, 300, 10)))
-check("K9 a plafon/padlo konstans tenyleg hat",
+from responder.linkedin_engine import LENGTH_DAMPING  # noqa: E402
+
+# A plafon a CSILLAPITAS miatt nem a `LENGTH_TARGET_CEILING` szavas posztnal all be,
+# hanem ott, ahol a csillapitott cel eleri a plafont. A hatart a konstansokbol
+# szamoljuk, hogy a teszt ne avuljon el egy jovobeli csillapitas-valtozasnal (ez az
+# elozo valtozat hibaja volt: a csillapitas ELOTTI osszefuggest kodolta be).
+_CEIL_AT = LENGTH_TARGET_FLOOR + (LENGTH_TARGET_CEILING - LENGTH_TARGET_FLOOR) / LENGTH_DAMPING
+check("K9 a padlo es a plafon is tenyleg hat",
       band(LENGTH_TARGET_FLOOR - 20) == band(LENGTH_TARGET_FLOOR)
-      and band(LENGTH_TARGET_CEILING + 200) == band(LENGTH_TARGET_CEILING))
+      and band(int(_CEIL_AT) + 10) == band(600),
+      f'padlo={band(LENGTH_TARGET_FLOOR)} plafon@{int(_CEIL_AT)}={band(int(_CEIL_AT) + 10)}')
 
 check("K10 kapcsolo: default on, 'off' es YAML-boolean kezelve",
       length_scaling_enabled({}) is True
@@ -471,6 +487,37 @@ check("K18 egy 45 szavas komment MOST atmegy (a 60-as padlo blokkolta volna)",
                             intent="engineering_problem", discourse_level="technical",
                             human_temperature="practical")),
       "ez volt a mert kar: a jo rovid valasz tomesre kenyszerult")
+
+# --- L) a strategy_fit skala horgonyzasa -----------------------------------
+# A MERT HIBA (10 poszt telemetriabol): a modell NYERS pontszamai gyakorlatilag
+# ALLANDOAK. Egy strategian beluli szoras 1-2 pont, a strategiak kozti res 2-4:
+#     missing_perspective 8-9 (atlag 8.8) | practical_lesson 7-9 | field_experience 7-8
+#     systems_thinking 5-7 | business_impact 5-7 | constructive_challenge 4-7
+#     future_outlook 3-7
+# Nyers maximum 10-bol 8 esetben a DOKUMENTALT FALLBACK (`missing_perspective`).
+# Vagyis a modell nem a POSZTOT pontozza, hanem a strategia-leirasokat: fix
+# velemenye van arrol, melyik strategia altalaban ertekes.
+#
+# A BIAS NEM HIBAS — o az egyetlen, ami ezt megforditja (a -1.5-es fallback-levonas).
+# Ezert a javitas a SKALAN van, nem a bias-szamokon: ugyanaz a hibatipus es ugyanaz a
+# gyogyszer, mint a classifier severity-jenel (`docs/04-rendszer-audit`: "a
+# severity-prompt mind az ot fokozatat horgonyoztuk", CLASSIFIER_VERSION -> v4).
+from responder.linkedin_engine import _REASON_PROMPT, STRATEGIES, _STRATEGY_BIAS  # noqa: E402
+
+check("L1 a skala mind a negy fokozata horgonyozva van",
+      all(a in _REASON_PROMPT for a in ("0-2", "3-5", "6-8", "9-10")))
+check("L2 a horgonyok KIMONDJAK, mit jelentenek (nem csak szamok)",
+      "would MISS what the post is about" in _REASON_PROMPT
+      and "single best available move" in _REASON_PROMPT)
+check("L3 van kalibracios ellenorzes a tomorodes ellen",
+      "CALIBRATION CHECK" in _REASON_PROMPT
+      and "four or more strategies a 7 or higher" in _REASON_PROMPT)
+check("L4 a prompt megnevezi a KONKRET hibat (absztrakt vs. EZ a poszt)",
+      "rating the strategies IN THE ABSTRACT" in _REASON_PROMPT)
+check("L5 minimum-szoras eloirva", "at least 5" in _REASON_PROMPT)
+check("L6 a fallback-levonas VALTOZATLAN (a diagnozis szerint o mukodik)",
+      _STRATEGY_BIAS == {"missing_perspective": -1.5}, str(_STRATEGY_BIAS))
+check("L7 a strategia-keszlet valtozatlan (nem szuritettunk)", len(STRATEGIES) == 7)
 
 # --- G) vegponttol vegpontig ------------------------------------------------
 TMP = tempfile.mkdtemp(prefix="nodu-conc-")

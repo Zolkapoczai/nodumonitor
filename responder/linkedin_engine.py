@@ -146,7 +146,7 @@ from google.genai import types
 
 from env_secrets import get_secret
 
-ENGINE_VERSION = "linkedin-tle-v7"
+ENGINE_VERSION = "linkedin-tle-v8"
 
 # --- Stage 4: strategiak -----------------------------------------------------
 # Pontosan EGY strategia valasztodik kommentenkent. A `directive` a compose-
@@ -664,10 +664,23 @@ Fill the JSON fields in this order:
     from the allowed list. Exactly one. Never a list.
 14. missing_perspective_reason — one sentence: why this omission matters here.
 15. strategy_fit — score EVERY strategy 0-10 on how much professional value it
-    would add to THIS post. Do not pick a winner; score them all honestly, and
-    let the scores differ. The `missing_perspective` you gave above is an input to
-    this scoring, not the answer to it.
+    would add to THIS post. Do not pick a winner; score them all honestly. The
+    `missing_perspective` you gave above is an input to this scoring, not the
+    answer to it.
 {chr(10).join(f'    - {k}: fits when {v["wins_when"]}' for k, v in STRATEGIES.items())}
+    WHAT THE NUMBERS MEAN — use the whole scale:
+      0-2  applying this strategy here would MISS what the post is about
+      3-5  technically applicable, but adds little the author or readers do not
+           already have
+      6-8  a good fit: the comment would say something worth reading
+      9-10 the single best available move for THIS post; any other choice would
+           produce a worse comment
+    CALIBRATION CHECK, and it is not optional. Most posts have only ONE strategy
+    in the 9-10 range, and SEVERAL that belong in 0-5 because they genuinely do
+    not fit this post. If you have given four or more strategies a 7 or higher,
+    you are rating the strategies IN THE ABSTRACT — which of them sounds
+    generally useful — instead of rating them against THIS post. Re-score.
+    The spread between your highest and lowest score should be at least 5.
     Score on professional value ALONE. Do NOT down-score a strategy because it
     seems to clash with the conversation_intent or the discourse_level — those
     are weighted separately, after you answer. Double-counting them here distorts
@@ -1452,21 +1465,47 @@ LENGTH_TARGET_FLOOR = 55        # ez ala nem megyunk, barmilyen rovid a poszt
 LENGTH_TARGET_CEILING = 120     # egy LinkedIn-komment ne legyen 250 szo
 LENGTH_BAND_SPREAD = 0.25       # a cel korul +/- ennyi a sav
 
+# CSILLAPITAS (2026-08-10, masodik iteracio): a padlo FELETTI resz csak feleresben
+# szamit, tehat egy hosszabb poszt nem "erdemel ki" aranyosan hosszabb kommentet.
+#
+# MIERT: a tukrozes elso valtozata csak a ROVID posztok esetet oldotta meg. Mert
+# adat harom savszelessegen:
+#     poszt  53, sav 40-70  -> komment 51, abstract 0
+#     poszt 108, sav 80-135 -> komment 95, abstract 5
+#     poszt 254, fix 80-150 -> komment 110-117, abstract 11-13
+# Az irany egyertelmu: MINEL TOBB a hely, ANNYIVAL tobb a toltelék. A 108 szavas
+# poszton a 95 szavas komment utolso mondata mar homalyos volt ("more rigorous
+# visual audits ... adds a layer of complexity"), tehat a sav felso vege toltelekre
+# ment el.
+#
+# EGY parametert valtoztatok, nem harmat: n=1-2 meres savkonfiguraciónkent, es
+# vegig azt tanacsoltam, hogy igazolatlan szamokra ne epitsunk. A csillapitas a
+# legvedhetobb valtozat, mert a MERT irany (a jo arany a rovid poszton 0.96 volt, a
+# gyengebb a hosszabbon 0.86, es ott a plusz szavak toltelekek voltak) pont azt
+# mondja, hogy az aranynak CSOKKENNIE kell a poszt hosszaval.
+LENGTH_DAMPING = 0.5
+
 
 def target_length(post_text: str) -> tuple[int, int]:
     """(min, max) cel-szohossz a POSZT hosszabol. A kod dontese, nem a modelle.
 
-    A szabaly: TUKROZD a posztot, es vagd le mindket vegen. Igy a sav 40-70 egy 53
-    szavas posztra, 75-125 egy 101 szavasra, es 90-150 egy 254 szavasra — vagyis a
-    gyakori (~100 szavas) esetben nagyjabol a mai viselkedes marad, es ott valtozik,
-    ahol a meres hibat mutatott: a rovid, eles posztoknal.
+    A szabaly: tukrozd a posztot, de a padlo feletti reszt CSILLAPITVA, es vagd le
+    mindket vegen. Igy:
+
+        poszt  53 szo -> 40-70    (a padlon)
+        poszt 108 szo -> 60-100   (elotte 80-135)
+        poszt 254 szo -> 90-150   (a plafonon)
+
+    A plafont igy csak ~185 szavas poszt fole eri el a cel, tehat a valos
+    LinkedIn-poszt-hosszak tobbsegen a csillapitas tenylegesen hat.
 
     A visszaadott sav INVARIANSA (teszt rogziti): a minimuma sosem esik a
     `MIN_WORDS` ala, a maximuma sosem no a `MAX_WORDS` fole — kulonben a prompt es a
     kapu egymassal harcolna, es minden komment ujrairast kapna.
     """
     n = len(_words(post_text))
-    target = max(LENGTH_TARGET_FLOOR, min(LENGTH_TARGET_CEILING, n))
+    damped = LENGTH_TARGET_FLOOR + LENGTH_DAMPING * (n - LENGTH_TARGET_FLOOR)
+    target = max(LENGTH_TARGET_FLOOR, min(LENGTH_TARGET_CEILING, damped))
     lo = int(round(target * (1 - LENGTH_BAND_SPREAD) / 5) * 5)
     hi = int(round(target * (1 + LENGTH_BAND_SPREAD) / 5) * 5)
     return lo, hi

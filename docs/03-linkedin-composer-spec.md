@@ -617,6 +617,70 @@
 > mérés. Ezért kapcsolóval jött be (`linkedin.length_scaling`), és a `target_length` +
 > `reply_words` a naplóban van, tehát mérhető, betartja-e a modell.
 >
+> ### 10. A `strategy_fit` skála horgonyzása (engine v8) — a stratégia-összeomlás
+> **A diagnózis megfordította a feladatot.** A telemetria 10 sora alapján a nyers
+> pontszámok gyakorlatilag **állandóak** voltak:
+>
+> | stratégia | terjedelem | átlag |
+> |---|---|---|
+> | `missing_perspective` | 8–9 | **8.8** |
+> | `practical_lesson` | 7–9 | 8.1 |
+> | `field_experience` | 7–8 | 7.6 |
+> | `systems_thinking` | 5–7 | 6.2 |
+> | `business_impact` | 5–7 | 6.1 |
+> | `constructive_challenge` | 4–7 | 5.7 |
+> | `future_outlook` | 3–7 | 4.9 |
+>
+> Az egy stratégián belüli szórás 1–2 pont, a stratégiák közti rés 2–4. **A modell nem
+> a posztot pontozta, hanem a stratégia-leírásokat.** Nyers maximum 10-ből **8 esetben
+> a dokumentált fallback** (`missing_perspective`).
+>
+> **A BIAS NEM HIBÁS — ő volt az egyetlen, ami ezt megfordította** (a `-1.5`-es
+> fallback-levonás). Ha a bias-számokhoz nyúlnánk, csak azt cserélnénk, melyik
+> közel-állandó győztes jön ki; a választ nem tennénk poszt-érzékennyé. `_STRATEGY_BIAS`
+> ezért **változatlan** (teszt rögzíti: L6).
+>
+> **A javítás a skálán van**, projekt-precedenssel: ugyanez a tömörödő pontozás már
+> előfordult a classifier severity-jénél, és a megoldás ott is a horgonyzás volt
+> (`docs/04-rendszer-audit`: „a severity-prompt mind az öt fokozatát horgonyoztuk",
+> `CLASSIFIER_VERSION → v4`). Négy fokozat kimondva (0-2 / 3-5 / 6-8 / 9-10), plusz
+> egy **kalibrációs ellenőrzés**, ami megnevezi a konkrét hibát: *„ha négy vagy több
+> stratégiának adtál 7-est vagy többet, a stratégiákat értékeled ABSZTRAKTAN, nem EZ
+> ellen a poszt ellen — pontozz újra"*, és minimum 5-ös szórás.
+>
+> ### 11. Csillapítás a hossz-sávban (`LENGTH_DAMPING = 0.5`)
+> A tükrözés első változata csak a **rövid** posztok esetét oldotta meg. Mért adat
+> három sávszélességen: 53 szó/40-70 → abstract **0**; 108 szó/80-135 → abstract **5**;
+> 254 szó/fix → abstract **11-13**. Az irány egyértelmű: **minél több a hely, annyival
+> több a töltelék.** A padló feletti rész ezért feleresben számít, így a plafont csak
+> ~185 szavas poszt fölött éri el a cél.
+>
+> **Egy paramétert változtattam, nem hármat** (spread és plafon érintetlen): n=1-2
+> mérés sávkonfigurációnként, és végig az volt a tanács, hogy igazolatlan számokra ne
+> építsünk. A csillapítás a legvédhetőbb, mert a mért irány (0.96 arány a rövid
+> poszton jó volt, 0.86 a hosszabbon már töltelékkel) pont azt mondja, hogy az aránynak
+> **csökkennie** kell a poszt hosszával.
+>
+> ### ÉLES A/B — mindkét változás, ugyanaz a poszt (Copy/Monitor, 108 szó)
+> | | előtte | most |
+> |---|---|---|
+> | `missing_perspective` (fallback) | 9 | **7** |
+> | `practical_lesson` | 8 | **9** |
+> | nyers max = végső győztes | nem | **igen** |
+> | komment | 95 szó | **73 szó** |
+> | `abstract_count` | 5 | **2** |
+> | `hedges` | 1 | **0** |
+>
+> A kapott komment **konkrét számot ad** — *„perhaps anything under 10mm"* —, és
+> pontosan a szerző saját példájára válaszol (a poszt 300 mm-t említ; a komment szerint
+> a *kis* elmozdulások a valódi probléma). Ez általános gyakorlati javaslat, nem
+> kitalált projekt-adat, tehát a zero-hallucination elv áll.
+>
+> **A mechanizmus egészségesebb lett:** a nyers maximum mindkét tesztelt poszton
+> egyezik a végső győztessel, tehát a bias nudge-ként működik, nem teherhordóként.
+> **Amit ez NEM mond ki:** hogy a győztes diverzifikálódott. Két poszton mindkétszer
+> `practical_lesson` nyert. Ehhez több mérés kell.
+>
 > ### NYITOTT — a konkrétság négy mérés után is romlik
 > | | #1 | #2 | #3 | #4 |
 > |---|---|---|---|---|
