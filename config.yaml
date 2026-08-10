@@ -623,6 +623,31 @@ linkedin:
   # 03-composer-spec §Hatókör "nincs perzisztencia/history-tábla" kikötése áll.
   # IDÉZŐJEL KELL: a YAML az on/off szavakat booleanná alakítja (HANDOFF §4/17).
   opening_variety: 'on'
+  # length_scaling — a cél-szóhossz a POSZT hosszából (2026-08-10, engine v7).
+  #   'on'  — (ALAPÉRTELMEZÉS) a kód kiszámolja a sávot és átadja a COMPOSE-nak.
+  #   'off' — fix "80-150 words", a v6-os viselkedés (bájtra), tehát A/B-zhető.
+  # MIÉRT: nyolc éles generálás mérése — a motor ~100 szót írt, BÁRMI is volt a
+  # bemenet (82-117 mind a nyolc esetben):
+  #     poszt 101 szó -> komment  82-97   (0.81-0.96x)
+  #     poszt 254 szó -> komment 110-117  (0.43-0.46x)
+  #     poszt  53 szó -> komment 102-116  (1.92-2.19x)  <- a poszt KÉTSZERESE
+  # Egy éles, kétmondatos megfigyelésre dupla hosszan válaszolni szerkezetileg is
+  # része annak, amiért tömöttnek érezzük: a HOSSZ IS REGISZTER, és a regisztert
+  # illeszteni kell — ugyanaz az elv, ami a nyelv és a `human_temperature` mögött áll.
+  # A SZABÁLY: tükrözd a posztot, és vágd le mindkét végén
+  # (`LENGTH_TARGET_FLOOR`=55, `LENGTH_TARGET_CEILING`=120, sáv +/-25%). Így
+  # 53 szó -> 40-70, 101 szó -> 75-125, 254 szó -> 90-150; vagyis a gyakori
+  # (~100 szavas) esetben nagyjából a mai viselkedés marad, és ott változik, ahol a
+  # mérés hibát mutatott: a rövid, éles posztoknál.
+  # KAPCSOLÓDIK a `MIN_WORDS`-hez: az 60 -> 35 lett. A felülvizsgálat eredménye az
+  # volt, hogy a 60-as padló SOHA nem kötött (nulla "túl rövid" sértés nyolc
+  # generálásból, a legrövidebb komment 82 szó) — a hosszt a PROMPT szabályozta, nem
+  # a kapu. A kettő csak EGYÜTT hat: a padló leengedése önmagában semmit nem
+  # változtatott volna, a sáv nélkül pedig a padló tömésre kényszerítene.
+  # A sáv UTASÍTÁS, nem kapu: a `target_length` és a `reply_words` a naplóban van,
+  # tehát mérhető, betartja-e a modell.
+  # IDÉZŐJEL KELL: a YAML az on/off szavakat booleanná alakítja (HANDOFF §4/17).
+  length_scaling: 'on'
   # telemetry — soronként egy generált komment döntési nyoma (2026-08-09).
   #   'on'  — minden hívás egy JSON-sort ír a `telemetry_path` fájlba.
   #   'off' — (KÓD-DEFAULT) nem ír semmit.

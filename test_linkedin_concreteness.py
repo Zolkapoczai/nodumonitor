@@ -391,6 +391,87 @@ check("J11 'BIM execution plan' EGY horgony",
       concreteness("the BIM execution plan was late", "")["anchors_added"] == 1,
       str(concreteness("the BIM execution plan was late", "")["anchor_terms"]))
 
+# --- K) a POSZTHOZ skalazott cel-hossz (v7) --------------------------------
+# A MERT HIBA: nyolc eles generalas, a komment 82-117 szo MINDEN esetben, barmi is
+# volt a bemenet. Az 53 szavas poszt 102-116 szavas valaszt kapott — a poszt
+# ketszereset. A hossz IS regiszter.
+from responder.linkedin_engine import (  # noqa: E402
+    target_length, length_scaling_enabled, MIN_WORDS, MAX_WORDS,
+    LENGTH_TARGET_FLOOR, LENGTH_TARGET_CEILING,
+    _compose_user_msg, _COMPOSE_PROMPT,
+)
+
+# A `_compose_user_msg` a mar KIVALASZTOTT strategiat varja (azt a `pick_strategy`
+# teszi be a reasoning-be), ezert itt egy kesz reasoning-objektum kell. Onallo, hogy
+# ne fuggjon a fajl kesobbi E2E-fixtureitol.
+REASONING = {
+    "strategy": "field_experience",
+    "conversation_intent": "engineering_problem", "discourse_level": "technical",
+    "expected_responder_role": "peer_practitioner",
+    "response_mode": "extend_one_insight", "human_temperature": "practical",
+    "topic_gravity": "shared parameter mapping",
+    "core_thesis": "Coordination fails between tools.",
+    "missing_perspective": "interoperability",
+    "missing_perspective_reason": "Semantics are not discussed.",
+    "insight": "Issue-type semantics differ per team.",
+}
+
+
+def band(n):
+    return target_length("szo " * n)
+
+
+check("K1 a MIN_WORDS 60 -> 35 (a legkisebb sav ALA)", MIN_WORDS == 35)
+check("K2 rovid poszt -> rovid sav (a Revit-eset: 53 szo)", band(53) == (40, 70), str(band(53)))
+check("K3 kozepes poszt -> a mai viselkedeshez kozeli sav", band(101) == (75, 125), str(band(101)))
+check("K4 hosszu poszt -> felso hataron all meg", band(254) == (90, 150), str(band(254)))
+check("K5 nagyon hosszu poszt sem visz 150 fole", band(1000)[1] == 150, str(band(1000)))
+check("K6 ures/rovid poszt sem megy a padlo ala", band(0) == band(10) == (40, 70), str(band(0)))
+
+# AZ INVARIANS: a sav sosem harcol a kapuval. Ha a sav minimuma a MIN_WORDS ala esne,
+# vagy a maximuma a MAX_WORDS fole, MINDEN komment ujrairast kapna.
+bad = [(n, band(n)) for n in range(0, 600, 7)
+       if not (MIN_WORDS <= band(n)[0] and band(n)[1] <= MAX_WORDS)]
+check("K7 INVARIANS: a sav minden poszt-hosszra a kapun BELUL van", not bad, str(bad[:3]))
+check("K8 a sav monoton no a poszt hosszaval",
+      all(band(n)[0] <= band(n + 10)[0] for n in range(0, 300, 10)))
+check("K9 a plafon/padlo konstans tenyleg hat",
+      band(LENGTH_TARGET_FLOOR - 20) == band(LENGTH_TARGET_FLOOR)
+      and band(LENGTH_TARGET_CEILING + 200) == band(LENGTH_TARGET_CEILING))
+
+check("K10 kapcsolo: default on, 'off' es YAML-boolean kezelve",
+      length_scaling_enabled({}) is True
+      and length_scaling_enabled({"linkedin": {"length_scaling": "off"}}) is False
+      and length_scaling_enabled({"linkedin": {"length_scaling": False}}) is False)
+
+# A promptba tenylegesen bekerul-e — es a kikapcsolt allapot BAJTRA a v6-os?
+V6_LENGTH = "80-150 words, max two paragraphs, ~20% acknowledgement / 80% new thinking."
+msg_scaled = _compose_user_msg(POST, "", REASONING, False, length_band=(40, 70))
+msg_fixed = _compose_user_msg(POST, "", REASONING, False, length_band=None)
+check("K11 a kijelolt sav bekerul a feladat-uzenetbe", "40-70 words" in msg_scaled)
+check("K12 kimondja, hogy FELULIRJA az instrukciot",
+      "REPLACES the one in" in msg_scaled)
+check("K13 kimondja, hogy ne tomjon (ez a mert hiba)",
+      "do not pad" in msg_scaled.lower())
+check("K14 kikapcsolva a v6-os mondat all elo, SZO SZERINT", V6_LENGTH in msg_fixed)
+check("K15 kikapcsolva NINCS skalazasra utalo szoveg",
+      "REPLACES the one in" not in msg_fixed and "do not pad" not in msg_fixed.lower())
+check("K16 a system-prompt kimondja, hogy a feladat-uzenet sava nyer",
+      "the task message gives a different range" in _COMPOSE_PROMPT)
+
+# A kapu tovabbra is mer — a sav utasitas, nem kapu.
+check("K17 a 35 szo alatti komment TOVABBRA is sertes",
+      any("tul rovid" in i for i in
+          check_quality("Egy rovid megjegyzes csak, semmi tobb.", POST, False,
+                        intent="engineering_problem", discourse_level="technical",
+                        human_temperature="practical")))
+check("K18 egy 45 szavas komment MOST atmegy (a 60-as padlo blokkolta volna)",
+      not any("tul rovid" in i for i in
+              check_quality(" ".join(["word"] * 45), POST, False,
+                            intent="engineering_problem", discourse_level="technical",
+                            human_temperature="practical")),
+      "ez volt a mert kar: a jo rovid valasz tomesre kenyszerult")
+
 # --- G) vegponttol vegpontig ------------------------------------------------
 TMP = tempfile.mkdtemp(prefix="nodu-conc-")
 REASON_OUT = {

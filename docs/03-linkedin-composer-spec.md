@@ -552,6 +552,71 @@
 > `TELEMETRY_SCHEMA` NEM emelkedett** — a verzió akkor kell, ha mező eltűnik vagy
 > jelentése változik; egy új oszlop nem teremti meg azt a hazárdot, ami ellen véd.
 >
+> ### 9. A cél-szóhossz a POSZT hosszából (engine v7) — a `MIN_WORDS` felülvizsgálata
+> A felülvizsgálat **más eredményt adott, mint a kérdés feltevése.** Nyolc éles
+> generálás:
+>
+> | poszt szó | komment szó | arány |
+> |---|---|---|
+> | 101 | 82–97 | 0.81–0.96× |
+> | 254 | 110–117 | 0.43–0.46× |
+> | **53** | **102–116** | **1.92–2.19×** |
+>
+> **A `MIN_WORDS = 60` nem a probléma volt: soha nem kötött.** Nulla „túl rövid"
+> sértés nyolc generálásból, a legrövidebb komment 82 szó. A hosszt a **prompt**
+> szabályozta („80-150 words"), nem a kapu — tehát a padló leengedése önmagában
+> semmit nem változtatott volna. (Mellékes megfigyelés: a `MAX_WORDS = 175`-nek van
+> dokumentált csonkolás-története, a `MIN_WORDS = 60` viszont **kommentár nélküli,
+> soha nem indokolt szám** volt a kódban.)
+>
+> **A valódi hiba:** a motor ~100 szót írt, bármi is volt a bemenet. Egy 53 szavas,
+> éles posztra a kétszeresével válaszolni szerkezetileg is része annak, amiért
+> tömöttnek érezzük — **a hossz is regiszter**, és a regisztert illeszteni kell,
+> ugyanaz az elv, ami a nyelv és a `human_temperature` mögött áll.
+>
+> **A szabály** (`target_length`, a kód dönt — `pick_opening`/`pick_strategy` minta):
+> tükrözd a posztot, és vágd le mindkét végén (`LENGTH_TARGET_FLOOR`=55,
+> `LENGTH_TARGET_CEILING`=120, sáv ±25%, ötre kerekítve).
+>
+> | poszt | sáv |
+> |---|---|
+> | ≤55 szó | 40–70 |
+> | 101 szó | 75–125 |
+> | ≥120 szó | 90–150 |
+>
+> A gyakori (~100 szavas) esetben nagyjából a mai viselkedés marad, és ott változik,
+> ahol a mérés hibát mutatott.
+>
+> **`MIN_WORDS` 60 → 35:** a legkisebb lehetséges sáv (40) **alá**, hogy a kapu ne
+> harcoljon a prompttal, de továbbra is kifogja az elfajzott egysorost. Ez a
+> **kettő csak együtt hat**. Invariáns, tesztel rögzítve (K7): a sáv minden
+> poszt-hosszra a kapun belül van — különben minden komment újraírást kapna.
+>
+> **ÉLES A/B ugyanazon a poszton** (Revit stair, 53 szó):
+>
+> | | előtte (fix 80-150) | most (skálázott 40-70) |
+> |---|---|---|
+> | komment | 102 és 116 szó | **51 szó** |
+> | arány | 1.92–2.19× | **0.96×** |
+> | `abstract_count` | 1 | **0** |
+> | újramondás | első 3 mondat | **nincs** |
+> | `rewrites` | 0 | 0 |
+>
+> A kapott komment: *„When a custom stair form pushes us to generic models or massing,
+> the real hit is often downstream. That choice … means that the 'I' in BIM for a
+> custom stair geometry often vanishes on IFC export, losing its data for facility
+> management or quantity take-off."*
+>
+> **Ez az első komment a sorozatban, ami vágás nélkül kiposztolható.** Az újramondás
+> eltűnt, és a helyére egy olyan következmény lépett, amit a poszt NEM mondott ki
+> (IFC-export → FM- és takeoff-adat vesztése) — pontosan az „egy fogalmi lépés a
+> poszton túl", amire a motor épült.
+>
+> **Óvatosság a következtetéssel:** ez n=1 A/B ugyanazon a poszton. A hatás nagy és a
+> mechanizmus meggyőző, de a konkrét számok (55/120/±25%) megítélés kérdése, nem
+> mérés. Ezért kapcsolóval jött be (`linkedin.length_scaling`), és a `target_length` +
+> `reply_words` a naplóban van, tehát mérhető, betartja-e a modell.
+>
 > ### NYITOTT — a konkrétság négy mérés után is romlik
 > | | #1 | #2 | #3 | #4 |
 > |---|---|---|---|---|

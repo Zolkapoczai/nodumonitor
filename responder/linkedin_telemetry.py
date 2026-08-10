@@ -102,6 +102,9 @@ _COPIED_FIELDS = (
     "insight", "core_thesis", "missing_perspective",
     # nyitas-rotacio
     "opening_shape", "opening_recent",
+    # cel-szohossz (2026-08-10, v7): a poszt hosszabol szamolt sav. A `reply_words`
+    # mellett igy merheto, betartja-e a modell — es hogy a skalazas egyaltalan hat-e.
+    "target_length",
     # homerseklet
     "temperature", "reason_temperature", "compose_temperature",
     # minoseg

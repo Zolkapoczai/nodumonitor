@@ -146,7 +146,7 @@ from google.genai import types
 
 from env_secrets import get_secret
 
-ENGINE_VERSION = "linkedin-tle-v6"
+ENGINE_VERSION = "linkedin-tle-v7"
 
 # --- Stage 4: strategiak -----------------------------------------------------
 # Pontosan EGY strategia valasztodik kommentenkent. A `directive` a compose-
@@ -1015,6 +1015,19 @@ _V4_OPENING_KEYS = ("own_practice", "encountered", "stood_out", "strikes",
                     "learned", "pattern")
 
 
+def length_scaling_enabled(config: dict) -> bool:
+    """`linkedin.length_scaling`: on (default) | off. YAML-boolean kezelve (§4/17).
+
+    Kikapcsolva a compose-uzenet hossz-mondata BAJTRA a v6-os fix "80-150 words",
+    tehat a skalazas A/B-zheto ugyanezen a kodon — mint az `intent_layer` es az
+    `opening_variety`.
+    """
+    raw = (config.get("linkedin", {}) or {}).get("length_scaling", "on")
+    if isinstance(raw, bool):
+        return raw
+    return str(raw).strip().lower() not in ("off", "false", "0", "no", "none")
+
+
 def opening_variety_enabled(config: dict) -> bool:
     """`linkedin.opening_variety`: on (default) | off. YAML-boolean kezelve (§4/17).
 
@@ -1118,7 +1131,8 @@ ENDING. Do not end with advice, a recommendation or a solution. End on a concret
 observation that leaves room for the other person to answer.
 
 Hard limits:
-- 80-150 words. Never more than two paragraphs.
+- 80-150 words, unless the task message gives a different range — that one wins.
+  Never more than two paragraphs.
 - First person, professional, plain. No emoji, no exclamation marks, no hashtags.
 - Never open with praise or agreement. Forbidden: "I completely agree",
   "Couldn't agree more", "Great post", "Thanks for sharing", "Well said",
@@ -1415,7 +1429,54 @@ def looks_english(text: str, threshold: float = 0.06) -> bool:
         return True  # tul rovid a dontéshez — ne jelezzunk hamisan
     return sum(1 for t in toks if t in _EN_STOPWORDS) / len(toks) >= threshold
 
-MIN_WORDS = 60
+# --- Hossz: a POSZTHOZ skalazott cel-sav (2026-08-10, v7) --------------------
+# A MERT HIBA. Nyolc eles generalas adata:
+#
+#   poszt szo   komment szo   arany
+#      101         82-97      0.81-0.96x
+#      254        110-117     0.43-0.46x
+#       53        102-116     1.92-2.19x   <- a poszt KETSZERESE
+#
+# A motor ~100 szot irt, BARMI is volt a bemenet (82-117 mind a nyolc esetben). Egy
+# eles, ketmondatos megfigyelesre dupla hosszan valaszolni szerkezetileg is resze
+# annak, amiert tomottnek erezzuk: a hossz IS regiszter, es a regisztert illeszteni
+# kell — ugyanaz az elv, ami a nyelv es a `human_temperature` mogott all.
+#
+# MIERT NEM A `MIN_WORDS` VOLT A PROBLEMA (a felulvizsgalat eredmenye): a 60-as
+# padlo SOHA nem kotott — nulla "tul rovid" sertes nyolc generalasbol, a legrovidebb
+# komment 82 szo. A hosszt a PROMPT szabalyozta ("80-150 words"), nem a kapu. A padlo
+# leengedese ezert onmagaban semmit nem valtoztatott volna: a ketto csak EGYUTT hat.
+# (A `MAX_WORDS = 175`-nek van dokumentalt csonkolas-tortenete; a `MIN_WORDS = 60`
+# viszont kommentar nelkuli, soha nem indokolt szam volt.)
+LENGTH_TARGET_FLOOR = 55        # ez ala nem megyunk, barmilyen rovid a poszt
+LENGTH_TARGET_CEILING = 120     # egy LinkedIn-komment ne legyen 250 szo
+LENGTH_BAND_SPREAD = 0.25       # a cel korul +/- ennyi a sav
+
+
+def target_length(post_text: str) -> tuple[int, int]:
+    """(min, max) cel-szohossz a POSZT hosszabol. A kod dontese, nem a modelle.
+
+    A szabaly: TUKROZD a posztot, es vagd le mindket vegen. Igy a sav 40-70 egy 53
+    szavas posztra, 75-125 egy 101 szavasra, es 90-150 egy 254 szavasra — vagyis a
+    gyakori (~100 szavas) esetben nagyjabol a mai viselkedes marad, es ott valtozik,
+    ahol a meres hibat mutatott: a rovid, eles posztoknal.
+
+    A visszaadott sav INVARIANSA (teszt rogziti): a minimuma sosem esik a
+    `MIN_WORDS` ala, a maximuma sosem no a `MAX_WORDS` fole — kulonben a prompt es a
+    kapu egymassal harcolna, es minden komment ujrairast kapna.
+    """
+    n = len(_words(post_text))
+    target = max(LENGTH_TARGET_FLOOR, min(LENGTH_TARGET_CEILING, n))
+    lo = int(round(target * (1 - LENGTH_BAND_SPREAD) / 5) * 5)
+    hi = int(round(target * (1 + LENGTH_BAND_SPREAD) / 5) * 5)
+    return lo, hi
+
+
+# 60 -> 35 (2026-08-10): a padlo mostantol a LEGKISEBB lehetseges cel-sav (40) ALATT
+# all, tehat nem harcol a prompttal, de tovabbra is kifogja az elfajzott egysorost
+# es a felig ures valaszt. A 60 azert volt karos, mert egy jogosan rovid valaszt
+# (az otodik meresnel a jo verzio ~45 szo lett volna) TOMESRE kenyszeritett.
+MIN_WORDS = 35
 MAX_WORDS = 175
 MAX_PARAGRAPHS = 2
 # A komment 4-gramjainak legfeljebb ennyi resze szerepelhet a posztban. Efolott
@@ -2100,7 +2161,8 @@ def vendor_promotion_skip(config: dict, reasoning: dict,
 
 def _compose_user_msg(post_text: str, author_line: str, reasoning: dict,
                       brand_allowed: bool, issues: list[str] | None = None,
-                      intent_layer: bool = True, opening: str = "") -> str:
+                      intent_layer: bool = True, opening: str = "",
+                      length_band: tuple[int, int] | None = None) -> str:
     """A compose-hivas feladat-uzenete.
 
     A kritikus megkotesek (nyelv, hossz, tilalmak) a system-promptban IS benne
@@ -2114,6 +2176,10 @@ def _compose_user_msg(post_text: str, author_line: str, reasoning: dict,
     §4/2 lecke miatt kerul a FELADAT-uzenetbe es nem a system-promptba: a
     per-hivas valtozo megkotes ott hat, ahol a modell a feladatot olvassa.
     Uresen a mondat BAJTRA a v4-es.
+
+    `length_band` (v7): a POSZT hosszabol szamolt (min, max) cel-szohossz, vagy
+    None. None eseten a fix "80-150 words" all elo, tehat a kikapcsolt skalazas
+    BAJTRA a korabbi promptot adja.
     """
     strat = STRATEGIES[reasoning["strategy"]]
     intent = CONVERSATION_INTENTS[_intent_key(reasoning.get("conversation_intent"))]
@@ -2189,7 +2255,14 @@ def _compose_user_msg(post_text: str, author_line: str, reasoning: dict,
         f"- the insight to deliver: {reasoning['insight']}",
         "",
         "Write ONE comment delivering that insight through that strategy.",
-        "80-150 words, max two paragraphs, ~20% acknowledgement / 80% new thinking.",
+        # A hossz a POSZTBOL szamolodik (v7) — a hossz is regiszter. `None` eseten a
+        # fix mondat all elo, tehat a kikapcsolt skalazas bajtra a v6-os promptot adja.
+        (f"{length_band[0]}-{length_band[1]} words — this range REPLACES the one in "
+         f"your instructions, and it is scaled to the length of THIS post. A short, "
+         f"sharp post gets a short, sharp reply; do not pad to fill space. "
+         f"Max two paragraphs, ~20% acknowledgement / 80% new thinking."
+         if length_band else
+         "80-150 words, max two paragraphs, ~20% acknowledgement / 80% new thinking."),
         "Write it in the SAME language as the POST above. Do not switch language.",
         "Do not praise, do not summarise, do not open with agreement.",
     ]
@@ -2408,6 +2481,13 @@ def _generate_comment(config: dict, post_text: str, author_name: str = "",
         print(f"[linkedin-tle] nyitas={opening or '(a valaszforma dontötte el)'}"
               f" | legutobbiak={list(_recent_openings)}")
 
+    # --- Stage 6.6: cel-szohossz a POSZT hosszabol (v7) ---
+    # A hossz is regiszter: egy 53 szavas, eles poszt nem erdemel 110 szavas valaszt.
+    length_band = target_length(post_text) if length_scaling_enabled(config) else None
+    if length_band:
+        print(f"[linkedin-tle] cel-hossz={length_band[0]}-{length_band[1]} szo "
+              f"(poszt: {len(_words(post_text))} szo)")
+
     # --- Stage 6-7: compose, + Stage 9: kapu, legfeljebb egy ujrairassal ---
     comment, issues, rewrites = "", ["nem futott le"], 0
     # Az ELSO kor sertesei kulon. A telemetria eddig csak a VEGSO `quality_issues`-t
@@ -2422,7 +2502,7 @@ def _generate_comment(config: dict, post_text: str, author_name: str = "",
         user_msg = _compose_user_msg(
             post_text, author_line, reasoning, brand_allowed,
             issues if attempt else None, intent_layer=intent_layer,
-            opening=opening,
+            opening=opening, length_band=length_band,
         )
         try:
             out = _call_json(client, model, _COMPOSE_PROMPT, user_msg,
@@ -2493,6 +2573,14 @@ def _generate_comment(config: dict, post_text: str, author_name: str = "",
         # rotacio ki van kapcsolva.
         "opening_shape": opening,
         "opening_recent": list(_recent_openings),
+        # Cel-szohossz (v7): a KOD altal a poszt hosszabol szamolt sav. Naplozva, hogy
+        # merheto legyen, betartja-e a modell — a sav utasitas, nem kapu.
+        #
+        # A `post_words` SZANDEKOSAN nem kerul ide: a telemetria `build_row`-ja mar
+        # szamolja, es ha ketten szamolnank, ket KULONBOZO definicio kerulne ugyanabba
+        # a naploba (`split()` vs a `_words()` regex — az 53 szavas teszt-poszton 53 vs
+        # 52). Pont az a hazard, ami ellen a `TELEMETRY_SCHEMA` vedelmet ad.
+        "target_length": list(length_band) if length_band else None,
         # Kep-bemenet: `image_attached` az ELKULDOTT kepet jelenti, nem a kapottat
         # (kikapcsolt layer / image_input=off eseten false, holott jott kep).
         "image_attached": use_image,
