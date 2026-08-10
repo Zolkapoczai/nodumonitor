@@ -3,7 +3,7 @@ LinkedIn-motor telemetria (2026-08-09, engine v5).
 
 A CEL: a motor minden dontest visszaad a valaszban, de a valasz a HTTP-korrel
 eltunik — ezert ma nem tudod megvalaszolni, hogy nyer-e valaha a
-`constructive_challenge`, korrelal-e az authenticity-rubrika a kezi pontjaiddal,
+`constructive_challenge`, homalyos-e a komment (`concreteness`),
 hat-e a homerseklet-bontas, es szor-e a nyitas-rotacio.
 
 A) Config: kapcsolo es utfeloldas
@@ -80,7 +80,11 @@ check("A9 ures ut -> a default",
 # --- B) build_row -----------------------------------------------------------
 RESULT = {
     "reply_text": "I've run into this at handover rather than during authoring.",
-    "engine": "linkedin-tle-v5", "strategy": "field_experience",
+    # A REASON gondolatmenete — a redundancia-diagnozishoz kell (2026-08-10).
+    "insight": "The GUID travels with the definition file, not the model.",
+    "core_thesis": "Shared parameters drift across linked models.",
+    "missing_perspective": "lifecycle",
+    "engine": "linkedin-tle-v6", "strategy": "field_experience",
     "strategy_label": "Field Experience",
     "strategy_fit": {"field_experience": 9, "constructive_challenge": 2},
     "strategy_scores": {"field_experience": 11.0, "constructive_challenge": 2.0},
@@ -92,8 +96,11 @@ RESULT = {
     "topic_gravity": "shared parameter mapping", "intent_layer": True,
     "opening_shape": "encountered", "opening_recent": ["pattern"],
     "temperature": None, "reason_temperature": 0.2, "compose_temperature": None,
-    "authenticity_score": 10, "authenticity_detail": {"voice_professional": 2},
-    "authenticity_min": 0, "quality_issues": [], "rewrites": 0,
+    "concreteness": {"words": 60, "anchors_added": 2,
+                     "anchor_terms": ["ifc", "handover"], "abstract_count": 1,
+                     "abstract_terms": ["coordination"], "hedges": 0,
+                     "hedge_terms": [], "anchors_shared_with_post": []},
+    "quality_issues": [], "quality_issues_first": [], "rewrites": 0,
     "post_overlap": 0.04, "ai_fingerprint_terms": [], "confidence": 0.8,
     "brand_mode": "none", "brand_allowed": False,
     "brand_gate_reason": "a poszt nem ker eszkozt",
@@ -107,9 +114,21 @@ check("B1 a sor jelolt: idobelyeg, sema-verzio, ok",
       row["ts"].startswith("2026-08-09T12:30")
       and row["schema"] == TELEMETRY_SCHEMA and row["ok"] is True)
 check("B2 a NEGY nyitott kerdes mezoi mind benne vannak",
-      all(k in row for k in ("strategy", "strategy_scores", "authenticity_detail",
+      all(k in row for k in ("strategy", "strategy_scores", "concreteness",
                              "reason_temperature", "compose_temperature",
                              "opening_shape", "rewrites")))
+# 2026-08-10: a rubrika torolve (harom meres, harom 10/10 — nulla variancia). Ez a
+# teszt orzi, hogy a mezoi ne kerulhessenek vissza csendben a naploba.
+check("B2.1 az authenticity-mezok MAR NEM kerulnek a naploba",
+      not any(k.startswith("authenticity") for k in row),
+      str([k for k in row if k.startswith("authenticity")]))
+# 2026-08-10: az otodik eles meres UJ hibatipust hozott (szemantikai redundancia:
+# a komment 75%-a a poszt sajat teteleet mondta ujra, mas szavakkal -> a 4-gram
+# `post_overlap` 0.0-t adott). A diagnozishoz a REASON gondolatmenete kell.
+check("B2.2 a REASON gondolatmenete is naplozva van (redundancia-diagnozis)",
+      all(k in row for k in ("insight", "core_thesis", "missing_perspective")),
+      str([k for k in ("insight", "core_thesis", "missing_perspective")
+           if k not in row]))
 check("B3 minden atvett mezo bekerult, ha a valaszban volt",
       all(k in row for k in _COPIED_FIELDS if k in RESULT))
 check("B4 a komment TELJES szovege benne van (ezt pontozod)",
@@ -262,8 +281,10 @@ check("E4 a ket homerseklet kulon szerepel (a bontas merheto)",
 check("E5 a strategia-pontszamok benne vannak (1. kerdes megvalaszolhato)",
       isinstance(ok_row.get("strategy_scores"), dict)
       and "constructive_challenge" in ok_row["strategy_scores"])
-check("E6 az authenticity-bontas benne van (2. kerdes megvalaszolhato)",
-      isinstance(ok_row.get("authenticity_detail"), dict))
+check("E6 a konkretsag-diagnosztika benne van (a rubrika helyere lepett)",
+      isinstance(ok_row.get("concreteness"), dict)
+      and "anchors_added" in ok_row["concreteness"],
+      str(ok_row.get("concreteness")))
 check("E7 elapsed_ms merve", isinstance(ok_row.get("elapsed_ms"), int))
 
 check("E8 a HIBAS ut is sort ir (a korai return-oket a wrapper fogja)",

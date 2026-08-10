@@ -353,6 +353,228 @@
 > („NEM DOKUMENTÁLT") tehát indokolt. A COMPOSE értékét ezért **mérésből** kell
 > eldönteni, nem dokumentációból.
 
+> ## ⚙️ KIEGÉSZÍTVE (2026-08-10) — vendor-skip, konkrétság-mérő, szótár-ragozás
+>
+> **Mind a három EGY mért esetből jön:** a Newforma-benchmark (külső ChatGPT-pontszám
+> 88/100, belső authenticity-rubrika **10/10**). Ez volt az első eset, amit a
+> telemetria (F1) rögzített, tehát nem következtetés, hanem napló.
+>
+> ### 1. Vendor-hirdetés → kihagyás
+> **Felhasználói döntés:** vendor-hirdetés alatt nem jelenünk meg. Az indok üzleti:
+> egy érdemi komment (a) ingyen engagementet ad a hirdetésnek — a LinkedIn
+> kommentszám szerint rangsorol —, (b) azzá tesz, aki egy **szomszédos** versenytárs
+> (Newforma: koordináció/interop, vagyis a Bridge mellett) marketingje alatt
+> ellenvetést fogalmaz meg.
+>
+> **Miért nem elég a meglévő `product_demonstration` intent:** annak definíciója
+> „their own or someone else's" — vagyis egy gyakorló szakember is ide esik, aki a
+> saját épített eszközét mutatja. Az PONT olyan poszt, amire válaszolni akarunk. A
+> kettőt csak a **regiszter** választja el, ezért kell rá saját séma-mező.
+>
+> Két új REASON-mező, **új LLM-hívás nélkül**: `vendor_promotion` (BOOLEAN) +
+> `promotion_evidence` (a posztból vett szó szerinti idézet). A döntést a kód hozza,
+> **három kapuval** — ugyanaz a zero-hallucination minta, mint a `tool_request_quote`-nál:
+> kapcsoló → a modell állítása → az idézet **ellenőrizve** a posztban. A modell „ez
+> hirdetés" állítását nem fogadjuk el szavára, mert a következmény az, hogy
+> egyáltalán nem generálunk.
+>
+> A kilépés a **COMPOSE ELŐTT** van: egy meg nem született kommentért nem fizetünk.
+> Élesben mérve: 2883 ms / 1 hívás a kihagyásnál, 4531 ms / 2 hívás a generálásnál.
+> A UI saját kártyát mutat az igazolt bizonyítékkal és egy **„Mégis generálj"**
+> gombbal (`force`) — a kihagyás **ajánlás, nem tilalom.**
+> Kapcsoló: `linkedin.skip_vendor_promotion`.
+>
+> ### 2. F2 — konkrétság-diagnosztika (MÉRÉS, nem kapu)
+> A benchmarkolt komment **kategóriát** nevezett meg, nem **esetet**: „subtle
+> variations in how they classify issues". A REASON-prompt kért konkrétságot, de
+> **semmi nem mérte**, és a rubrika minden tengelyen 2/2-t adott — nincs olyan
+> tengelye, ami a homályosságot látná.
+>
+> Három független proxy (`concreteness`), tiszta regex, nulla LLM-költség:
+>
+> | | benchmarkolt (88/100) | konkrét változat |
+> |---|---|---|
+> | `anchors_added` (hozott konkrét domain-elem, a poszthoz relativizálva) | **0** | 3 |
+> | `abstract_count` | 7 | 1 |
+> | `hedges` (darabszám: 3× „often") | 5 | 0 |
+>
+> **Nincs összpontszám, és nincs belőle kapu** — szándékosan. Az authenticity-rubrika
+> tanulsága: egy igazolatlan mérőszámra kapuzni annyi, mint úgy viselkedni, mintha
+> tudnánk valamit. A három komponenst **külön** kell rangkorreláltatni a benchmark-
+> pontokkal; az megmutatja, melyik jelez egyáltalán. Ha egyik sem, a blokk törölhető.
+>
+> A REASON `insight` mezője prompt-oldalon is kapott konkrétság-követelményt, a
+> határvonal kimondásával: **technikai konkrétság igen, kitalált projekt-specifikum nem.**
+>
+> ### 3. Szótár-ragozás — mért hiányok
+> A kapu-szótárak csak a **szótári alakot** keresték. A benchmarkolt kommentben:
+> `standardizing` ≠ `standardi[sz]ation`, `consistent` ≠ `consistency` → a komment a
+> teljes framework-szókincset használta, az `ai_fingerprint_terms` mégis **üres** volt.
+> Javítva mindkét szótárban (`_AI_FINGERPRINT_PATTERNS`, `_EXEC_ABSTRACTION_PATTERNS`),
+> a többes számmal együtt (`frameworks`, `competitive advantages`, `business cases`).
+> A `\b`-határok maradnak: az `inconsistent` **nem** egyezik a `consistency`-vel.
+>
+> **Új, feltétel nélkül mérő lista:** `_MARKETING_CLICHE_PATTERNS`. A mért kommentben
+> ott volt a „can truly unlock its full potential" — egyik listán sem. Ez **külön**
+> lista, mert az `_AI_FINGERPRINT_PATTERNS` szerzőhöz relativizált és csak
+> technikai/emberközpontú beszélgetésben mér, a mért eset viszont `management` síkon
+> volt. Egy marketing-klisé **semmilyen** síkon nem jó írás, ezért mindig mér. Szűk
+> és védhető: a legitim BIM-zsargon (`architecture`, `pipeline`, `single source of
+> truth`) szándékosan kimarad.
+>
+> ### Telemetria-hiányosság javítva
+> `quality_issues_first`: eddig csak a **végső** `quality_issues` került a naplóba
+> (üres = átengedve), tehát egy `rewrites: 1`-es sornál nem lehetett megtudni, **mi**
+> váltotta ki az újraírást. A 2026-08-10-i napló-elemzés találta meg ezt a hiányt.
+>
+> ### 4. Framework-reflex kapu → a `management` sík is (user-döntés)
+> A ragozás-javítás után a kényszerített generálás `['governance', 'consistency']`-t
+> adott — **két** elem, tehát a darabszám-feltétel teljesült —, a kapu mégsem lépett
+> be, mert a `discourse_level` `management` volt. Épp az a „foundational governance" +
+> „naming conventions" reflex volt, amire a mechanizmus készült.
+>
+> `_FINGERPRINT_LEVELS = {"technical", "management"}`.
+>
+> **A `business` szándékosan kimarad:** ha a szerző MÁR üzleti síkra tette a
+> beszélgetést, ott folytatni nem drift, hanem a beszélgetés követése — ezt a motor
+> saját terve mondja ki (`_LEVEL_STRATEGY_BIAS['business']` meg is emeli a
+> `business_impact`-et). Ott kapuzni szembemenne a saját döntésünkkel.
+>
+> **Miért elég a `>= 2` küszöb management síkon is:** a kapu csak azokat a
+> kifejezéseket számolja, amiket a **szerző nem használt** (`ai_fingerprint_terms`
+> relativizál). Egy management-poszt szerzője, aki maga beszél governance-ról, eleve
+> védett — az ő szavai nem számolódnak. Teszttel rögzítve (H5).
+>
+> **Visszafordítható:** a hatás a `rewrites` és a `quality_issues_first` mezőkből
+> mérhető; ha túl sok hamis pozitívot hoz, a halmaz egy sorban szűkül.
+>
+> ### 5. Sablonos-nyitás kapu → első két mondat (user-döntés)
+> A minták `^`-hoz kötöttek `re.MULTILINE`-nal, ami **sor**kezdet, nem **mondat**kezdet.
+> Egy éles generálás így írt: *„The challenge of disconnected tools is a real one. We
+> often see that even with integrated platforms…"* — a sablonos fordulat a **második**
+> mondat elején volt, ugyanabban a sorban, tehát átment. Ugyanaz a mondat első helyen
+> viszont sértés volt.
+>
+> `_opening_window()`: az első **két** mondat, mondatonként illesztve.
+>
+> **Miért pontosan kettő, és miért nem „bármely mondatkezdet":** ez a szabály a
+> NYITÁSRÓL szól. Egy sablonos fordulat a 8. mondatban nem nyitási hiba — ott a
+> sértés címkéje („ismétlődő nyitás") félrevezető lenne, és átfedésbe kerülne az
+> `_AI_FINGERPRINT_PATTERNS`-szel, aminek éppen a regiszter a dolga. A kettő megőrzi
+> a kódban már dokumentált szándékot is: a kifejezés későbbi, tartalmilag indokolt
+> használata nem sérül (teszt: I3 mondat közepén, I4 harmadik mondat).
+>
+> **Ismert korlát:** a rövidítések („e.g.", „vs.") hamis mondathatárt adnak. A hatás
+> legrosszabb esetben egy szűkebb/bővebb ablak, nem hibás sértés.
+>
+> ### 6. Az Authenticity rubrika TÖRÖLVE (user-döntés, engine v6)
+> A 2026-08-01-i bevezetés saját feltételt szabott: *„az egyetlen valódi próba, hogy
+> az `authenticity_detail` korrelál-e a kézi benchmark-pontokkal. Ha nem, a rubrika
+> törölhető."* **A feltétel teljesült — negatív irányban.**
+>
+> | # | Poszt | `authenticity` | `no_implementation_drift` | Amit a komment valójában írt |
+> |---|---|---|---|---|
+> | 1 | Newforma (vendor ad) | **10/10** | 2 | külső pontozó: „consultant mode", 88/100 |
+> | 2 | ugyanaz, `force` | **10/10** | 2 | „foundational governance", „naming conventions" |
+> | 3 | BIM risk management | **10/10** | 2 | „cultural willingness to embed those capabilities into daily operations" |
+>
+> Ez **nem gyenge korreláció volt, hanem nulla variancia.** Egy mérőszám, ami mindig a
+> maximumot adja, definíció szerint nem tud rangsorolni. A `no_implementation_drift`
+> mindháromszor „nulla driftet" állított, miközben mindhárom komment pontosan
+> implementációs/szervezeti síkra sodródott.
+>
+> **Amit vesztünk:** a modell a lezárás előtt öt megnevezett tengely szerint
+> újraolvasta a saját szövegét. Három mérés alapján ez az újraolvasás semmit nem
+> fogott meg. A törlés utáni negyedik éles futás megerősítette: a komment minősége
+> **változatlan** (ugyanaz a hibatípus, `rewrites: 0`) — vagyis a rubrika valóban nem
+> tartott semmit.
+>
+> **Amit nyerünk:** ~10 kimeneti token/hívás, és eltűnik a 10/10 adta hamis
+> biztonságérzet. A helyére a determinisztikus kapu és az F2 konkrétság-diagnosztika
+> lép — azok **mért** dolgokat mérnek, nem önértékelést kérnek.
+>
+> Törölve: `_AUTHENTICITY_DIMENSIONS`, `AUTHENTICITY_MAX`, `authenticity_score()`,
+> `authenticity_min_score()`, a `_COMPOSE_PROMPT` pontozó blokkja, a `_COMPOSE_SCHEMA`
+> öt integer mezője, a `check_quality` `auth_score`/`auth_min` paramétere, a négy
+> válasz-mező és a `linkedin.authenticity_min_score` config-kulcs.
+> `TELEMETRY_SCHEMA` 1 → 2 (a régi sorok más oszlopkészletűek).
+> Visszaszivárgás ellen teszt őrzi (A1–A8, B2.1).
+>
+> ### 7. Regiszter-szavak és a horgony-lexikon (a negyedik mérésből)
+> **`robust` és a puszta `leverage`** bekerült az `_AI_FINGERPRINT_PATTERNS`-be — és
+> nem a marketing-listába, mert *lehet* legitim használatuk („a mapping elég robusztus,
+> hogy túlélje az újraépítést"). A relativizálás + a legalább-kettő küszöb pontosan ezt
+> a határesetet kezeli: ha a szerző használta, nem számol, és egyetlen előfordulás sem
+> indít újraírást.
+>
+> **Önkritikus tétel:** a `robust` szó a külső spec lexikai tiltólistáján szerepelt,
+> amit az első értékelésemben „2019-es AI-jelként" intéztem el, és strukturális
+> tellekre tereltem a figyelmet. A szó ezután **éles kimenetben** jelent meg („robust
+> BIM tools"), és egyetlen kapu sem fogta. A strukturális tellek valósak — de a
+> lexikai listát túl könnyen írtam le.
+>
+> **`full potential`** már `unlock` nélkül is sértés (a mért komment így ment át: „the
+> full potential for risk mitigation can remain untapped").
+>
+> **Horgony-lexikon bővítve** az éles posztok saját szókincséből: `execution plan`,
+> `bep`, `4d`/`5d`/`6d`, `takeoff`, `qa/qc`, `scan-to-bim`, `lidar`, `point cloud`,
+> `spi`/`cpi`, `power bi`, `drone`. A hiányuk **alulszámolt**, tehát a későbbi
+> korrelációt is rontotta volna.
+> **Szándékosan kimarad a `naming convention`:** az egyik mért komment éppen
+> consultant-nyelvként használta („establishing strict naming conventions"), tehát
+> horgonynak venni azt a kommentet **jutalmazta** volna.
+>
+> ### 8. ÚJ hibatípus (ötödik mérés): szemantikai redundancia
+> Teszt-poszt: *„Revit can run an entire multidisciplinary project yet forces you to
+> choose between a stair that's intelligent and one that's shaped the way you actually
+> designed it."*
+>
+> **Ez volt eddig a legjobb futás:** `engineering_problem` / `technical` /
+> `frustrated` — mindhárom helyes; a `business_impact` **vétózva**; `abstract_count: 1`
+> (a korábbi 7 / 5 / 11 / 13 után); a regiszter tiszta; `rewrites: 0`. A kiosztott
+> nyitó-forma (`condition`, az egyik 2026-08-09-i új forma) ezúttal **érvényesült** is.
+>
+> **De:** a komment első három mondata a poszt saját dichotómiáját mondta újra, más
+> szavakkal (~75 szó). Az egyetlen új tartalom a záró mondat volt (hibrid → in-place
+> modellek → downstream clash és adatintegritás-vesztés).
+>
+> **És ezt egyetlen kapu sem látja:** a `post_overlap` **0.0**, mert a 4-gram mérő
+> **lexikai** visszhangot mér, nem tartalmi redundanciát. Ugyanaz a hibaosztály, mint
+> a korábbiaknál: a kapu a betűt méri, nem a mondanivalót.
+>
+> **Hol keletkezett — és ez most fordítva van.** A negyedik posztnál a REASON jó volt
+> és a COMPOSE hígította fel; itt a REASON `insight`-ja **már eleve újramondás** volt,
+> és a COMPOSE hűen megírta. A `missing_perspective` `automation`-t választott — vagyis
+> a motor **talált** egy kihagyott dimenziót, de a komment nem használta.
+>
+> **Telemetria bővítve** ezért: `insight`, `core_thesis`, `missing_perspective`. Enélkül
+> csak a végterméket látjuk, a gondolatmenetet nem. **Tisztán additív, ezért a
+> `TELEMETRY_SCHEMA` NEM emelkedett** — a verzió akkor kell, ha mező eltűnik vagy
+> jelentése változik; egy új oszlop nem teremti meg azt a hazárdot, ami ellen véd.
+>
+> ### NYITOTT — a konkrétság négy mérés után is romlik
+> | | #1 | #2 | #3 | #4 |
+> |---|---|---|---|---|
+> | `anchors_added` | 0 | 0 | 0 | 0 |
+> | `abstract_count` | 7 | 5 | 11 | 13 |
+>
+> **Négy komment, négyszer nulla hozott konkrét horgony.** A REASON `insight`-ja
+> közben használható volt (pl. „a kontroll-százalékok a BIM execution plan
+> érettségétől függenek") — a hígítás tehát a COMPOSE lépésben történik, nem a
+> gondolatmenetben.
+>
+> Két további, egyik kapun sem szereplő regiszter-szó a negyedik futásból:
+> **„robust"** BIM tools és a puszta **„leverage"** (a `_MARKETING_CLICHE_PATTERNS`
+> `leverage the power of`-ot követel). A horgony-lexikon is hiányos: a „BIM execution
+> plan", `4D`/`5D`, `quantity takeoff`, `QA/QC`, `scan-to-BIM`, `LiDAR`, `SPI`/`CPI`
+> nincs benne, holott valódi, megnevezhető artefaktumok — ez alulszámol, tehát a
+> későbbi korrelációt is rontja.
+>
+> **Válasz-szerződés:** a 8 legacy mező változatlan; új additív mezők: `skipped`,
+> `skip_reason`, `vendor_promotion`, `promotion_evidence`, `forced`, `concreteness`,
+> `quality_issues_first`. A `skipped: true` válaszban `reply_text` üres — a UI a
+> `skipped` flaget vizsgálja először. DB-séma nem változott.
+
 ## Cél
 Egy dashboard-fül, ahova egy LinkedIn-poszt szövege bemásolható, és a rendszer egyetlen Gemini-hívással eldönti, melyik válasz-mód illik rá, majd megírja a választ.
 

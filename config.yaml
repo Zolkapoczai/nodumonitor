@@ -591,17 +591,19 @@ linkedin:
   # `compose_temperature`), hogy utólag megmagyarázható legyen, melyik lépés min futott.
   reason_temperature: 0.2
   compose_temperature: 'default'
-  # authenticity_min_score — a modell a megírt kommentet ÖT megnevezett tengelyen
-  # pontozza (0-2 mind): voice_professional, conversation_fit, one_step_insight,
-  # no_implementation_drift, natural_language. Összeg 0-10. Ez alatt a kód EGY
-  # célzott újraírást kér a már meglévő újraíró körben.
-  # FONTOS: a modell csak PONTOZ (szenzor), a küszöböt és az újraírást a KÓD végzi
-  # (bíró) — §4/16. Az önértékelésre alapozott döntést a motor tudatosan nem
-  # használja, mert az LLM a saját szövegét gyakorlatilag mindig elfogadja.
-  # A pontszám minden válaszban ott van (`authenticity_detail`), hogy a kézi
-  # benchmark-pontokkal korreláltatható legyen. Ha nincs korreláció, törölhető.
-  # 0 = kikapcsolva.
-  authenticity_min_score: 0
+  # TÖRÖLVE (2026-08-10): authenticity_min_score + az Authenticity rubrika.
+  # A 2026-08-01-i bevezetésnél a feltétel ez volt: "az egyetlen valódi próba, hogy
+  # korrelál-e a kézi benchmark-pontokkal. Ha nem, a rubrika törölhető."
+  # HÁROM éles mérés, HÁROM 10/10 — a `no_implementation_drift` mindháromszor 2-t
+  # kapott ("nulla drift"), közben a három komment sorrendben ezt írta: külső
+  # pontozó "consultant mode"-ot kifogásolt (88/100); "foundational governance" +
+  # "naming conventions"; "cultural willingness to embed those capabilities into
+  # daily operations". Nem gyenge korreláció volt, hanem NULLA VARIANCIA: egy
+  # mérőszám, ami mindig a maximumot adja, nem tud rangsorolni.
+  # A helyére a determinisztikus kapu és az F2 konkrétság-diagnosztika lép — azok
+  # mért dolgokat mérnek, nem önértékelést kérnek. Nyereség: ~10 kimeneti
+  # token/hívás, és eltűnik a 10/10 adta hamis biztonságérzet.
+  # A kulcs ELHAGYHATÓ a configból; ha bent marad, a motor figyelmen kívül hagyja.
   # opening_variety — nyitás-rotáció (2026-08-09, engine v5).
   #   'on'  — (ALAPÉRTELMEZÉS) a KÓD jelöl ki egy nyitó-formát kommentenként a
   #           nyolcból, kizárva a legutóbbi négyet, és azt adja át a COMPOSE-nak.
@@ -628,8 +630,8 @@ linkedin:
   # eltűnik. Emiatt négy fontos kérdésre ma nem tudsz felelni:
   #   1. nyer-e valaha a `constructive_challenge` (a bias-terv szerint vélemény- és
   #      debate-poszton nyerhetne — de méri ezt valaki?)
-  #   2. korrelál-e az authenticity-rubrika a kézi benchmark-pontjaiddal (ezt a
-  #      03-composer-spec NYITOTT KÉRDÉSKÉNT rögzíti: ha nincs korreláció, törölhető)
+  #   2. (MEGVÁLASZOLVA 2026-08-10: az authenticity-rubrika három mérés után
+  #      törölve — nulla variancia, mindháromszor 10/10. A napló adta a választ.)
   #   3. hat-e a hívásonkénti hőmérséklet-bontás
   #   4. szór-e tényleg a nyitás-rotáció, és nő-e tőle az újraírások száma
   # Mind a négy UGYANABBÓL az egy sorból megválaszolható.
@@ -641,6 +643,26 @@ linkedin:
   # párosításhoz elég. A KÉP soha, semmilyen formában. A komment teljes szövege
   # benne van: az a saját kimeneted, és pont az, amit pontozol.
   # A naplózás hibája SOHA nem törli el a már kifizetett LLM-hívás eredményét.
+  # skip_vendor_promotion — vendor-hirdetés alatt NE generáljunk kommentet (2026-08-10).
+  #   'on'  — (ALAPÉRTELMEZÉS) ha a poszt a termék gyártójának marketing-anyaga,
+  #           a motor a COMPOSE-hívás ELŐTT kilép: nincs komment, nincs második
+  #           LLM-hívás. A UI "Mégis generálj" gombja felülírja (force).
+  #   'off' — mindig generál, a korábbi viselkedés.
+  # MIÉRT: felhasználói döntés (2026-08-10). Az indok üzleti, nem stilisztikai: egy
+  # érdemi komment (a) ingyen engagementet ad a hirdetésnek — a LinkedIn kommentszám
+  # szerint rangsorol —, (b) azzá tesz, aki egy SZOMSZÉDOS versenytárs (Newforma:
+  # koordináció/interop, vagyis a Bridge mellett) marketingje alatt finoman
+  # ellenvetést tesz.
+  # MIÉRT NEM ELÉG a `conversation_intent == product_demonstration`: annak
+  # definíciója "their own or someone else's" — vagyis egy gyakorló szakember is ide
+  # esik, aki a saját épített eszközét mutatja meg. Az PONT olyan poszt, amire
+  # válaszolni akarunk. A kettőt csak a REGISZTER választja el, ezért van rá saját
+  # séma-mező (`vendor_promotion`) + kötelező, a posztban ELLENŐRZÖTT idézet
+  # (`promotion_evidence`) — ugyanaz a zero-hallucination minta, mint a
+  # `tool_request_quote`-nál. A modell "ez hirdetés" állítását nem fogadjuk el
+  # szavára, mert a következmény az, hogy egyáltalán nem generálunk.
+  # IDÉZŐJEL KELL: a YAML az on/off szavakat booleanná alakítja (HANDOFF §4/17).
+  skip_vendor_promotion: 'on'
   telemetry: 'on'
   # telemetry_path — relatív út a dashboard gyökeréhez képest (mint a database.path).
   # Soronként egy JSON objektum; pandas/jq/Excel közvetlenül olvassa.

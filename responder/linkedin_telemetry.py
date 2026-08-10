@@ -2,22 +2,28 @@
 LinkedIn-motor telemetria — soronkent egy generalt komment dontesi nyoma.
 
 MIERT KELL: a motor MINDEN dontest visszaad a valaszban (`strategy_scores`,
-`authenticity_detail`, `opening_shape`, a ket homerseklet...), de a valasz a
-HTTP-korrel eltunik. Emiatt negy, kimondottan FONTOS kerdesre ma nem tudsz
-valaszolni:
+`concreteness`, `opening_shape`, a ket homerseklet...), de a valasz a HTTP-korrel
+eltunik. Emiatt kimondottan FONTOS kerdesekre nem lehetett valaszolni:
 
   1. Nyer-e valaha a `constructive_challenge`? A bias-terv szerint velemeny- es
      debate-poszton semleges, tehat nyerhetne. Ha a modell `strategy_fit`
      pontozasa szisztematikusan lehuzza, a terv nem valosul meg — es ez ma
      lathatatlan.
-  2. Korrelal-e az authenticity-rubrika a kezi benchmark-pontjaiddal? A
-     03-composer-spec ezt NYITOTT KERDESKENT rogziti: "ha nincs korrelacio, a
-     rubrika torolheto". Korrelaciot merni parositott adatbol lehet.
+  2. MEGVALASZOLVA (2026-08-10): korrelal-e az authenticity-rubrika a kezi
+     pontokkal? Nem — harom meres, harom 10/10, nulla variancia. A rubrika
+     TOROLVE, es ezt a naplo dontotte el, nem velemeny. Ez a mezo maga is
+     eltunt (`TELEMETRY_SCHEMA` 1 -> 2).
   3. Hat-e a hivasonkenti homerseklet-bontas (2026-08-09)?
   4. Szor-e tenylegesen a nyitas-rotacio, es no-e tole az ujrairasok szama?
+  5. Homalyos-e a komment? (`concreteness`: hozott konkret horgony, absztrakt-
+     suruseg, hedge-halmozas — harom kulon szam, osszpontszam SZANDEKOSAN nincs.)
+  6. Ujramondja-e a komment a posztot? A `post_overlap` csak LEXIKAI visszhangot
+     mer (4-gram), a mas szavakkal elmondott ugyanaz 0.0-t ad. Ehhez a REASON
+     gondolatmenete kell: `insight` + `core_thesis` + `missing_perspective`.
 
-Mind a negy UGYANABBOL az egy sorbol megvalaszolhato, ezert egy fajl, nem negy
-kulon meres.
+Mind UGYANABBOL az egy sorbol megvalaszolhato, ezert egy fajl, nem sok kulon meres.
+A 2. pont mutatja, hogy ez mukodik: egy igazolatlan meroszamot harom sor alapjan
+lehetett kivezetni.
 
 MIERT NEM DB-TABLA: a 03-composer-spec §Hatokor tiltja a "perzisztencia/
 history-tablat". Az a tiltas ALLAPOTRA vonatkozik — approve/reject allapotgep,
@@ -60,7 +66,18 @@ DEFAULT_PATH = os.path.join("storage", "linkedin_telemetry.jsonl")
 # A sor-sema verzioja. Ha kesobb mezo tunik el vagy valtozik a jelentese, ezt
 # kell emelni — kulonben egy fel evvel kesobbi elemzes ket kulonbozo jelentesu
 # oszlopot atlagolna ossze.
-TELEMETRY_SCHEMA = 1
+# MIKOR KELL EMELNI: ha mezo ELTUNIK, vagy egy meglevo mezo JELENTESE valtozik. Egy
+# UJ mezo hozzaadasa NEM indokol emelest — a regi sorokban egyszeruen nincs benne, es
+# ez nem teremti meg azt a hazardot, ami ellen a verzio vedelmet ad (ket kulonbozo
+# jelentesu adat osszeatlagolasa).
+#
+# 1 -> 2 (2026-08-10): az `authenticity_score` / `authenticity_detail` /
+# `authenticity_min` mezok ELTUNTEK a rubrika torlesevel. Ezt a bumpot a TORLES
+# indokolja; az ugyanakkor bekerult `concreteness` / `quality_issues_first` /
+# vendor-skip mezok onmagukban nem indokoltak volna. A 2026-08-10-i kesobbi,
+# TISZTAN additiv bovites (`insight`, `core_thesis`, `missing_perspective`) ezert
+# NEM emelte tovabb a verziot.
+TELEMETRY_SCHEMA = 2
 
 # Amit a motor valaszabol szo szerint atveszunk. Szandekosan EXPLICIT lista es nem
 # "minden mezo": a valasz reply_text-en kivul is bovulhet, es egy naplo, ami
@@ -72,14 +89,32 @@ _COPIED_FIELDS = (
     "strategy_vetoed", "conversation_intent", "discourse_level",
     "expected_responder_role", "response_mode", "human_temperature",
     "topic", "post_type", "technical_depth", "topic_gravity", "intent_layer",
+    # A REASON GONDOLATMENETE (2026-08-10). Miert kellett: az otodik eles meres egy
+    # UJ hibatipust hozott — SZEMANTIKAI REDUNDANCIA. A komment 75%-a a poszt sajat
+    # tetelet mondta ujra, mas szavakkal; a `post_overlap` 4-gram-mero ezert 0.0-t
+    # adott. A diagnozishoz azt kell latni, hogy a redundancia MAR a REASON
+    # `insight`-jaban benne volt-e, vagy csak a COMPOSE hozta be — es ez a harom mezo
+    # dönti el. Enelkul csak a vegtermeket latjuk, a gondolatmenetet nem.
+    #
+    # ADATVEDELEM: a `core_thesis` a szerzo allitasanak MODELL-ALTALI parafrazisa, nem
+    # a szo szerinti szovege — vagyis kevesbe erzekeny, mint a mar tarolt
+    # `post_excerpt`. A `missing_perspective` enum, az `insight` a sajat kimenetunk.
+    "insight", "core_thesis", "missing_perspective",
     # nyitas-rotacio
     "opening_shape", "opening_recent",
     # homerseklet
     "temperature", "reason_temperature", "compose_temperature",
     # minoseg
-    "authenticity_score", "authenticity_detail", "authenticity_min",
-    "quality_issues", "rewrites", "post_overlap", "ai_fingerprint_terms",
-    "confidence",
+    # (Az `authenticity_*` mezok 2026-08-10-en TOROLVE a rubrikaval egyutt: harom
+    # meres, harom 10/10 — nulla variancia. A REGI sorok tovabbra is tartalmazzak
+    # oket; a `schema` verzio alapjan kulonithetok el.)
+    "quality_issues", "quality_issues_first", "rewrites", "post_overlap",
+    "ai_fingerprint_terms", "confidence",
+    # F2 konkretsag-diagnosztika (2026-08-10) — meres, nem kapu
+    "concreteness",
+    # vendor-hirdetes kihagyasa (2026-08-10). A `skipped=True` sorokban nincs
+    # `reply_text`, de van `post_id` — igy szamolhato, milyen aranyban hagyunk ki.
+    "skipped", "skip_reason", "vendor_promotion", "promotion_evidence", "forced",
     # marka + kep
     "brand_mode", "brand_allowed", "brand_gate_reason",
     "image_attached", "image_role",

@@ -146,7 +146,7 @@ from google.genai import types
 
 from env_secrets import get_secret
 
-ENGINE_VERSION = "linkedin-tle-v5"
+ENGINE_VERSION = "linkedin-tle-v6"
 
 # --- Stage 4: strategiak -----------------------------------------------------
 # Pontosan EGY strategia valasztodik kommentenkent. A `directive` a compose-
@@ -495,6 +495,29 @@ HUMAN_TEMPERATURES = [
 
 _HUMAN_CENTERED_INTENTS = {"reflection", "personal_experience"}
 
+# Azok a DISKURZUS-SZINTEK, ahol a framework-reflex kapu mer (2026-08-10, user-dontes).
+#
+# MIERT KERULT BE A `management`: a 2026-08-10-i eles meres. A ragozas-javitas utan a
+# komment `['governance', 'consistency']`-t adott — KETTO uj, a szerzotol nem atvett
+# kifejezes, tehat a darabszam-feltetel teljesult —, a kapu megsem lepett be, mert a
+# szint `management` volt. A komment eppen az a "foundational governance" + "naming
+# conventions" reflex volt, amire ez a mechanizmus keszult, es amit a kulso pontozo
+# is kifogasolt ("consultant mode").
+#
+# MIERT MARAD KI A `business`: ha a szerzo MAR uzleti sikra tette a beszelgetest, ott
+# folytatni nem drift, hanem a beszelgetes kovetese — ezt a motor sajat terve mondja
+# ki (`_LEVEL_STRATEGY_BIAS['business']` MEG IS EMELI a business_impactet). Ott
+# kapuzni szembemenne a sajat dontesunkkel.
+#
+# MIERT ELEG a `>= 2` kuszob a `management` szinten is: a kapu csak azokat a
+# kifejezeseket szamolja, amiket a SZERZO NEM hasznalt (`ai_fingerprint_terms`
+# relativizal). Egy management-poszt szerzoje, aki maga beszel governance-rol, igy
+# eleve vedett — az o szavai nem szamolodnak. Ami szamol, azt a komment hozta be.
+#
+# VISSZAFORDITHATO: a hatas a telemetria `rewrites` es `quality_issues_first`
+# mezoibol merheto. Ha tul sok hamis pozitivot hoz, ez a halmaz egy sorban szűkul.
+_FINGERPRINT_LEVELS = {"technical", "management"}
+
 # A "Critical Principle" KODBAN. Lagy levonas helyett VETO — ld. a modul-
 # docstring 2. pontjat: a -2-es bias atengedi a 10-re pontozott business_impactet,
 # es pont ez volt a jelentett hiba.
@@ -662,12 +685,33 @@ Fill the JSON fields in this order:
 18. tool_request_quote — if explicit_tool_request is true, copy the EXACT words
     from the post that contain the request, verbatim, nothing else. Empty string
     if false. Do not paraphrase — the quote is verified against the post.
-19. insight — ONE original, specific claim that is NOT stated in the post and is
+19. vendor_promotion — true ONLY if this post is MARKETING MATERIAL published by
+    the seller of the product it promotes. The markers are register, not topic:
+    the brand written about in the third person, feature or integration counts
+    ("30+ integrations"), benefit claims ("nothing falls through the cracks"),
+    and a call to action ("stop coordinating around the chaos").
+    FALSE for a practitioner showing a tool they use, built or bought — even
+    enthusiastically, even naming the vendor. A person sharing their own work is
+    NOT vendor marketing. FALSE for a release note or version announcement made
+    by a practitioner. When genuinely unsure, answer false.
+20. promotion_evidence — if vendor_promotion is true, copy the EXACT words from
+    the post that make it marketing (the call to action or the benefit claim),
+    verbatim, nothing else. Empty string if false. Do not paraphrase — the quote
+    is verified against the post.
+21. insight — ONE original, specific claim that is NOT stated in the post and is
     not a restatement of it. This is the substance of the comment. Go deeper,
     not wider. No hedging, no generalities like "communication is important".
     The insight must sit at the `discourse_level` you reported above — on a
     technical post, a deeper technical claim, NOT a business consequence.
-20. confidence — 0.0-1.0, your confidence in this reasoning.
+    BE CONCRETE. Name the mechanism, the artefact, the phase or the discipline
+    where this bites — an IFC property set, a shared parameter GUID, a workset,
+    the handover, the MEP model. An insight that names only a CATEGORY ("teams
+    classify issues differently") is too vague; name the INSTANCE ("one team
+    logs a clash as an issue, the next logs it as an RFI").
+    The line: technical concreteness YES, invented project specifics NO. General
+    domain facts are fair; numbers, client names and anecdotes from projects you
+    cannot have seen are not.
+22. confidence — 0.0-1.0, your confidence in this reasoning.
 
 Hard rules:
 - Do NOT summarise the post anywhere.
@@ -709,6 +753,10 @@ _REASON_SCHEMA = {
         "strategy_reason": {"type": "STRING"},
         "explicit_tool_request": {"type": "BOOLEAN"},
         "tool_request_quote": {"type": "STRING"},
+        # Ugyanaz a minta, mint a tool_request: a modell ALLIT, a kod pedig az
+        # idezetet MEGKERESI a posztban (`_quote_in_post`) — zero-hallucination.
+        "vendor_promotion": {"type": "BOOLEAN"},
+        "promotion_evidence": {"type": "STRING"},
         "insight": {"type": "STRING"},
         "confidence": {"type": "NUMBER"},
     },
@@ -718,7 +766,8 @@ _REASON_SCHEMA = {
         "topic_gravity", "author_objective", "audience", "technical_depth",
         "emotional_tone", "core_thesis", "missing_perspective",
         "missing_perspective_reason", "strategy_fit", "strategy_reason",
-        "explicit_tool_request", "tool_request_quote", "insight", "confidence",
+        "explicit_tool_request", "tool_request_quote",
+        "vendor_promotion", "promotion_evidence", "insight", "confidence",
     ],
 }
 
@@ -1079,94 +1128,37 @@ Hard limits:
 - Do not reuse the author's distinctive phrasing; use your own words.
 - No marketing language. Nothing that sounds like selling.
 - Write in the SAME language as the post.
-
-AFTER writing the comment, score it on five axes, 0-2 each. Score the text you
-just wrote, honestly — a low score triggers one targeted rewrite, so an inflated
-score only produces a worse comment.
-- voice_professional: 2 = reads as a practitioner; 0 = reads as a consultant.
-- conversation_fit: 2 = answers the conversation the author started; 0 = answers
-  a different one.
-- one_step_insight: 2 = exactly one idea beyond the post; 0 = no new idea, or a
-  whole theory.
-- no_implementation_drift: 2 = NO drift, you stayed at the author's level;
-  0 = drifted into implementation, governance, architecture or transformation.
-  Higher is always better on every axis, including this one.
-- natural_language: 2 = plain professional speech; 0 = enterprise vocabulary the
-  author never used.
 """.strip()
 
-# --- Authenticity rubrika (2026-08-01) --------------------------------------
-# A munkaparancs "Authenticity Score"-ja MEGFORDITVA: a modell nem dont es nem ir
-# ujra sajat magatol — csak PONTOZ (szenzor), a kuszobot es az ujrairast a kod
-# vegzi (biro). Ez a projekt sajat elve (§4/16), es azert kell igy, mert:
-#   1. a COMPOSE strukturalt kimenetet ad `thinking_budget=0`-val, tehat nincs hol
-#      egy belso "self-check" kort futtatni — a modell egyszeruen kiirja a JSON-t;
-#   2. az LLM-nek feltett "eleg jo ez?" kerdesre a valasz gyakorlatilag mindig igen,
-#      ezert az onertekelesre alapozott ujrairas nem megbizhato kapu.
-# Amit a rubrika IGY is ad: a modell a vegleges szoveget ot MEGNEVEZETT tengely
-# szerint ujraolvassa a lezaras elott, es kapunk egy szamot, ami Zoltan kezi
-# benchmark-pontjaival korrelaltathato. A korrelacio maga a proba: ha nincs, a
-# rubrika torolheto (10 kimeneti token).
+# --- COMPOSE sema -----------------------------------------------------------
+# TOROLVE (2026-08-10): az Authenticity rubrika (ot 0-2-es onertekelo tengely).
 #
-# MINDEN tengelyen a NAGYOBB a jobb — a `no_implementation_drift` ezert van
-# tagadva megfogalmazva (a munkaparancs "Implementation Drift"-je forditott
-# iranyu lett volna, es az osszeg ertelmetlen).
-_AUTHENTICITY_DIMENSIONS = [
-    "voice_professional", "conversation_fit", "one_step_insight",
-    "no_implementation_drift", "natural_language",
-]
-AUTHENTICITY_MAX = 2 * len(_AUTHENTICITY_DIMENSIONS)      # 10
-
+# MIERT: harom eles meres, HAROM 10/10. A `no_implementation_drift` mindharom
+# esetben 2-t kapott — vagyis "nulla drift" —, kozben a harom komment sorrendben
+# ezt irta: "consultant mode"-ot kifogasolt kulso pontozo (88/100), "foundational
+# governance"-t es "naming conventions"-t, illetve "cultural willingness to embed
+# those capabilities into daily operations"-t. A rubrika tehat NEM gyengen
+# korrelalt: egyaltalan nem volt benne VARIANCIA. Egy mérőszám, ami mindig a
+# maximumot adja, definicio szerint nem tud rangsorolni.
+#
+# A 03-composer-spec (2026-08-01, "Nyitott kerdes") sajat feltetelt szabott:
+# "Az egyetlen valodi proba, hogy az authenticity_detail korrelal-e a kezi
+# benchmark-pontokkal. Ha nem, a rubrika torolheto." Ez a feltetel teljesult.
+#
+# MIT VESZTUNK: a modell a lezaras elott ot megnevezett tengely szerint
+# ujraolvasta a sajat szovegét. Harom meres alapjan ez az ujraolvasas semmit nem
+# fogott meg, tehat nem vesztes. Amit NYERUNK: ~10 kimeneti token/hivas, es egy
+# hamis biztonsagerzet eltunese — a 10/10 azt sugallta, hogy a komment rendben van.
+#
+# AMI A HELYERE LEP: a determinisztikus kapu (`check_quality`) es az F2
+# konkretsag-diagnosztika (`concreteness`). Mindketto MERT dolgokat mer, nem
+# onertekelest kér. A `linkedin.authenticity_min_score` amugy is 0 volt a
+# configban, tehat a kuszob mar nem is befolyasolta a kimenetet.
 _COMPOSE_SCHEMA = {
     "type": "OBJECT",
-    # A `comment` ELOL all: a modell a mar megirt szoveget pontozza, nem a
-    # semmit. A dict-sorrend szandekos.
-    "properties": {
-        "comment": {"type": "STRING"},
-        **{d: {"type": "INTEGER"} for d in _AUTHENTICITY_DIMENSIONS},
-    },
-    "required": ["comment", *_AUTHENTICITY_DIMENSIONS],
+    "properties": {"comment": {"type": "STRING"}},
+    "required": ["comment"],
 }
-
-
-def authenticity_score(out: dict) -> tuple[int | None, dict]:
-    """(osszeg vagy None, tengelyenkenti pontszamok) a COMPOSE valaszabol.
-
-    KET KULONBOZO HIBA, ket kulonbozo valasz — es ez MERT dontes:
-
-      RESZBEN hianyzo pontszam -> a hianyzo tengely 0. A modell nem tudja
-      megkerulni a kaput azzal, hogy a rossz tengelyt kihagyja.
-
-      TELJESEN hianyzo pontszam -> None, es a kapu KIHAGYJA a rubrikat. Ez nem
-      minosegi jel, hanem sema-/vezetekezesi hiba: ha 0-nak vennenk, MINDEN hivas
-      a kuszob ala esne, tehat mindegyik ujrairast kapna — a masodik hivas
-      ugyanugy nem adna pontszamot, tehat a plusz kor semmit nem javitana, csak
-      csendben megduplazna a compose-koltseget. Ezt a hibat a v2/v4 tesztek
-      stubjai fedtek fel (azok nem pontoznak), es eles uzemben ugyanigy jelentkezne
-      egy sema-valtozas utan.
-    """
-    per = {}
-    present = 0
-    for d in _AUTHENTICITY_DIMENSIONS:
-        raw = (out or {}).get(d)
-        if isinstance(raw, (int, float)):
-            present += 1
-            per[d] = max(0, min(2, int(raw)))
-        else:
-            per[d] = 0
-    if not present:
-        return None, per
-    return sum(per.values()), per
-
-
-def authenticity_min_score(config: dict) -> int:
-    """`linkedin.authenticity_min_score` — ez alatt egy celzott ujrairas. 0 = ki."""
-    raw = (config.get("linkedin", {}) or {}).get("authenticity_min_score", 8)
-    try:
-        value = int(raw)
-    except (TypeError, ValueError):
-        return 8
-    return value if 0 <= value <= AUTHENTICITY_MAX else 8
 
 # --- Stage 9: deterministikus quality gate ----------------------------------
 # Angol ES magyar mintak: a komment a poszt nyelven keszul (a nyelvi sodras
@@ -1222,6 +1214,38 @@ _STOCK_OPENING_PATTERNS: list[tuple[str, str]] = [
 # CSAK angolra mer, mert a magyar tipografiaban a gondolatjel legitim irasjel —
 # ugyanaz az elv, amiert az "architecture" sem kerult kemeny tiltolistara (egy
 # AEC-eszkozben az maga az iparag).
+# Hany mondatot tekintunk NYITASNAK (2026-08-10, user-dontes).
+#
+# A MERT HIBA: a mintak `^`-hoz kotottek `re.MULTILINE`-nal, ami SORkezdet, nem
+# MONDATkezdet. Egy eles generalas igy irt: "The challenge of disconnected tools is
+# a real one. We often see that even with integrated platforms..." — a sablonos
+# fordulat a MASODIK mondat elejen volt, ugyanabban a sorban, tehat a kapu nem
+# latta. Ugyanaz a mondat elso helyen viszont sertes volt.
+#
+# MIERT PONTOSAN KETTO, es miert nem "barmely mondatkezdet": ez a szabaly a
+# NYITASROL szol. Egy sablonos fordulat a 8. mondatban nem nyitasi hiba — ott a
+# serteés cimkéje ("ismetlodo nyitas") felrevezeto lenne, es atfedesbe kerulne az
+# `_AI_FINGERPRINT_PATTERNS`-szel, aminek eppen a regiszter a dolga. A ketto
+# megorzi a kodban mar dokumentalt szandekot is: "a kifejezes kesobbi, tartalmilag
+# indokolt hasznalata nem serul".
+_OPENING_SENTENCES = 2
+
+
+def _opening_window(text: str) -> list[str]:
+    """A komment elso `_OPENING_SENTENCES` mondata, kulon-kulon.
+
+    A nyitas-mintak `^`-hoz kotottek, ezert mondatonkent kell rajuk illeszteni —
+    igy a masodik mondat eleje is "kezdet". Mondathatar: irasjel + szokoz, VAGY
+    sortores (a bekezdeshatar is uj mondat).
+
+    Ismert korlat: a roviditesek ("e.g.", "vs.") hamis mondathatart adnak. Egy
+    ilyen tores legfeljebb egy plusz jelolt-mondatot ereszt be az ablakba, tehat
+    a hatas legrosszabb esetben is egy szűkebb/bővebb ablak, nem hibas sertes.
+    """
+    parts = re.split(r"(?<=[.!?])\s+|\n+", (text or "").strip())
+    return [p.strip() for p in parts if p.strip()][:_OPENING_SENTENCES]
+
+
 _EM_DASH_PATTERN = re.compile(r"[—]")
 
 # Csak a komment VEGEN vizsgaljuk: onmagukban ezek a szavak lehetnek igazak, de
@@ -1240,15 +1264,35 @@ _EFFICIENCY_ENDING_PATTERNS: list[tuple[str, str]] = [
 # OLYAN kifejezes viszont, amit a szerzo nem hasznalt, mar a megfigyelt
 # framework->process->governance reflex merheto jele. Ezert itt nem tiltott szavak,
 # hanem kontextushoz kotott lanc.
+#
+# RAGOZAS (2026-08-10): a lista eredetileg csak a SZOTARI ALAKOT kereste, a modell
+# viszont ragozva hasznalja ugyanazt a szot. A 2026-08-10-i benchmarkon mérve:
+# "standardizing" NEM egyezett a `standardi[sz]ation`-nel, "consistent" NEM
+# egyezett a `consistency`-vel, tehat a komment a teljes framework-szokincset
+# hasznalta, a kapu meg ures listat adott. A tovek most a kepzett alakokat is
+# fedik. A `\b`-hatarok maradnak: a reszszo-egyezes (pl. "inconsistent") nem cel.
 _AI_FINGERPRINT_PATTERNS: list[tuple[str, str]] = [
-    (r"\boperational efficiency\b", "operational efficiency"),
+    (r"\boperational(?:ly)? efficien(?:cy|t)\b", "operational efficiency"),
     (r"\bstructured process(?:es)?\b", "structured process"),
-    (r"\bgovernance\b", "governance"),
-    (r"\bstandardi[sz]ation\b", "standardisation"),
-    (r"\bconsistency\b", "consistency"),
-    (r"\benterprise adoption\b", "enterprise adoption"),
-    (r"\bstakeholder alignment\b", "stakeholder alignment"),
-    (r"\bframework\b", "framework"),
+    (r"\bgovern(?:ance|ing)\b", "governance"),
+    (r"\bstandardi[sz](?:ation|ations|ing|e|es|ed)\b", "standardisation"),
+    (r"\bconsisten(?:cy|cies|t|tly)\b", "consistency"),
+    (r"\benterprise(?:-wide)? adoption\b", "enterprise adoption"),
+    (r"\bstakeholders? align(?:ment|ed)\b", "stakeholder alignment"),
+    (r"\bframeworks?\b", "framework"),
+    # 2026-08-10, a NEGYEDIK eles futasbol. Mindketto ide kerul es nem a
+    # `_MARKETING_CLICHE_PATTERNS`-be, mert LEHET legitim hasznalatuk ("a mapping
+    # eleg robusztus, hogy tulelje az ujraepitest"), es a relativizalas + a
+    # legalabb-ketto kuszob pont ezt a hataresetet kezeli: ha a SZERZO hasznalta,
+    # nem szamol, es egyetlen elofordulas sem indit ujrairast.
+    #
+    # A "robust" onkritikus tetel: a 2026-08-10-i elso ertekelesemben a kulso spec
+    # lexikai tiltolistajat "2019-es AI-jelekkent" intéztem el, es strukturalis
+    # tellekre tereltem a figyelmet. A szo ezutan ELES kimenetben jelent meg
+    # ("robust BIM tools"), es egyetlen kapu sem fogta. A strukturalis tellek
+    # valosak — de a lexikai listat tul konnyen irtam le.
+    (r"\brobust(?:ly|ness)?\b", "robust"),
+    (r"\bleverag(?:e|es|ed|ing)\b", "leverage"),
 ]
 
 # --- Stage 9c: kepre hivatkozas (2026-07-31) --------------------------------
@@ -1281,28 +1325,63 @@ _BRAND_PATTERN = re.compile(r"\bnodu\b|\bnodu[ .-]?bridge\b", re.IGNORECASE)
 # csak olyan kifejezes van a listan, ami technikai kommentben nem fordul elo
 # ARTATLANUL. Ezert nincs itt "cost", "value", "efficiency", "time" — ezek egy
 # technikai kommentben teljesen legitimek ("the cost of remodelling the family").
+# RAGOZAS/SZAM (2026-08-10): ugyanaz az audit, mint az `_AI_FINGERPRINT_PATTERNS`-nel
+# — a tobbes szam es a kepzett alakok korabban kicsusztak ("competitive advantages",
+# "business cases"). A precizio-elv VALTOZATLAN: ide csak olyan kifejezes kerul,
+# ami technikai kommentben nem fordul elo artatlanul.
 _EXEC_ABSTRACTION_PATTERNS: list[tuple[str, str]] = [
     (r"\broi\b", "ROI"),
     (r"\breturn on investment\b", "ROI"),
     (r"\bmegter(?:ules|ülés)\b", "ROI (HU)"),
-    (r"\bcompetitive advantage\b", "versenyelony-keretezes"),
+    (r"\bcompetitive advantages?\b", "versenyelony-keretezes"),
     (r"\bversenyelony\b|\bversenyelőny\b", "versenyelony-keretezes (HU)"),
     (r"\bprofitabilit(?:y|ies)\b", "jovedelmezoseg-keretezes"),
     (r"\bjovedelmezoseg\b|\bjövedelmezőség\b", "jovedelmezoseg-keretezes (HU)"),
-    (r"\borganisational transformation\b|\borganizational transformation\b",
-     "szervezeti transzformacio"),
+    (r"\borgani[sz]ational transformations?\b", "szervezeti transzformacio"),
     (r"\bszervezeti (?:atalakulas|átalakulás|transzformacio|transzformáció)\b",
      "szervezeti transzformacio (HU)"),
-    (r"\bdigital transformation\b", "digitalis transzformacio"),
+    (r"\bdigital transformations?\b", "digitalis transzformacio"),
     (r"\bdigit(?:alis|ális) transzform(?:acio|áció)\b", "digitalis transzformacio (HU)"),
     (r"\btotal cost of ownership\b|\btco\b", "TCO"),
-    (r"\bbusiness case\b", "business case"),
+    (r"\bbusiness cases?\b", "business case"),
     (r"\bbottom line\b", "bottom line"),
     (r"\bstakeholder value\b|\bshareholder value\b", "stakeholder value"),
     (r"\bbusiness value\b", "business value"),
     (r"\buzleti ertek\b|\büzleti érték\b", "business value (HU)"),
     (r"\bc-level\b|\bexecutive buy-?in\b", "executive framing"),
     (r"\bbottom-?line impact\b", "bottom line"),
+]
+
+# --- Stage 9d: marketing-klise (2026-08-10) ---------------------------------
+# A 2026-08-10-i benchmarkon a komment ATVETTE a hirdetes regiszteret: "can truly
+# unlock its full potential". Ez a fordulat egyik meglevo listan sem volt.
+#
+# MIERT KULON LISTA es miert FELTETEL NELKUL mer: az `_AI_FINGERPRINT_PATTERNS`
+# szerzohoz relativizalt es csak technikai/emberkozpontu beszelgetesben, legalabb
+# KETTO talalatnal indit — a mert eset viszont `management` sikon volt, tehat ott
+# semmi nem fogta volna meg. Egy marketing-klise ellenben SEMMILYEN sikon nem jo
+# irás egy gyakorlo szakember kommentjeben, ezert ez a lista a
+# `_FORBIDDEN_PATTERNS`-hez hasonloan mindig mer.
+#
+# SZUK ES VEDHETO: csak olyan fordulat, ami tiszta toltelék. A legitim BIM-zsargon
+# (pl. "single source of truth", "pipeline", "architecture") SZANDEKOSAN kimarad —
+# ugyanaz az elv, amiert az "architecture" sem kerult kemeny tiltolistara.
+_MARKETING_CLICHE_PATTERNS: list[tuple[str, str]] = [
+    # 2026-08-10: az eredeti minta `unlock`-ot kovetelt ele, es a mert komment igy
+    # atment: "the full potential for risk mitigation can remain untapped". A puszta
+    # "full potential" onmagaban is toltelék — nincs olyan gyakorlo-komment, ami
+    # nyerne vele —, ezert az `unlock` mar nem feltetel.
+    (r"\bfull potential\b", "full potential"),
+    (r"\b(?:take|takes|taking) (?:it|this|things) to the next level\b", "next level"),
+    (r"\bgame[- ]chang(?:er|ing)\b", "game-changer"),
+    (r"\brevolutioni[sz](?:e|es|ing|ed)\b", "revolutionize"),
+    (r"\bseamless(?:ly)? integrat(?:e|es|ing|ed|ion)\b", "seamless integration"),
+    (r"\bbest[- ]in[- ]class\b", "best-in-class"),
+    (r"\bcutting[- ]edge\b", "cutting-edge"),
+    (r"\bleverag(?:e|es|ing) the (?:full )?power of\b", "leverage the power of"),
+    (r"\bempower(?:s|ing)? (?:teams|organi[sz]ations|users)\b", "empower teams"),
+    (r"\bteljes potencial(?:t|ját|jat)\b", "unlock full potential (HU)"),
+    (r"\bforradalmasit(?:ja|ani)\b|\bforradalmasít(?:ja|ani)\b", "revolutionize (HU)"),
 ]
 
 # Azok az intentek, ahol a munkaparancs KIFEJEZETTEN tiltja az uzleti keretezest,
@@ -1389,12 +1468,186 @@ def ai_fingerprint_terms(comment: str, post_text: str) -> list[str]:
             and not re.search(pattern, low_post, re.IGNORECASE)]
 
 
+# --- F2: konkretsag-diagnosztika (2026-08-10) --------------------------------
+# A MERT HIBA: a 2026-08-10-i benchmark kommentje "subtle variations in how they
+# classify issues, assign ownership, or define RFI types"-ot irt — ez KATEGORIA,
+# nem ESET. Egy gyakorlo szakember azt irja: "az egyik csapat clashkent naplozza,
+# a masik ugyanazt RFI-kent". A REASON-prompt kert konkretsagot ("no generalities"),
+# de SEMMI nem merte, es az authenticity-rubrika minden tengelyen 2/2-t adott —
+# nincs olyan tengelye, ami a homalyossagot latna.
+#
+# MIERT NINCS BELOLE KAPU, ES MIERT NINCS OSSZPONTSZAM
+# Az authenticity-rubrika tanulsaga (03-composer-spec, nyitott kerdes): egy
+# igazolatlan mérőszamra kapuzni annyi, mint ugy viselkedni, mintha tudnank valamit.
+# Ezert ez a harom szam CSAK a valaszban es a naploban jelenik meg, a dontest nem
+# befolyasolja. Osszpontszam SZANDEKOSAN nincs: egy kompozit szam azt sugallna, hogy
+# a sulyozas mar validalt. A harom komponenst kulon kell a benchmark-pontokkal
+# rangkorrelaltatni — az egyben megmutatja, MELYIK komponens jelez egyaltalan.
+#
+# Ha egyik sem korrelal, ez a blokk torolheto (nulla LLM-koltseg: tiszta regex).
+
+# Amit egy gyakorlo szakember MEGNEVEZ: formatum, eszkoz, artefaktum, diszciplina,
+# fazis. A lista nem teljes es nem is kell annak lennie — a HIANYA a jel.
+_CONCRETE_ANCHORS = [
+    # formatumok / adatcsere
+    "ifc", "ifc2x3", "ifc4", "bcf", "cobie", "gbxml", "dwg", "dxf", "rvt", "pln",
+    "nwd", "nwc", "ifczip", "landxml",
+    # eszkozok
+    "revit", "archicad", "navisworks", "solibri", "speckle", "grasshopper",
+    "dynamo", "rhino", "tekla", "bonsai", "ifcopenshell", "bimcollab", "revizto",
+    "aconex", "civil 3d", "vectorworks", "allplan",
+    # modell-artefaktumok
+    "family", "families", "shared parameter", "parameter", "guid", "workset",
+    "worksets", "worksharing", "schedule", "view template", "wall type",
+    "floor type", "property set", "pset", "ifc class", "classification",
+    "mapping table", "central model", "linked model", "type catalog",
+    "keynote", "level", "grid", "revision", "sheet",
+    # koordinacio-artefaktumok
+    "clash", "clashes", "rfi", "rfis", "snag", "snagging", "markup",
+    # diszciplinak
+    "mep", "structural", "architectural", "facade", "façade", "hvac",
+    "electrical", "plumbing", "ductwork", "rebar", "precast", "curtain wall",
+    # fazisok
+    "handover", "tender", "as-built", "commissioning", "lod", "loi",
+    "riba stage", "coordination meeting", "site survey",
+    # 2026-08-10: a hianyzo tetelek, amiket az eles posztok sajat szokincse mutatott
+    # meg. Mindegyik MEGNEVEZHETO artefaktum, eszkoz vagy metrika — pont az, amit egy
+    # gyakorlo ember kimond. A hianyuk ALULSZAMOLT, tehat a kesobbi korrelaciot is
+    # rontotta volna.
+    # SZANDEKOSAN KIMARAD a "naming convention": az egyik mert komment eppen
+    # consultant-nyelvkent hasznalta ("establishing strict naming conventions"),
+    # tehat horgonynak venni azt a kommentet JUTALMAZTA volna.
+    # Az atfedes elkerulve: "takeoff" (nem "quantity takeoff") es "execution plan"
+    # (nem "bim execution plan") — kulonben egy fogalom ket horgonynak szamolna.
+    "execution plan", "bep", "4d", "5d", "6d", "takeoff", "qa/qc",
+    "scan-to-bim", "lidar", "point cloud", "spi", "cpi", "power bi", "drone",
+    # HU
+    "atadas", "átadás", "kivitelezes", "kivitelezés", "tenderezes", "tenderezés",
+    "szerkezeti", "gepeszet", "gépészet", "homlokzat", "vasalas", "vasalás",
+]
+
+# Absztrakt fonevek: nem tiltottak, de a SURUSEGUK a homalyossag proxyja. A poszthoz
+# NEM relativizaljuk: ha a poszt absztrakt, a komment dolga akkor is a konkretsag.
+_ABSTRACT_TERMS = [
+    "coordination", "communication", "collaboration", "alignment", "process",
+    "processes", "workflow", "workflows", "efficiency", "quality", "transparency",
+    "visibility", "consistency", "standardisation", "standardization", "governance",
+    "strategy", "culture", "mindset", "ecosystem", "framework", "synergy",
+    "potential", "complexity", "challenge", "challenges", "solution", "solutions",
+    "approach", "insight", "insights", "stakeholder", "stakeholders", "adoption",
+    "maturity", "transformation", "silo", "silos", "protocol", "protocols",
+    "schema", "consensus", "interpretation", "platform", "capability",
+    "capabilities", "best practice", "value proposition",
+    # HU
+    "koordinacio", "koordináció", "kommunikacio", "kommunikáció", "folyamat",
+    "hatekonysag", "hatékonyság", "atlathatosag", "átláthatóság", "szemlelet",
+    "szemlélet", "megkozelites", "megközelítés", "kihivas", "kihívás",
+]
+
+# Bizonytalanito nyelv. A mert kommentben harom "often" volt 97 szoban — aki
+# konkret allitast tesz, nem hedge-el haromszor.
+_HEDGE_TERMS = [
+    "often", "frequently", "sometimes", "usually", "typically", "generally",
+    "many", "some", "several", "various", "certain", "subtle", "a bit",
+    "somewhat", "tend to", "tends to", "can be", "may be", "might be",
+    "in some cases", "more or less", "relatively",
+    # HU
+    "gyakran", "neha", "néha", "tobbnyire", "többnyire", "altalaban", "általában",
+    "nemileg", "némileg", "olykor", "bizonyos",
+]
+
+
+def _term_regex(term: str) -> str:
+    """Szo-hataros minta egy (akar tobbszavas) kifejezesre, rugalmas szokozzel.
+
+    Az UTOLSO szo tobbes szama is egyezik. Enelkul a mero rendszeresen ALULSZAMOL:
+    a 2026-08-10-i eles futasban a komment "property sets"-et irt, a lista pedig
+    "property set"-et keresett — a `set\\b` a "sets"-ben nem hatar, tehat a horgony
+    elveszett, es a mero 0 hozott horgonyt jelentett egy olyan kommentre, ami
+    tenylegesen megnevezett egyet. Egy alulszamolo diagnosztika a kesobbi
+    korrelaciot rontja el, ezert ez itt nem kozmetika.
+    """
+    parts = term.split()
+    head = [re.escape(p) for p in parts[:-1]]
+    last = re.escape(parts[-1]) + r"(?:e?s)?"
+    return r"\b" + r"\s+".join([*head, last]) + r"\b"
+
+
+def _found_terms(terms: list[str], text: str) -> list[str]:
+    low = (text or "").lower()
+    return [t for t in terms if re.search(_term_regex(t), low, re.IGNORECASE)]
+
+
+def _anchor_key(term: str) -> str:
+    """Egyes/tobbes szam osszevonasa a poszthoz valo relativizalashoz.
+
+    Enelkul hamis pozitiv keletkezik: a poszt "RFIs"-t ir, a komment "RFI"-t —
+    ket kulon listaelem, tehat az `rfi` "hozott" horgonynak szamitott volna,
+    holott a szerzo mar kimondta. A tobbes-s levagasa erre eleg; nem cel altalanos
+    stemmelés (a "clashes"/"clash" es a "families"/"family" is a listan van
+    kulon-kulon, tehat a kulcsuk igy egybeesik).
+    """
+    t = term.rstrip()
+    if t.endswith("ies") and len(t) > 4:
+        return t[:-3] + "y"
+    if t.endswith("es") and len(t) > 3:
+        return t[:-2]
+    if t.endswith("s") and len(t) > 2:
+        return t[:-1]
+    return t
+
+
+def concreteness(comment: str, post_text: str) -> dict:
+    """Harom fuggetlen homalyossag-proxy. DIAGNOSZTIKA — a kapu nem hasznalja.
+
+    anchors_added  — a komment altal HOZOTT konkret domain-elemek (a posztban nem
+                     szereplok). A relativizalas ugyanaz az elv, mint az
+                     `ai_fingerprint_terms`-nel: amit a szerzo mar kimondott, az
+                     nem a komment erdeme. TOBB = jobb.
+    abstract_terms — jelen levo absztrakt fonevek. TOBB = rosszabb.
+    hedges         — bizonytalanito fordulatok DARABSZAMA (nem tipusszam): a
+                     halmozas a jel, ezert minden elofordulas szamit. TOBB = rosszabb.
+    """
+    text, post = comment or "", post_text or ""
+    # DEDUP fogalmi kulcs szerint: a "clashes" szoveg egyszerre illeszkedik a lista
+    # "clash" ES "clashes" elemere, ami ket horgonynak szamitott volna egy fogalomra.
+    # A szamnak FOGALMAT kell mernie, nem szoalak-valtozatot.
+    seen, in_comment = set(), []
+    for t in _found_terms(_CONCRETE_ANCHORS, text):
+        key = _anchor_key(t)
+        if key not in seen:
+            seen.add(key)
+            in_comment.append(t)
+    # Egyes/tobbes-fuggetlen osszevetes a poszttal — ld. `_anchor_key`.
+    in_post_keys = {_anchor_key(t) for t in _found_terms(_CONCRETE_ANCHORS, post)}
+    added = [t for t in in_comment if _anchor_key(t) not in in_post_keys]
+
+    hedge_hits, hedge_terms = 0, []
+    low = text.lower()
+    for t in _HEDGE_TERMS:
+        n = len(re.findall(_term_regex(t), low, re.IGNORECASE))
+        if n:
+            hedge_hits += n
+            hedge_terms.append(f"{t}×{n}" if n > 1 else t)
+
+    abstract = _found_terms(_ABSTRACT_TERMS, text)
+    return {
+        "words": len(_words(text)),
+        "anchors_added": len(added),
+        "anchor_terms": added,
+        "anchors_shared_with_post": [t for t in in_comment
+                                     if _anchor_key(t) in in_post_keys],
+        "abstract_count": len(abstract),
+        "abstract_terms": abstract,
+        "hedges": hedge_hits,
+        "hedge_terms": hedge_terms,
+    }
+
+
 def check_quality(comment: str, post_text: str, brand_allowed: bool = False,
                   intent: str = "", discourse_level: str = "",
                   human_temperature: str = "",
-                  image_attached: bool = False,
-                  auth_score: int | None = None,
-                  auth_min: int = 0) -> list[str]:
+                  image_attached: bool = False) -> list[str]:
     """Stage 9 — deterministikus kapu. Visszaadja a KONKRET serteseket.
 
     A lista uressege a "mehet" jel. A hivo ezt a listat adja at az ujrairo
@@ -1407,9 +1660,21 @@ def check_quality(comment: str, post_text: str, brand_allowed: bool = False,
     viselkedest adja, tehat a regi hivasok valtozatlanul mukodnek.
 
     v3: aktiv Conversation Intent Layer mellett a sablonos nyitas/záras is
-    merheto; a framework-reflex csak technikai vagy emberkozpontu
-    beszelgetesben, es csak ket uj (a szerzotol nem atvett) kifejezesnel indit
-    ujrairast.
+    merheto; a framework-reflex `_FINGERPRINT_LEVELS`-en (technikai VAGY
+    management sik) es emberkozpontu beszelgetesben mer, es csak ket uj (a
+    szerzotol nem atvett) kifejezesnel indit ujrairast.
+
+    2026-08-10 (v5), ket user-dontes eles meres alapjan:
+      - a framework-reflex hatokore a `management` sikra is kiterjed
+        (`_FINGERPRINT_LEVELS`); a `business` szandekosan kimarad,
+      - a sablonos NYITAS az elso KET MONDATRA mer, nem csak sorelejere
+        (`_opening_window`),
+      - a marketing-klise (`_MARKETING_CLICHE_PATTERNS`) FELTETEL NELKUL mer.
+
+    2026-08-10: az `auth_score`/`auth_min` parameterek TOROLVE az Authenticity
+    rubrikaval egyutt (harom eles meres, harom 10/10 — nulla variancia). Innentol
+    a kapu KIZAROLAG merheto dolgokat mer, onertekelest nem hasznal. Reszletes
+    indoklas a `_COMPOSE_SCHEMA` felett.
 
     `image_attached` (2026-07-31): ha a REASON kepet is kapott, a kommentben a
     KEPRE hivatkozas sertes — az ilyen allitast kodban nem tudjuk ellenorizni.
@@ -1425,9 +1690,20 @@ def check_quality(comment: str, post_text: str, brand_allowed: bool = False,
         if re.search(pattern, low, re.IGNORECASE | re.MULTILINE):
             issues.append(f"tiltott fordulat ({label})")
 
+    # Marketing-klise: FELTETEL NELKUL mer, minden sikon es minden intenten —
+    # ld. `_MARKETING_CLICHE_PATTERNS`. A mert eset (`management` sik) pont azt
+    # mutatta, hogy a szinthez kotott kapuk itt nem segitenek.
+    for pattern, label in _MARKETING_CLICHE_PATTERNS:
+        if re.search(pattern, low, re.IGNORECASE | re.MULTILINE):
+            issues.append(f"marketing-klise ({label})")
+
     if shaping_active:
+        # Az ELSO KET MONDATRA merunk, nem csak sorelejere — ld. `_opening_window`.
+        # A mintak `^`-hoz kotottek, ezert mondatonkent illesztunk; MULTILINE itt
+        # mar nem kell, mert egy ablak-elem sosem tartalmaz sortorest.
+        window = _opening_window(text)
         for pattern, label in _STOCK_OPENING_PATTERNS:
-            if re.search(pattern, text, re.IGNORECASE | re.MULTILINE):
+            if any(re.search(pattern, s, re.IGNORECASE) for s in window):
                 issues.append(label)
 
         tail = low[-220:]
@@ -1449,9 +1725,13 @@ def check_quality(comment: str, post_text: str, brand_allowed: bool = False,
     # framework-lanc. `human_temperature` a hivasi szerzodes resze es a jovo
     # finomitast tamogatja; az intent eleg a determinisztikus scope-hoz.
     fingerprint = ai_fingerprint_terms(text, post_text)
-    if ((discourse_level == "technical") or
+    if ((discourse_level in _FINGERPRINT_LEVELS) or
             (intent in _HUMAN_CENTERED_INTENTS)) and len(fingerprint) >= 2:
-        issues.append(f"AI-ujjlenyomat / framework-reflex ({', '.join(fingerprint[:3])})")
+        # A cimke "AI-ujjlenyomat" prefixe SZANDEKOSAN valtozatlan (tesztek erre
+        # illesztenek); a masodik fele viszont mar "enterprise-regiszter", mert a
+        # lista 2026-08-10 ota tulmutat a framework->process->governance klaszteren
+        # (`robust`, `leverage`).
+        issues.append(f"AI-ujjlenyomat / enterprise-regiszter ({', '.join(fingerprint[:3])})")
 
     # Kep-hivatkozas: csak akkor mer, ha tenylegesen volt kep. A kep besorolasi
     # kontextus — amit csak azon lattunk, az nem allithato egy nyilvanos
@@ -1484,12 +1764,6 @@ def check_quality(comment: str, post_text: str, brand_allowed: bool = False,
         leaked = [p for p in _FRAMING_PHRASES if p in low]
         if leaked:
             issues.append(f"angol frazis nem-angol kommentben ({leaked[0]})")
-
-    # Authenticity-rubrika: a modell PONTOZ, a kuszob a KODBAN van. auth_min=0
-    # kikapcsolja, es a regi (parameter nelkuli) hivasok igy valtozatlanok.
-    if auth_min and auth_score is not None and auth_score < auth_min:
-        issues.append(f"authenticity-pontszam {auth_score}/{AUTHENTICITY_MAX} "
-                      f"(min {auth_min})")
 
     # Gondolatjel csak ANGOL kommentben (ld. `_EM_DASH_PATTERN`).
     if looks_english(post_text) and _EM_DASH_PATTERN.search(text):
@@ -1781,6 +2055,49 @@ def brand_mention_allowed(config: dict, reasoning: dict,
     return True, f"kifejezett eszkoz-kerdes, igazolt idezet, tema={topic}"
 
 
+def skip_vendor_promotion_enabled(config: dict) -> bool:
+    """`linkedin.skip_vendor_promotion`: on (default) | off. YAML-boolean (§4/17)."""
+    raw = (config.get("linkedin", {}) or {}).get("skip_vendor_promotion", "on")
+    if isinstance(raw, bool):
+        return raw
+    return str(raw).strip().lower() not in ("off", "false", "0", "no", "none")
+
+
+def vendor_promotion_skip(config: dict, reasoning: dict,
+                          post_text: str) -> tuple[bool, str]:
+    """Ki kell-e hagyni ezt a posztot? (skip, indok)
+
+    USER-DONTES (2026-08-10): vendor-hirdetes ALATT nem akarunk megjelenni. Az
+    indok nem stilisztikai, hanem uzleti: egy erdemi komment (a) ingyen
+    engagementet ad a hirdetesnek (a LinkedIn kommentszam szerint rangsorol),
+    (b) a szerzot azza teszi, aki egy SZOMSZEDOS versenytars marketingje alatt
+    finoman ellenvetést tesz.
+
+    MIERT NEM ELEG a `conversation_intent == product_demonstration`: az intent
+    definicioja szerint "their own or someone else's" — vagyis egy gyakorlo
+    szakember is ide esik, aki a sajat epitett eszkozet mutatja meg. Az PONT olyan
+    poszt, amire VALASZOLNI akarunk. A kettot csak a REGISZTER valasztja el, ezert
+    kell hozza sajat mezo.
+
+    HAROM KAPU, ugyanaz a minta, mint a `brand_mention_allowed`-nal:
+      1. a kapcsolo be van kapcsolva,
+      2. a modell `vendor_promotion`-t allit,
+      3. az idezet ELLENORIZHETOEN szerepel a posztban (zero-hallucination) —
+         a modell "ez hirdetes" allitasat nem fogadjuk el szavara, mert a
+         kovetkezmeny az, hogy EGYALTALAN nem generalunk kommentet.
+    """
+    if not skip_vendor_promotion_enabled(config):
+        return False, "skip_vendor_promotion=off"
+    if not reasoning.get("vendor_promotion"):
+        return False, "nem vendor-hirdetes"
+
+    quote = reasoning.get("promotion_evidence", "")
+    if not _quote_in_post(quote, post_text):
+        return False, f"vendor-hirdetesnek jelolve, de az idezet nem talalhato a posztban ({quote[:60]!r})"
+
+    return True, f"vendor-hirdetes, igazolt idezet: {quote[:80]!r}"
+
+
 def _compose_user_msg(post_text: str, author_line: str, reasoning: dict,
                       brand_allowed: bool, issues: list[str] | None = None,
                       intent_layer: bool = True, opening: str = "") -> str:
@@ -1911,7 +2228,8 @@ def _compose_user_msg(post_text: str, author_line: str, reasoning: dict,
 def generate_comment(config: dict, post_text: str, author_name: str = "",
                      author_role: str = "",
                      image_bytes: bytes | None = None,
-                     image_mime: str = "image/jpeg") -> dict:
+                     image_mime: str = "image/jpeg",
+                     force: bool = False) -> dict:
     """A motor NYILVANOS belepesi pontja: `_generate_comment` + telemetria.
 
     Miert wrapper es nem a nagy fuggveny vegen egy sor: a `_generate_comment` HAT
@@ -1927,7 +2245,8 @@ def generate_comment(config: dict, post_text: str, author_name: str = "",
 
     started = time.monotonic()
     result = _generate_comment(config, post_text, author_name, author_role,
-                               image_bytes=image_bytes, image_mime=image_mime)
+                               image_bytes=image_bytes, image_mime=image_mime,
+                               force=force)
     record(config, result, post_text,
            elapsed_ms=int((time.monotonic() - started) * 1000))
     return result
@@ -1936,7 +2255,8 @@ def generate_comment(config: dict, post_text: str, author_name: str = "",
 def _generate_comment(config: dict, post_text: str, author_name: str = "",
                       author_role: str = "",
                       image_bytes: bytes | None = None,
-                      image_mime: str = "image/jpeg") -> dict:
+                      image_mime: str = "image/jpeg",
+                      force: bool = False) -> dict:
     """
     Thought Leadership Engine — teljes pipeline egy LinkedIn-poszthoz.
 
@@ -1973,7 +2293,6 @@ def _generate_comment(config: dict, post_text: str, author_name: str = "",
     temp = temperature(config)
     reason_temp = stage_temperature(config, "reason")
     compose_temp = stage_temperature(config, "compose")
-    auth_min = authenticity_min_score(config)
     use_image = bool(image_bytes) and intent_layer and image_input_enabled(config)
     if image_bytes and not use_image:
         why = ("linkedin.image_input=off" if not image_input_enabled(config)
@@ -2040,6 +2359,40 @@ def _generate_comment(config: dict, post_text: str, author_name: str = "",
           + (f" | vetozott={sorted(strategy_vetoed)}" if strategy_vetoed else "")
           + ("" if intent_layer else " | INTENT LAYER KIKAPCSOLVA"))
 
+    # --- Stage 5.5: vendor-hirdetes -> KIHAGYAS (2026-08-10) ---
+    # A COMPOSE ELE kerul, mert ha kihagyjuk, a masodik hivast MEG SEM inditjuk:
+    # egy meg nem szuletett kommentert nem fizetunk. A `force` a UI "Megis
+    # generalj" gombja — a dontes ajanlas, nem tilalom.
+    skip, skip_reason = vendor_promotion_skip(config, reasoning, post_text)
+    if skip and not force:
+        print(f"[linkedin-tle] KIHAGYVA: {skip_reason}")
+        return {
+            "skipped": True,
+            "skip_reason": skip_reason,
+            # A legacy mezok jelen vannak, hogy a dashboard-szerzodes ne toljon
+            # el; a UI a `skipped` flaget vizsgalja eloszor.
+            "topic": reasoning.get("topic", "general"),
+            "post_type": reasoning.get("post_type", "general"),
+            "engagement_intent": "", "reply_style": "", "brand_mode": "none",
+            "confidence": reasoning.get("confidence", 0.0),
+            "reply_text": "", "rationale": skip_reason,
+            "engine": ENGINE_VERSION,
+            "conversation_intent": intent,
+            "conversation_intent_label": CONVERSATION_INTENTS[intent]["label"],
+            "discourse_level": level,
+            "vendor_promotion": True,
+            "promotion_evidence": reasoning.get("promotion_evidence", ""),
+            "core_thesis": reasoning.get("core_thesis", ""),
+            "author_objective": reasoning.get("author_objective", ""),
+            "technical_depth": reasoning.get("technical_depth", ""),
+            "topic_gravity": reasoning.get("topic_gravity", ""),
+            "reason_temperature": reason_temp,
+            "compose_temperature": compose_temp,
+            "temperature": temp,
+        }
+    if skip and force:
+        print(f"[linkedin-tle] vendor-hirdetes, de FORCE: {skip_reason}")
+
     # Markaemlites: a POSZT tulajdonsaga, nem globalis beallitas (ld.
     # brand_mention_allowed). Az idezetet ellenorizzuk a posztban.
     brand_allowed, brand_reason = brand_mention_allowed(config, reasoning, post_text)
@@ -2057,7 +2410,11 @@ def _generate_comment(config: dict, post_text: str, author_name: str = "",
 
     # --- Stage 6-7: compose, + Stage 9: kapu, legfeljebb egy ujrairassal ---
     comment, issues, rewrites = "", ["nem futott le"], 0
-    auth_total, auth_per = None, {d: 0 for d in _AUTHENTICITY_DIMENSIONS}
+    # Az ELSO kor sertesei kulon. A telemetria eddig csak a VEGSO `quality_issues`-t
+    # naplozta (ures = atengedve), tehat egy `rewrites: 1`-es sornal nem lehetett
+    # megtudni, MI valtotta ki az ujrairast — a 2026-08-10-i naplo-elemzes talalta
+    # meg ezt a hianyt. A javito kort igy visszamenoleg is meg lehet magyarazni.
+    issues_first: list[str] = []
     for attempt in range(2):
         # A nyitas-forma az ujrairo korben is UGYANAZ: az ujrairas a kapu konkret
         # serteseit javitja, nem a retorikai formát valtoztatja. Uj forma itt
@@ -2074,7 +2431,6 @@ def _generate_comment(config: dict, post_text: str, author_name: str = "",
             print(f"[linkedin-tle] compose HIBA: {e}")
             return {"error": f"Gemini API hiba (compose): {e}"}
         comment = _normalise(((out or {}).get("comment") or ""))
-        auth_total, auth_per = authenticity_score(out or {})
         # A kapu csak akkor meri az absztrakcio-szivargast, ha a layer be van
         # kapcsolva — kikapcsolva a v1-es kapu fut.
         issues = check_quality(
@@ -2083,8 +2439,9 @@ def _generate_comment(config: dict, post_text: str, author_name: str = "",
             discourse_level=level if intent_layer else "",
             human_temperature=human_temperature if intent_layer else "",
             image_attached=use_image,
-            auth_score=auth_total, auth_min=auth_min,
         )
+        if attempt == 0:
+            issues_first = list(issues)
         if not issues:
             break
         rewrites = attempt + 1
@@ -2152,19 +2509,24 @@ def _generate_comment(config: dict, post_text: str, author_name: str = "",
         "strategy_fit": reasoning.get("strategy_fit", {}),   # auditalhato dontes
         "explicit_tool_request": bool(reasoning.get("explicit_tool_request")),
         "tool_request_quote": reasoning.get("tool_request_quote", ""),
+        # Vendor-hirdetes: ide csak ugy jutunk, hogy NEM hagytuk ki (vagy force).
+        "skipped": False,
+        "vendor_promotion": bool(reasoning.get("vendor_promotion")),
+        "promotion_evidence": reasoning.get("promotion_evidence", ""),
+        "skip_reason": skip_reason,
+        "forced": bool(skip and force),
+        # F2 konkretsag-diagnosztika — a kapu NEM hasznalja, csak merjuk (ld.
+        # `concreteness`). Osszpontszam szandekosan nincs.
+        "concreteness": concreteness(comment, post_text),
         "brand_allowed": brand_allowed,
         "brand_gate_reason": brand_reason,
         "author_objective": reasoning.get("author_objective", ""),
         "audience": reasoning.get("audience", ""),
         "technical_depth": reasoning.get("technical_depth", ""),
         "quality_issues": issues,          # ures = a kapu atengedte
-        # Authenticity-rubrika: a modell pontszamai + a KODBELI kuszob, hogy a
-        # dontes utolag megmagyarazhato es a kezi benchmark-pontokkal
-        # korrelaltathato legyen.
-        "authenticity_score": auth_total,
-        "authenticity_max": AUTHENTICITY_MAX,
-        "authenticity_min": auth_min,
-        "authenticity_detail": auth_per,
+        # Az ELSO kor sertesei: `rewrites >= 1` eseten ez mondja meg, MIERT kellett
+        # ujrairni. Enelkul a naploban csak az latszott, hogy volt egy plusz kor.
+        "quality_issues_first": issues_first,
         # `temperature` a BAZIS-ertek (visszafele-kompatibilis mezo); a ket hivas
         # tenyleges homerseklete a ket uj, additiv mezoben van — igy utolag
         # megmagyarazhato, melyik lepes min futott.

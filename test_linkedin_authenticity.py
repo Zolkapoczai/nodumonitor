@@ -37,10 +37,9 @@ def check(name, cond, detail=""):
 
 import responder.linkedin_engine as eng  # noqa: E402
 from responder.linkedin_engine import (  # noqa: E402
-    _AUTHENTICITY_DIMENSIONS, AUTHENTICITY_MAX, _COMPOSE_SCHEMA, _COMPOSE_PROMPT,
+    _COMPOSE_SCHEMA, _COMPOSE_PROMPT,
     _STOCK_OPENING_PATTERNS, _EM_DASH_PATTERN, DEFAULT_MODEL,
-    authenticity_score, authenticity_min_score, temperature, check_quality,
-    linkedin_model, looks_english,
+    temperature, check_quality, linkedin_model, looks_english,
 )
 
 POST = "How do you keep shared parameters aligned across linked Revit models?"
@@ -52,76 +51,46 @@ GOOD = ("I've run into this mostly at handover rather than during authoring. The
         "the drift only becomes visible weeks later when a schedule stops matching.")
 
 
-# --- A) rubrika ------------------------------------------------------------
-check("A1 ot tengely, mind a semaban ES kotelezo",
-      len(_AUTHENTICITY_DIMENSIONS) == 5
-      and all(d in _COMPOSE_SCHEMA["properties"] and d in _COMPOSE_SCHEMA["required"]
-              for d in _AUTHENTICITY_DIMENSIONS))
-check("A2 a comment ELOL all (a modell a mar megirt szoveget pontozza)",
-      list(_COMPOSE_SCHEMA["properties"])[0] == "comment")
-check("A3 a maximum 10", AUTHENTICITY_MAX == 10)
-check("A4 minden tengely NAGYOBB=JOBB iranyu (a drift tagadva van megfogalmazva)",
-      "no_implementation_drift" in _AUTHENTICITY_DIMENSIONS
-      and "implementation_drift" not in _AUTHENTICITY_DIMENSIONS)
-check("A5 a prompt kimondja, hogy a 2 jelenti a NINCS driftet",
-      "2 = NO" in _COMPOSE_PROMPT and "Higher is always better" in _COMPOSE_PROMPT)
+# --- A) a rubrika TOROLVE (2026-08-10) --------------------------------------
+# A 2026-08-01-i bevezetes sajat feltetelt szabott: "az egyetlen valodi proba, hogy
+# korrelal-e a kezi benchmark-pontokkal. Ha nem, torolheto." HAROM eles meres, HAROM
+# 10/10 — a `no_implementation_drift` mindharomszor 2 ("nulla drift"), kozben a
+# harom komment "consultant mode"-ot, "foundational governance"-t es "cultural
+# willingness to embed those capabilities"-t irt. Nem gyenge korrelacio: NULLA
+# VARIANCIA. Ez a szekcio azt orzi, hogy a rubrika ne szivarogjon vissza csendben.
+_AXES = ("voice_professional", "conversation_fit", "one_step_insight",
+         "no_implementation_drift", "natural_language")
 
-full, per = authenticity_score({d: 2 for d in _AUTHENTICITY_DIMENSIONS})
-check("A6 teli pontszam 10", full == 10 and all(v == 2 for v in per.values()))
-low, _ = authenticity_score({d: 1 for d in _AUTHENTICITY_DIMENSIONS})
-check("A7 kozepes pontszam 5", low == 5)
-# A8/A8.1 — KET kulonbozo hiba, ket kulonbozo valasz:
-#   teljesen hianyzo pontszam = sema-/vezetekezesi hiba -> None, a kapu kihagyja
-#     (0-nak venni azt jelentene, hogy MINDEN hivas ujrairast kap, es a masodik kor
-#      ugyanugy nem pontozna -> csendes koltseg-duplazas)
-#   reszben hianyzo = minosegi jel -> a hianyzo tengely 0, a kapu mer
-miss, _ = authenticity_score({})
-check("A8 TELJESEN hianyzo pontszam -> None (a kapu kihagyja, nem 0)", miss is None)
-part, pper = authenticity_score({"voice_professional": 2, "conversation_fit": 2})
-check("A8.1 RESZBEN hianyzo -> a hianyzo tengely 0, es MER",
-      part == 4 and pper["one_step_insight"] == 0, str(part))
-check("A8.2 igy a modell nem kerulheti meg a kaput a rossz tengely kihagyasaval",
-      part < 8)
-clamp, cper = authenticity_score({d: 9 for d in _AUTHENTICITY_DIMENSIONS})
-check("A9 a 2 feletti ertek levagva (nem lehet 45 pont)",
-      clamp == 10 and all(v == 2 for v in cper.values()))
-neg, _ = authenticity_score({d: -3 for d in _AUTHENTICITY_DIMENSIONS})
-check("A10 negativ ertek 0-ra vagva", neg == 0)
-junk, _ = authenticity_score({d: "sok" for d in _AUTHENTICITY_DIMENSIONS})
-check("A11 csak nem-szam ertekek -> None (ugyanaz, mint a teljes hianyzas)",
-      junk is None)
-mixed, _ = authenticity_score({"voice_professional": 2, "conversation_fit": "sok",
-                               "one_step_insight": 2, "no_implementation_drift": 2,
-                               "natural_language": 2})
-check("A11.1 egy nem-szam a tobbi kozott -> az a tengely 0, es MER",
-      mixed == 8, str(mixed))
+check("A1 a COMPOSE-sema CSAK a kommentet keri",
+      list(_COMPOSE_SCHEMA["properties"]) == ["comment"]
+      and _COMPOSE_SCHEMA["required"] == ["comment"],
+      str(_COMPOSE_SCHEMA))
+check("A2 egyetlen tengely sem maradt a semaban",
+      not any(a in _COMPOSE_SCHEMA["properties"] for a in _AXES))
+check("A3 a prompt MAR NEM ker onertekelest",
+      "score it on five axes" not in _COMPOSE_PROMPT
+      and "Higher is always better" not in _COMPOSE_PROMPT
+      and not any(a in _COMPOSE_PROMPT for a in _AXES))
+check("A4 a modul mar nem exportalja a rubrika szimbolumait",
+      not any(hasattr(eng, n) for n in
+              ("_AUTHENTICITY_DIMENSIONS", "AUTHENTICITY_MAX",
+               "authenticity_score", "authenticity_min_score")),
+      str([n for n in ("_AUTHENTICITY_DIMENSIONS", "AUTHENTICITY_MAX",
+                       "authenticity_score", "authenticity_min_score")
+           if hasattr(eng, n)]))
 
-check("A12 kuszob default 8", authenticity_min_score({}) == 8)
-check("A13 0 = kikapcsolva",
-      authenticity_min_score({"linkedin": {"authenticity_min_score": 0}}) == 0)
-check("A14 ertelmetlen kuszob -> 8",
-      authenticity_min_score({"linkedin": {"authenticity_min_score": "nyolc"}}) == 8
-      and authenticity_min_score({"linkedin": {"authenticity_min_score": 99}}) == 8)
+import inspect  # noqa: E402
 
-check("B0 alacsony pontszam SERTES a kapuban",
-      any("authenticity-pontszam" in i for i in
-          check_quality(GOOD, POST, False, "engineering_problem", "technical",
-                        auth_score=5, auth_min=8)),
-      str(check_quality(GOOD, POST, False, "engineering_problem", "technical",
-                        auth_score=5, auth_min=8)))
-check("B0.1 eleg magas pontszam nem sertes",
-      not any("authenticity-pontszam" in i for i in
-              check_quality(GOOD, POST, False, "engineering_problem", "technical",
-                            auth_score=9, auth_min=8)))
-check("B0.2 auth_min=0 -> a kapu NEM meri (kikapcsolhato)",
-      not any("authenticity-pontszam" in i for i in
-              check_quality(GOOD, POST, False, "engineering_problem", "technical",
-                            auth_score=0, auth_min=0)))
-check("B0.4 auth_score=None -> a kapu kihagyja (sema-hiba, nem minosegi jel)",
-      not any("authenticity-pontszam" in i for i in
-              check_quality(GOOD, POST, False, "engineering_problem", "technical",
-                            auth_score=None, auth_min=8)))
-check("B0.3 a regi, parameter nelkuli hivas valtozatlan",
+_sig = inspect.signature(check_quality)
+check("A5 a check_quality mar nem vesz auth_score/auth_min parametert",
+      not any(p in _sig.parameters for p in ("auth_score", "auth_min")),
+      str(list(_sig.parameters)))
+check("A6 a kapu semmilyen bemenetre nem ad authenticity-sertest",
+      not any("authenticity" in i for i in
+              check_quality(GOOD, POST, False, "engineering_problem", "technical")))
+check("A7 a REGI config-kulcs jelenlete nem tor el semmit (figyelmen kivul marad)",
+      temperature({"linkedin": {"authenticity_min_score": 8, "temperature": 0.4}}) == 0.4)
+check("A8 a parameter nelkuli hivas valtozatlanul atmegy",
       check_quality(GOOD, POST, False, "engineering_problem", "technical") == [],
       str(check_quality(GOOD, POST, False, "engineering_problem", "technical")))
 
@@ -312,8 +281,16 @@ REASON_OUT = {
     "confidence": 0.8,
 }
 
+REASON_OUT["vendor_promotion"] = False
+REASON_OUT["promotion_evidence"] = ""
+
 calls = []
-SCORES = [3, 10]          # elso kor: 3/10 -> ujrairas; masodik kor: 10/10 -> mehet
+# Az ujrairast mostantol VALODI kapu-sertes valtja ki, nem onertekelés: az elso
+# kor marketing-kliset tartalmaz (`game-changer`), a masodik tiszta.
+BAD_FIRST = "This is a game-changer for the whole industry. " + GOOD
+# A fake EBBOL a sorbol ad vissza, korönként. Futasonkent EXPLICITEN allitjuk be —
+# egy futas-fuggetlen szamlalo korabban a masodik futasra is a rossz valtozatot adta.
+compose_outputs: list[str] = []
 
 
 class _FakeResp:
@@ -323,19 +300,17 @@ class _FakeResp:
 
 class _FakeModels:
     def generate_content(self, model=None, contents=None, config=None):
-        wants_reason = "strategy_fit" in (config.response_schema or {}).get("properties", {})
+        schema = config.response_schema or {}
+        props = schema.get("properties", {})
+        wants_reason = "strategy_fit" in props
         calls.append({"stage": "reason" if wants_reason else "compose",
-                      "temperature": getattr(config, "temperature", None)})
+                      "temperature": getattr(config, "temperature", None),
+                      "schema_props": list(props)})
         if wants_reason:
             return _FakeResp(_json.dumps(REASON_OUT))
         n = sum(1 for c in calls if c["stage"] == "compose") - 1
-        s = SCORES[min(n, len(SCORES) - 1)]
-        per = {d: (2 if s == 10 else 0) for d in _AUTHENTICITY_DIMENSIONS}
-        if s == 3:
-            per["voice_professional"] = 1
-            per["conversation_fit"] = 1
-            per["natural_language"] = 1
-        return _FakeResp(_json.dumps({"comment": GOOD, **per}))
+        return _FakeResp(_json.dumps(
+            {"comment": compose_outputs[min(n, len(compose_outputs) - 1)]}))
 
 
 class _FakeClient:
@@ -345,35 +320,42 @@ class _FakeClient:
 _real = eng._client
 eng._client = lambda config: (_FakeClient(), "gemini-2.5-flash", None)
 try:
-    res = eng.generate_comment({"linkedin": {"temperature": 0.3,
-                                             "authenticity_min_score": 8}}, POST)
+    eng._recent_openings.clear()
+    compose_outputs[:] = [BAD_FIRST, GOOD]          # 1. kor sertes -> ujrairas
+    res = eng.generate_comment({"linkedin": {"temperature": 0.3}}, POST)
     calls_scored = list(calls)
     calls.clear()
-    res_off = eng.generate_comment({"linkedin": {"authenticity_min_score": 0,
-                                                 "temperature": "default"}}, POST)
+    eng._recent_openings.clear()
+    compose_outputs[:] = [GOOD]                      # mar az 1. kor tiszta
+    res_off = eng.generate_comment({"linkedin": {"temperature": "default"}}, POST)
     calls_off = list(calls)
 finally:
     eng._client = _real
+    eng._recent_openings.clear()
 
 check("F1 nincs hiba", "error" not in res, str(res.get("error", "")))
-check("F2 az alacsony pontszam PONTOSAN EGY ujrairast valtott ki (1 reason + 2 compose)",
+check("F2 a KAPU-SERTES pontosan EGY ujrairast valtott ki (1 reason + 2 compose)",
       len(calls_scored) == 3 and [c["stage"] for c in calls_scored]
       == ["reason", "compose", "compose"], str([c["stage"] for c in calls_scored]))
 check("F3 az ujrairas utan a kapu atengedte", res.get("quality_issues") == [],
       str(res.get("quality_issues")))
-check("F4 a vegso pontszam es a kuszob a valaszban van",
-      res.get("authenticity_score") == 10 and res.get("authenticity_min") == 8
-      and res.get("authenticity_max") == 10)
-check("F5 a tengelyenkenti bontas is visszajon (korrelaltathato a kezi ponttal)",
-      isinstance(res.get("authenticity_detail"), dict)
-      and set(res["authenticity_detail"]) == set(_AUTHENTICITY_DIMENSIONS))
+check("F4 az ELSO kor sertese naplozva van (megmagyarazza az ujrairast)",
+      any("marketing-klise" in i for i in (res.get("quality_issues_first") or [])),
+      str(res.get("quality_issues_first")))
+check("F5 a valaszban NINCS egyetlen authenticity-mezo sem",
+      not any(k.startswith("authenticity") for k in res),
+      str([k for k in res if k.startswith("authenticity")]))
+check("F5.1 BEKOTVE: a COMPOSE-hivas semaja CSAK a kommentet keri",
+      all(c["schema_props"] == ["comment"]
+          for c in calls_scored if c["stage"] == "compose"),
+      str([c["schema_props"] for c in calls_scored if c["stage"] == "compose"]))
 check("F6 a temperature MINDKET hivasba atmegy",
       all(c["temperature"] == 0.3 for c in calls_scored), str(calls_scored))
 check("F7 a temperature a valaszban is szerepel (auditalhato)",
       res.get("temperature") == 0.3)
 check("F8 rewrites=1 az ujrairas miatt", res.get("rewrites") == 1, str(res.get("rewrites")))
 
-check("F9 kikapcsolt kuszob -> NINCS ujrairas a pontszam miatt (1 reason + 1 compose)",
+check("F9 tiszta elso kor -> NINCS ujrairas (1 reason + 1 compose)",
       len(calls_off) == 2, str([c["stage"] for c in calls_off]))
 check("F10 'default' temperature -> nem allitjuk be (API-default)",
       all(c["temperature"] is None for c in calls_off)

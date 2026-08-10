@@ -522,6 +522,9 @@ def linkedin_compose():
         author_name=(data.get("author_name") or "").strip(),
         author_role=(data.get("author_role") or "").strip(),
         image_bytes=image_bytes,
+        # `force`: a UI "Megis generalj" gombja vendor-hirdetes eseten. A kihagyas
+        # AJANLAS, nem tilalom — a vegso szot a felhasznalo mondja ki.
+        force=bool(data.get("force")),
     )
     if not result:
         return jsonify({"ok": False, "error": "Nem sikerült. Be van kapcsolva a Gemini API az Adminban?"})

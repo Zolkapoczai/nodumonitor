@@ -1111,7 +1111,9 @@ function clearLinkedin() {
   updateLiClearBtn();
 }
 
-function composeLinkedin() {
+// `force`: vendor-hirdetesnel a motor alapbol NEM general. A "Megis generalj"
+// gomb ugyanezt a fuggvenyt hivja force=true-val — a kihagyas ajanlas, nem tilalom.
+function composeLinkedin(force) {
   const postText = document.getElementById('li-post-text').value.trim();
   if (!postText) { toast('Illessz be egy poszt-szöveget.'); return; }
 
@@ -1128,17 +1130,46 @@ function composeLinkedin() {
       author_name: document.getElementById('li-author-name').value.trim(),
       author_role: document.getElementById('li-author-role').value.trim(),
       image_b64: liImageB64,
+      force: !!force,
     })
   }).then(r => r.json()).then(d => {
     btn.disabled = false; btn.textContent = 'Válasz generálása';
     document.getElementById('li-status').textContent = '';
     if (!d.ok) { toast(d.error || 'Nem sikerült a válasz generálása.'); return; }
+    if (d.skipped) { renderLinkedinSkipped(d); return; }
     renderLinkedinResult(d);
   }).catch(() => {
     btn.disabled = false; btn.textContent = 'Válasz generálása';
     document.getElementById('li-status').textContent = '';
     toast('Hiba a válasz generálásakor.');
   });
+}
+
+// Vendor-hirdetes: nem hiba es nem ures valasz, hanem DONTES — ezert sajat kartya,
+// az idezett bizonyitekkal (amit a szerver a posztban ellenorzott) es egy
+// felulirassal. A UI itt nem rejt el semmit: latszik, MIERT nem generalt.
+function renderLinkedinSkipped(d) {
+  const box = document.getElementById('li-result');
+  box.innerHTML =
+    '<div class="opp-card">' +
+      '<div class="opp-head">' +
+        '<span class="sev-badge sev-cool">KIHAGYVA</span>' +
+        '<span class="li-chip">' + esc(d.conversation_intent_label || d.conversation_intent || '') + '</span>' +
+        '<span class="li-chip">' + esc(d.post_type || '') + '</span>' +
+      '</div>' +
+      '<div class="opp-title">Ez vendor-hirdetés — nem javaslunk kommentet</div>' +
+      '<div class="opp-pain">Egy érdemi komment ingyen engagementet ad a hirdetésnek, ' +
+        'és téged tesz azzá, aki egy versenytárs marketingje alatt ellenvetést fogalmaz meg.</div>' +
+      (d.promotion_evidence
+        ? '<div class="sec-label">A posztban ellenőrzött bizonyíték</div>' +
+          '<div class="original-text">' + esc(d.promotion_evidence) + '</div>'
+        : '') +
+      '<div class="opp-tech" style="margin-top:10px">Indoklás: ' + esc(d.skip_reason || '') + '</div>' +
+      '<div class="opp-actions" style="margin-top:14px">' +
+        '<button class="btn btn-secondary btn-sm" onclick="composeLinkedin(true)">Mégis generálj</button>' +
+      '</div>' +
+    '</div>';
+  updateLiClearBtn();
 }
 
 function renderLinkedinResult(d) {
