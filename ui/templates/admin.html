@@ -13,7 +13,6 @@
     <div class="nav-item" onclick="show('alerts', this)">Értesítések & Integrációk</div>
 
     <div class="nav-group-label" style="margin-top: 30px;">Működés</div>
-    <div class="nav-item" onclick="show('run', this)">Monitor indítása</div>
     <div class="nav-item" onclick="show('status', this)">Rendszerállapot</div>
   </nav>
 
@@ -272,114 +271,6 @@
       </div>
 
     </form><!-- /config-form -->
-
-            <div class="card-desc">Releváns bejegyzések összegyűjtése. A futtatás a háttérben zajlik.</div>
-
-        {% set runners = [
-          ('reddit', 'Reddit', 'r/Revit, r/ArchiCAD, r/BIM: legfrissebb posztok és kommentek'),
-          ('playwright', 'JS fórumok (Playwright)', 'Graphisoft és Autodesk Community valós idejű scraping'),
-          ('stackoverflow', 'Stack Overflow', 'Stack Exchange API: revit, archicad, ifc témák'),
-          ('discourse', 'Discourse fórumok', 'buildingSMART + Speckle közösség (speckle.community: csak /latest.json, robots)'),
-          ('vanilla', 'OSArch közösség', 'Vanilla Forums API: community.osarch.org (openBIM/IfcOpenShell)'),
-          ('zendesk', 'Graphisoft support KB', 'Zendesk API: support.graphisoft.com interop-cikkei — intelligencia, nem lead'),
-          ('github', 'GitHub issues', 'IfcOpenShell/Bonsai, Speckle, xeokit repók'),
-          ('youtube', 'YouTube kommentek', 'YouTube Data API v3 (tutorialok és webinarok kommentjei)'),
-          ('forums', 'Fórumok (HTML)', 'Khoros és phpBB fórumok közvetlen scraping')
-        ] %}
-        {% for key, title, desc in runners %}
-        <div class="run-row">
-          <div class="run-info">
-            <div class="r-title">{{ title }}</div>
-            <div class="r-desc">{{ desc }}</div>
-          </div>
-          <div class="run-right">
-            <span class="badge badge-idle" id="badge-{{ key }}">Nem futott</span>
-            <button type="button" class="btn btn-secondary btn-sm" onclick="openRunProgressModal('{{ key }}', '{{ title }}')">Futtatás</button>
-          </div>
-        </div>
-        {% endfor %}
-      </div>
-
-      <div class="card">
-        <div class="card-title">Feldolgozás és értesítés</div>
-        <div class="card-desc">Válaszjavaslatok, heti riport és tartalom-marketing. Feltétel: a Gemini API be van kapcsolva.</div>
-
-        {% set processors = [
-          ('generate-drafts', 'Válaszjavaslat generálás', 'Minden releváns, feldolgozatlan bejegyzésre 1 javaslat'),
-          ('weekly-report', 'Heti riport', 'Slack-összefoglaló: források, top fájdalompontok'),
-          ('build-knowledge', 'Tudásbázis frissítése', 'A lokális mappákból (technical, repo) újraépíti a kontextust az AI számára')
-        ] %}
-        {# A Tartalom Pipeline (Blog + LinkedIn) a Dashboard Áttekintő fülén kiemelt
-           kártya lett, innen eltávolítva — ld. dashboard.html #content-pipeline-card. #}
-        {% for key, title, desc in processors %}
-        <div class="run-row">
-          <div class="run-info">
-            <div class="r-title">{{ title }}</div>
-            <div class="r-desc">{{ desc }}</div>
-          </div>
-          <div class="run-right">
-            <span class="badge badge-idle" id="badge-{{ key }}">Nem futott</span>
-            <button type="button" class="btn btn-primary btn-sm" onclick="openRunProgressModal('{{ key }}', '{{ title }}')">Indítás</button>
-          </div>
-        </div>
-        {% endfor %}
-      </div>
-    </div>
-
-    </form><!-- /config-form -->
-
-            <div class="card-desc">Releváns bejegyzések összegyűjtése. A futtatás a háttérben zajlik.</div>
-
-        {% set runners = [
-          ('reddit', 'Reddit', 'r/Revit, r/ArchiCAD, r/BIM: legfrissebb posztok és kommentek'),
-          ('playwright', 'JS fórumok (Playwright)', 'Graphisoft és Autodesk Community valós idejű scraping'),
-          ('stackoverflow', 'Stack Overflow', 'Stack Exchange API: revit, archicad, ifc témák'),
-          ('discourse', 'Discourse fórumok', 'buildingSMART + Speckle közösség (speckle.community: csak /latest.json, robots)'),
-          ('vanilla', 'OSArch közösség', 'Vanilla Forums API: community.osarch.org (openBIM/IfcOpenShell)'),
-          ('zendesk', 'Graphisoft support KB', 'Zendesk API: support.graphisoft.com interop-cikkei — intelligencia, nem lead'),
-          ('github', 'GitHub issues', 'IfcOpenShell/Bonsai, Speckle, xeokit repók'),
-          ('youtube', 'YouTube kommentek', 'YouTube Data API v3 (tutorialok és webinarok kommentjei)'),
-          ('forums', 'Fórumok (HTML)', 'Khoros és phpBB fórumok közvetlen scraping')
-        ] %}
-        {% for key, title, desc in runners %}
-        <div class="run-row">
-          <div class="run-info">
-            <div class="r-title">{{ title }}</div>
-            <div class="r-desc">{{ desc }}</div>
-          </div>
-          <div class="run-right">
-            <span class="badge badge-idle" id="badge-{{ key }}">Nem futott</span>
-            <button type="button" class="btn btn-secondary btn-sm" onclick="openRunProgressModal('{{ key }}', '{{ title }}')">Futtatás</button>
-          </div>
-        </div>
-        {% endfor %}
-      </div>
-
-      <div class="card">
-        <div class="card-title">Feldolgozás és értesítés</div>
-        <div class="card-desc">Válaszjavaslatok, heti riport és tartalom-marketing. Feltétel: a Gemini API be van kapcsolva.</div>
-
-        {% set processors = [
-          ('generate-drafts', 'Válaszjavaslat generálás', 'Minden releváns, feldolgozatlan bejegyzésre 1 javaslat'),
-          ('weekly-report', 'Heti riport', 'Slack-összefoglaló: források, top fájdalompontok'),
-          ('build-knowledge', 'Tudásbázis frissítése', 'A lokális mappákból (technical, repo) újraépíti a kontextust az AI számára')
-        ] %}
-        {# A Tartalom Pipeline (Blog + LinkedIn) a Dashboard Áttekintő fülén kiemelt
-           kártya lett, innen eltávolítva — ld. dashboard.html #content-pipeline-card. #}
-        {% for key, title, desc in processors %}
-        <div class="run-row">
-          <div class="run-info">
-            <div class="r-title">{{ title }}</div>
-            <div class="r-desc">{{ desc }}</div>
-          </div>
-          <div class="run-right">
-            <span class="badge badge-idle" id="badge-{{ key }}">Nem futott</span>
-            <button type="button" class="btn btn-primary btn-sm" onclick="openRunProgressModal('{{ key }}', '{{ title }}')">Indítás</button>
-          </div>
-        </div>
-        {% endfor %}
-      </div>
-    </div>
 
     <!-- ===================== Rendszerállapot ===================== -->
     <div id="s-status" class="section">
