@@ -1,0 +1,590 @@
+<title>Hogyan ír kommentet a NODU LinkedIn-asszisztens</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --surface: #fafafa;
+    --ink: #171717;
+    --muted: #6b6b6b;
+    --rule: #e5e5e5;
+    --accent: #ea580c;
+    --accent-soft: #fef1ea;
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #141414;
+    --surface: #1b1b1b;
+    --ink: #f2f0ed;
+    --muted: #a3a3a3;
+    --rule: #2c2c2c;
+    --accent: #ff7a33;
+    --accent-soft: #2a1c14;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #141414;
+      --surface: #1b1b1b;
+      --ink: #f2f0ed;
+      --muted: #a3a3a3;
+      --rule: #2c2c2c;
+      --accent: #ff7a33;
+      --accent-soft: #2a1c14;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 17px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+  }
+
+  .page {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 64px 24px 96px;
+  }
+
+  /* ---------- header ---------- */
+
+  .masthead {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding-bottom: 32px;
+    margin-bottom: 48px;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    color: var(--accent);
+  }
+
+  .eyebrow::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 1px;
+    background: var(--accent);
+  }
+
+  h1 {
+    font-weight: 800;
+    font-size: clamp(28px, 4.5vw, 38px);
+    letter-spacing: -0.01em;
+    line-height: 1.15;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  .dek {
+    font-size: 18px;
+    color: var(--muted);
+    max-width: 56ch;
+    margin: 0;
+  }
+
+  /* ---------- intro card ---------- */
+
+  .intro {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 24px;
+    margin-bottom: 48px;
+    font-size: 16px;
+    color: var(--ink);
+  }
+
+  .intro p { margin: 0; }
+  .intro p + p { margin-top: 12px; }
+
+  /* ---------- steps ---------- */
+
+  .section-label {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 20px;
+  }
+
+  .steps {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .step {
+    display: grid;
+    grid-template-columns: 48px 1fr;
+    gap: 20px;
+    padding: 28px 0;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .step:first-child { padding-top: 0; }
+  .step:last-child { border-bottom: none; }
+
+  .step-num {
+    font-weight: 800;
+    font-size: 20px;
+    color: var(--accent);
+    line-height: 1.4;
+  }
+
+  .step h3 {
+    font-weight: 700;
+    font-size: 19px;
+    margin: 0 0 8px;
+    text-wrap: balance;
+  }
+
+  .step p {
+    margin: 0;
+    color: var(--ink);
+  }
+
+  .step p + p { margin-top: 10px; }
+
+  /* ---------- tone list ---------- */
+
+  .tones {
+    margin: 48px 0;
+  }
+
+  .tone-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 12px;
+  }
+
+  .tone-card {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 16px;
+  }
+
+  .tone-card .name {
+    font-weight: 700;
+    font-size: 15.5px;
+    margin-bottom: 4px;
+  }
+
+  .tone-card .desc {
+    font-size: 14px;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+
+  .tone-card .example {
+    font-size: 13.5px;
+    color: var(--ink);
+    line-height: 1.5;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--rule);
+  }
+
+  .tone-card .example b {
+    color: var(--muted);
+    font-weight: 600;
+  }
+
+  /* ---------- example walkthrough ---------- */
+
+  .example-box {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 24px;
+    margin-bottom: 48px;
+  }
+
+  .example-box .post {
+    font-size: 15.5px;
+    font-style: italic;
+    color: var(--ink);
+    padding: 14px 16px;
+    background: var(--bg);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    margin-bottom: 16px;
+  }
+
+  .example-box .row {
+    display: flex;
+    gap: 10px;
+    font-size: 14.5px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .example-box .row:last-child { border-bottom: none; }
+
+  .example-box .row .k {
+    flex: 0 0 130px;
+    color: var(--muted);
+    font-weight: 600;
+  }
+
+  .example-box .row .v { flex: 1; }
+
+  .checks li .why {
+    color: var(--muted);
+    font-size: 14.5px;
+    display: block;
+    margin-top: 2px;
+  }
+
+  /* ---------- checklist ---------- */
+
+  .checklist {
+    margin: 48px 0;
+  }
+
+  ul.checks {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  ul.checks li {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    font-size: 16px;
+  }
+
+  ul.checks li::before {
+    content: "";
+    flex: 0 0 auto;
+    width: 8px;
+    height: 8px;
+    margin-top: 7px;
+    border-radius: 1px;
+    background: var(--accent);
+  }
+
+  /* ---------- closing note ---------- */
+
+  .note {
+    background: var(--accent-soft);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 24px;
+    margin-top: 48px;
+  }
+
+  .note p { margin: 0; }
+  .note p + p { margin-top: 10px; }
+
+  a { color: var(--accent); text-decoration: underline; text-decoration-color: var(--rule); }
+  a:hover { text-decoration-color: var(--accent); }
+  a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  @media (max-width: 560px) {
+    .step { grid-template-columns: 1fr; gap: 6px; }
+    .step-num { display: none; }
+    .page { padding: 40px 18px 72px; }
+  }
+</style>
+
+<div class="page">
+
+  <header class="masthead">
+    <span class="eyebrow">NODU · LinkedIn-asszisztens</span>
+    <h1>Hogyan ír kommentet a rendszer</h1>
+    <p class="dek">
+      Egyszerűen, technikai kifejezések nélkül: mi történik, amikor a rendszer
+      elolvas egy LinkedIn-posztot, és mit csinál, mire elkészül a kommenttel.
+    </p>
+  </header>
+
+  <div class="intro">
+    <p>
+      A rendszer nem egyszerűen "kitalál valamit" a posztra. Minden egyes komment
+      előtt végigmegy egy rögzített gondolkodási folyamaton: először megérti a
+      posztot, aztán eldönti, milyen típusú válasz illik hozzá, megírja a szöveget,
+      majd saját magát ellenőrzi, mielőtt bármi elkészülne.
+    </p>
+    <p>
+      Az alábbi lépések pontosan ezt a folyamatot mutatják be, a sorrendjük szerint.
+      Egy konkrét példán keresztül könnyebb követni — a leírás közben végig
+      visszatérünk ehhez a posztra.
+    </p>
+  </div>
+
+  <div class="example-box">
+    <div class="section-label" style="margin-bottom: 14px;">Példa: ezt a posztot kapja a rendszer</div>
+    <div class="post">
+      "Áttértünk egy közös digitális modellre a projekten, és a koordináció
+      sokkal gyorsabb lett. Szerintem minden csapatnak ezt kellene csinálnia."
+    </div>
+    <div class="row"><span class="k">Fő állítás</span><span class="v">a közös digitális modell mindenkinek felgyorsítja a munkát</span></div>
+    <div class="row"><span class="k">Ki nem mondott feltétel</span><span class="v">csak akkor igaz, ha a csapatok tényleg ugyanazt a modellt, ugyanazokkal a szabályokkal használják</span></div>
+    <div class="row"><span class="k">Választott hangnem</span><span class="v">építő jellegű ellenvélemény</span></div>
+    <div class="row"><span class="k">Eredmény</span><span class="v">"Ez sok helyen igaz — de mi történik, ha egy alvállalkozó nem ugyanazt a szoftvert vagy szabványt használja? Nálunk pont ez törte meg a gyorsaságot."</span></div>
+  </div>
+
+  <div class="steps">
+
+    <div class="step">
+      <div class="step-num">1</div>
+      <div>
+        <h3>Elolvassa és megérti a posztot</h3>
+        <p>
+          Mielőtt egy szót is leírna, a rendszer alaposan átgondolja a posztot: mi a
+          fő állítása, milyen hangnemben íródott, kinek szól, mennyire technikai a
+          téma, és van-e benne olyan pont, ami vitatható vagy hiányos. Ez a lépés
+          csak gondolkodás — még nem születik komment-szöveg.
+        </p>
+        <p>
+          A példánkban ez azt jelenti: felismeri, hogy a poszt a közös digitális
+          modellről szól, hogy a szerző lelkesen, üzleti szemmel írt, és hogy van
+          benne egy nem kimondott feltétel — mikor működik ez, és mikor nem.
+        </p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num">2</div>
+      <div>
+        <h3>Kiválasztja a legjobban illő hangnemet</h3>
+        <p>
+          Hét különböző módja van annak, hogyan lehet reagálni egy posztra (lásd
+          lent). A rendszer minden hangnemet megpontoz — mennyire illik a poszthoz
+          —, majd figyelembe veszi, hogy melyiket használta legutóbb.
+        </p>
+        <p>
+          Ez utóbbi azért fontos, mert egy hangnem sokszor jól illik <i>több</i>
+          posztra is egymás után, és ha a rendszer mindig a legjobban illőt
+          választaná, hamar monoton, gépies lenne — mintha mindig ugyanazt a
+          fordulatot ismételné. Ezért a legutóbb használt 1–2 hangnemet a rendszer
+          kizárja a választásból, még akkor is, ha épp az illene a legjobban —
+          hacsak nincs más, ami elérné a minimum pontszámot.
+        </p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num">3</div>
+      <div>
+        <h3>Külön megnézi, van-e érdemes ellenvélemény</h3>
+        <p>
+          Ha a poszt egy állítást fogalmaz meg, a rendszer megkeresi, hogy van-e egy
+          ki nem mondott feltétel, ami alatt az állítás nem lenne igaz. A
+          példánkban ez a feltétel: "csak akkor gyorsabb a közös modell, ha
+          mindenki ugyanazt használja."
+        </p>
+        <p>
+          Ez a lépés csak akkor engedi meg az ellenvéleményt, ha három dolog
+          egyszerre teljesül: a poszt tényleg egy véleményt fogalmaz meg (nem
+          például egy kérdést vagy egy technikai leírást), a feltételt szó szerint
+          alá lehet támasztani a poszt szövegével, és a rendszer nem hivatkozott
+          ugyanerre a típusú feltételre a legutóbbi kommentjeiben. Ha ezek közül
+          bármelyik hiányzik, egyszerűen egy másik hangnemmel válaszol.
+        </p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num">4</div>
+      <div>
+        <h3>Leellenőrzi, nem versenytárs reklámja-e a poszt</h3>
+        <p>
+          Ha a poszt egy versenytárs eszközét dicséri, a rendszer alapesetben nem ír
+          hozzá kommentet — inkább kihagyja, mint hogy kényes helyzetbe kerüljön.
+        </p>
+        <p>
+          Ez azért van, mert egy jóindulatú, szakmailag helyes komment egy
+          versenytárs bejegyzése alatt is úgy nézhet ki, mintha a cég nevében
+          reklámoznánk mást. A rendszer inkább hallgat, mint hogy ezt a kockázatot
+          vállalja — ez a döntés kézzel felülírható, ha valaki tudatosan mégis
+          szeretne választ küldeni.
+        </p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num">5</div>
+      <div>
+        <h3>Eldönti, hogyan induljon és milyen hosszú legyen</h3>
+        <p>
+          A komment nyitómondatának stílusát és a várható hosszát a rendszer előre
+          kijelöli, mielőtt megírná a szöveget — és emlékszik, milyen nyitást
+          használt legutóbb, hogy ne induljon egymás után ugyanúgy két komment.
+        </p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num">6</div>
+      <div>
+        <h3>Megírja a kommentet</h3>
+        <p>
+          Az előző lépések döntéseit összefűzve a rendszer megírja a végleges
+          szöveget: a kiválasztott hangnemben, a kijelölt nyitással és hosszal, a
+          poszt tartalmára szabva.
+        </p>
+        <p>
+          A záró mondatra külön szabály vonatkozik: nem fejezheti be a kommentet
+          egy semleges, "levegőben lógó" megjegyzéssel. Vagy egy olyan kérdést kell
+          feltennie, ami kifejezetten a poszt egy konkrét pontjára kérdez rá, vagy
+          vissza kell utalnia a szerző saját állítására, mielőtt hozzáteszi a maga
+          gondolatát — a kettő közül csak az egyiket, hogy ne váljon sablonossá.
+        </p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num">7</div>
+      <div>
+        <h3>Átnézi és szükség esetén átírja saját magát</h3>
+        <p>
+          A megírt komment egy rögzített ellenőrző listán megy át (lásd lent). Ha
+          bármi nem felel meg, a rendszer legfeljebb kétszer átírja a szöveget,
+          mielőtt feladná és jelentené a hibát.
+        </p>
+        <p>
+          A javítás nem mindig ugyanolyan szigorú: ha a hiba csak megfogalmazás
+          (például egy elcsépelt mondatkezdés), a rendszer nyugodtan próbálkozik
+          harmadszor is. Ha viszont súlyosabb a probléma — mondjuk túl hosszú lett,
+          vagy képre hivatkozik, amikor nem volt kép —, csak egyszer próbálkozik
+          újra, aztán inkább leáll, mint hogy egy rosszabb szöveget erőltessen ki.
+        </p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num">8</div>
+      <div>
+        <h3>Megjegyzi, mit írt</h3>
+        <p>
+          Csak akkor jegyzi meg a döntéseit (a hangnemet, a nyitást, a gondolat
+          típusát), ha a komment végül elkészült és megfelelt. Ez biztosítja, hogy a
+          következő poszt kommentje ne ismételje meg ugyanazt.
+        </p>
+        <p>
+          Ezt kétféleképpen jegyzi meg: összesítve, az összes szerzőre nézve
+          <i>és</i> külön, minden szerzőre névre szólóan. Ez azért fontos, mert
+          önmagában az összesített emlékezet nem elég: ha ugyanaz a szerző csak
+          hetek múlva posztol újra, közben már sok más szerző kommentje
+          "felülírta" az összesített emlékezetet — a névre szóló emlékezet nélkül
+          a rendszer elfelejtené, hogy pont ennek a szerzőnek mit írt legutóbb, és
+          véletlenül megismételhetné magát ugyanannál az embernél.
+        </p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num">9</div>
+      <div>
+        <h3>Naplózza a döntést</h3>
+        <p>
+          Minden egyes kommentről — sikeres és sikertelen esetben is — készül egy
+          bejegyzés egy naplóban, amiben szerepel, mit döntött a rendszer és miért.
+          Ez teszi lehetővé, hogy utólag, hetekkel később is visszakövethető legyen,
+          mi történt.
+        </p>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="tones">
+    <div class="section-label">A hét hangnem, amiből választhat</div>
+    <div class="tone-grid">
+      <div class="tone-card">
+        <div class="name">Építő jellegű ellenvélemény</div>
+        <div class="desc">Rákérdez egy ki nem mondott feltételre, ami alatt az állítás megbukna. Nem vitatkozik — csak megmutatja a határát.</div>
+        <div class="example"><b>Pl.:</b> "Ez igaz, ha mindenki ugyanazt a modellt használja — de mi történik a kivétellel?"</div>
+      </div>
+      <div class="tone-card">
+        <div class="name">Üzleti hatás</div>
+        <div class="desc">A technikai pontot lefordítja arra, mit jelent ez pénzben, időben vagy kockázatban a vállalat számára.</div>
+        <div class="example"><b>Pl.:</b> "Ez a lépés nem csak gyorsaság — kevesebb utólagos javítás, kevesebb vitás számla."</div>
+      </div>
+      <div class="tone-card">
+        <div class="name">Terepi tapasztalat</div>
+        <div class="desc">Egy hasonló, valós helyzetet hoz fel, amit maga is átélt — mintha egy kollégától jönne a válasz.</div>
+        <div class="example"><b>Pl.:</b> "Mi is átálltunk erre egy projekten, és pont az alvállalkozói oldal volt a nehéz rész."</div>
+      </div>
+      <div class="tone-card">
+        <div class="name">Gyakorlati tanulság</div>
+        <div class="desc">Egy konkrét, azonnal alkalmazható tanulságot tesz hozzá a témához — nem elmélet, hanem tipp.</div>
+        <div class="example"><b>Pl.:</b> "Ami nálunk sokat segített: egy közös szótár a fogalmakra, mielőtt a modellezés elindul."</div>
+      </div>
+      <div class="tone-card">
+        <div class="name">Jövőbe tekintés</div>
+        <div class="desc">Megnézi, merre fejlődhet tovább ez a téma vagy probléma — mi jöhet ezután.</div>
+        <div class="example"><b>Pl.:</b> "Kérdés, hogy ez hosszabb távon hogyan skálázódik, ha több projekt fut párhuzamosan."</div>
+      </div>
+      <div class="tone-card">
+        <div class="name">Rendszerszintű gondolkodás</div>
+        <div class="desc">A posztot egy nagyobb összefüggésbe helyezi — hogyan kapcsolódik más folyamatokhoz.</div>
+        <div class="example"><b>Pl.:</b> "Ez ott igazán számít, ahol a tervezés és a kivitelezés csapatai külön rendszerben dolgoznak."</div>
+      </div>
+      <div class="tone-card">
+        <div class="name">Hiányzó nézőpont</div>
+        <div class="desc">Egy szempontot ad hozzá, amit a poszt nem érintett, de érdemes lenne végiggondolni.</div>
+        <div class="example"><b>Pl.:</b> "Erről még nem volt szó, de a végfelhasználó oldala pont ilyenkor szokott kimaradni."</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="checklist">
+    <div class="section-label">Mit ellenőriz magán, mielőtt elkészülne</div>
+    <ul class="checks">
+      <li>Nem kezdi és nem zárja a kommentet elcsépelt, gépiesen ismerős fordulattal.
+        <span class="why">Ezek a fordulatok azonnal elárulják, hogy nem ember írta — a rendszer ezeket felismeri és kerüli.</span>
+      </li>
+      <li>Nem ismétli ugyanazt a nyitást vagy ugyanazt a gondolatot, mint a legutóbbi kommentjei.
+        <span class="why">Egy-egy komment külön-külön jó lehet, de ha mindig ugyanoda fut ki, az sorozatban gépiesnek tűnik.</span>
+      </li>
+      <li>Se nem túl rövid, se nem túl hosszú, és nem tördeli túl sok bekezdésre.
+        <span class="why">Egy LinkedIn-kommentnek van egy természetes hossza — ennél rövidebb súlytalan, hosszabb untat.</span>
+      </li>
+      <li>Nem hivatkozik képre, ha a poszthoz nem volt kép csatolva.
+        <span class="why">Ha nincs mire hivatkozni, az ilyen mondat hamis benyomást kelt, mintha látott volna valamit.</span>
+      </li>
+      <li>Nem másolja szóról szóra a poszt mondatait.
+        <span class="why">A komment adjon hozzá valamit — ne csak megismételje, amit a szerző már leírt.</span>
+      </li>
+      <li>Nem említi a saját márkát engedély nélkül.
+        <span class="why">Egy komment alatt nem szabad reklámnak tűnnie — a márkaemlítés mindig külön jóváhagyást kap.</span>
+      </li>
+      <li>Ha a beszélgetés nyelve magyar, nem csúszik bele idegen kifejezésekbe.
+        <span class="why">A keveredő nyelvhasználat töri meg a hangot és odafigyelést von el a tartalomtól.</span>
+      </li>
+    </ul>
+  </div>
+
+  <div class="note">
+    <p>
+      Röviden: a rendszer nem egy lépésben "kitalálja" a kommentet, hanem egy
+      rögzített, végigkövethető folyamaton halad át — és minden döntéséről
+      megmarad a nyoma, hogy utólag is ellenőrizhető legyen.
+    </p>
+  </div>
+
+</div>
