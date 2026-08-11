@@ -92,6 +92,8 @@ _COPIED_FIELDS = (
     # holtverseny — a pontozas nem rangsor. Enelkul nem lehet megmondani, MIERT nem
     # nyert egy strategia (nem volt jelolt / kizarta a frissesseg / mas volt a max).
     "strategy_candidates", "strategy_recent", "strategy_decision_reason",
+    # Szerzonkenti emlekezet (engine v21) — ld. linkedin_engine.author_key.
+    "author_key", "author_strategy_recent",
     "conversation_intent", "discourse_level",
     "expected_responder_role", "response_mode", "human_temperature",
     "topic", "post_type", "technical_depth", "topic_gravity", "intent_layer",
