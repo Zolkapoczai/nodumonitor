@@ -140,14 +140,14 @@ import json
 import re
 import time
 import unicodedata
-from collections import deque
+from collections import defaultdict, deque
 
 from google import genai
 from google.genai import types
 
 from env_secrets import get_secret
 
-ENGINE_VERSION = "linkedin-tle-v19"
+ENGINE_VERSION = "linkedin-tle-v21"
 
 # --- Stage 4: strategiak -----------------------------------------------------
 # Pontosan EGY strategia valasztodik kommentenkent. A `directive` a compose-
@@ -1336,8 +1336,18 @@ Never open with: "We often see", "We frequently observe", "One approach",
 "Best practice", "Organizations should", "Implementation requires",
 "Establishing...", "Ensuring...", "It is critical to".
 
-ENDING. Do not end with advice, a recommendation or a solution. End on a concrete
-observation that leaves room for the other person to answer.
+ENDING (v21). Do not end with advice, a recommendation or a solution. Close in
+one of these two ways — pick whichever fits the strategy, do not force both:
+  (a) a genuine question that could only be asked by someone who read THIS
+      post — it must name the author's specific detail, claim or number, not a
+      generic "what do you think?"; or
+  (b) an explicit callback to the author's own point — reference what they
+      specifically said or claimed, then add your one new thing to it.
+A comment that ends on a free-floating observation with no question and no
+named callback to the author is the weaker version of this rule — prefer (a)
+or (b) whenever the strategy allows it. `constructive_challenge` naturally
+wants (a); `field_experience` and `practical_lesson` often read better with
+(b). Never use both forms in the same comment — one clean move, not two.
 
 Hard limits:
 - 80-150 words, unless the task message gives a different range — that one wins.
@@ -1580,16 +1590,19 @@ def shape_frame(opening_key: str) -> str:
     return opening_frame(shape["example"].strip('"'))
 
 
-def echo_ring_for(opening_key: str) -> list[str]:
+def echo_ring_for(opening_key: str, extra: list[str] | None = None) -> list[str]:
     """A KAPUNAK atadott gyűrű: a kiosztott forma sajat kerete kimarad belole.
 
     Kulon fuggveny es nem egy sor a hivo oldalon, mert ez a szabaly a ket
     mechanizmus kozotti szerzodes (`shape_frame` docstring), es igy tesztelheto
     onmagaban. Ures `own` eseten semmi nem esik ki: ures ujjlenyomat sosem kerul
     a gyűrűbe.
+
+    `extra`: tovabbi bejegyzesek (pl. a szerzonkenti gyűrű) — ld. `move_ring_for`.
     """
     own = shape_frame(opening_key)
-    return [fp for fp in _recent_opening_texts if fp != own]
+    combined = list(_recent_opening_texts) + list(extra or ())
+    return [fp for fp in combined if fp != own]
 
 
 def opening_fingerprint(comment: str) -> str:
@@ -1626,7 +1639,8 @@ def remember_opening_text(comment: str) -> None:
 
 
 def reset_opening_state() -> None:
-    """MIND AZ OT varianciа-gyűrűt nullazza (forma, nyitas, mozdulat, feltetel, strategia).
+    """MINDEN varianciа-gyűrűt nullazza (forma, nyitas, mozdulat, feltetel, strategia
+    — globalisan ES szerzonkent).
 
     MIERT KELL: mind a ketto processz-eletű varianciа-allapot, es egy teszt, ami
     hivas-sorozatokra allit (pl. "tiszta elso kor -> nincs ujrairas"), csak akkor
@@ -1640,6 +1654,11 @@ def reset_opening_state() -> None:
     _recent_content_moves.clear()
     _recent_condition_families.clear()
     _recent_strategies.clear()
+    # Szerzonkenti gyűrűk (v21) — ugyanaz a "mindent nullaz" elv.
+    _author_strategies.clear()
+    _author_openings.clear()
+    _author_opening_texts.clear()
+    _author_content_moves.clear()
 
 
 def opening_echo_gate_enabled(config: dict) -> bool:
@@ -1683,6 +1702,15 @@ _CONTENT_MOVES: list[tuple[str, str]] = [
      r"\bfees?\b|\bprocurement\b|\bcompensat\w+\b|"
      r"\bcommercial model\w*\b|\bpayment milestone\w*\b|\breimburs\w+\b",
      "move:commercial_frame"),
+    # A 2026-08-11-i futasban (v15-v19) a "" (nem kategorizalt) `thesis_condition`-ok
+    # kozott EGY masik, addig lathatatlan csalad ismetlodott legalabb 5-6x: kozos CDE/
+    # BIM execution plan / koordinata-rendszer hianya tobb szoftver/diszciplina eseten.
+    # A `condition_family` egy-mintas listaja ezt nem tudta nevesiteni, tehat a gyűrű
+    # sem vedhetett ellene — a masik monokultura felugyelet nelkul futott.
+    (r"\bCDE\b|\bBIM execution plan\b|\bcoordinate system\w*\b|"
+     r"\bauthoring tools?\b|\bmachine-readable\b|"
+     r"\bmultiple (?:software )?platforms?\b|\bregional standards?\b",
+     "move:tool_interop_frame"),
 ]
 _CONTENT_MOVE_MIN_HITS = 2
 
@@ -1713,10 +1741,82 @@ def remember_content_move(comment: str) -> None:
         _recent_content_moves.append(move)
 
 
-def move_ring_for(strategy: str) -> list[str]:
-    """A kapunak atadott mozdulat-gyűrű: a strategia sajat mozdulata kimarad."""
+def move_ring_for(strategy: str, extra: list[str] | None = None) -> list[str]:
+    """A kapunak atadott mozdulat-gyűrű: a strategia sajat mozdulata kimarad.
+
+    `extra`: tovabbi bejegyzesek (pl. a szerzonkenti gyűrű), amiket a globalis
+    gyűrűvel egyutt kell nezni — ld. `_author_content_moves`.
+    """
     own = next((m for m, s in _MOVE_EXEMPT_STRATEGY.items() if s == strategy), "")
-    return [m for m in _recent_content_moves if m != own]
+    combined = list(_recent_content_moves) + list(extra or ())
+    return [m for m in combined if m != own]
+
+
+# --- Szerzonkenti emlekezet (2026-08-11, engine v21) -------------------------
+# A MERT HIANY: a fenti gyűrűk (forma, nyitas-szoveg, mozdulat, strategia)
+# GLOBALISAK — minden szerzore egyutt szamolnak. Ha A szerzo posztjara
+# `constructive_challenge`-t kap, majd tiz MASIK szerzo kommentje kozbejon, A
+# szerzo legkozelebbi posztja ujra kaphat `constructive_challenge`-t, mert a
+# globalis gyűrű mar kiuritette A szerzo nyomat — A szerzo szemszogebol ez
+# ismetlesnek tunik, akkor is, ha a rendszer egeszben valtozatos volt.
+#
+# A MEGOLDAS NEM CSERE, HANEM KIEGESZITES: a globalis gyűrűk maradnak (azok
+# vedik az OSSZKEP valtozatossagat), es MELLETTUK minden szerzohoz kulon,
+# ugyanolyan melysegű gyűrű jar. Egy forma/strategia/mozdulat akkor esik ki,
+# ha a globalis VAGY a szerzo-gyűrűben szerepel — a hivo oldalon a ketto
+# egyszeruen osszefuzve megy at a mar meglevo `recent`/`extra` parametereken.
+# Ismeretlen (nev nelkuli) szerzonel a szerzo-gyűrű ures marad, tehat a
+# viselkedes valtozatlan a korabbi (csak globalis) allapothoz.
+#
+# A melyseg UGYANAZ, mint a megfelelo globalis gyűrűnel — nincs uj magic-
+# number, csak egy masik kulcs (szerzo, nem "az egesz folyam") ugyanazon a
+# szabalyon.
+_author_strategies: defaultdict = defaultdict(lambda: deque(maxlen=_STRATEGY_RING_SIZE))
+_author_openings: defaultdict = defaultdict(lambda: deque(maxlen=_OPENING_RING_SIZE))
+_author_opening_texts: defaultdict = defaultdict(lambda: deque(maxlen=_OPENING_ECHO_RING_SIZE))
+_author_content_moves: defaultdict = defaultdict(lambda: deque(maxlen=_OPENING_RING_SIZE))
+
+
+def author_key(author_name: str) -> str:
+    """A szerzonev kanonikus kulcsa a szerzonkenti gyűrűkhoz.
+
+    Ekezet-fuggetlen, kis- es nagybetűtől fuggetlen, tobbszoros szokoz
+    osszevonva — ugyanaz a nev irasvariansai (pl. "Kovács János" vs
+    "kovacs janos") ugyanarra a gyűrűre essenek. Ures nev -> ures kulcs, ami
+    minden ebbol szarmazo fuggvenyben "nincs szerzonkenti emlekezet"-et jelent.
+    """
+    folded = _fold_accents((author_name or "").strip().lower())
+    return re.sub(r"\s+", " ", folded)
+
+
+def remember_author_strategy(key: str, slug: str) -> None:
+    """A strategia a SZERZO sajat gyűrűjebe — csak sikeres komment utan, mint a globalisnal."""
+    if key and slug:
+        _author_strategies[key].append(slug)
+
+
+def remember_author_opening(key: str, shape: str) -> None:
+    """A nyitas-forma a SZERZO sajat gyűrűjebe."""
+    if key and shape:
+        _author_openings[key].append(shape)
+
+
+def remember_author_opening_text(key: str, comment: str) -> None:
+    """A megvalosult nyitas ujjlenyomata a SZERZO sajat gyűrűjebe."""
+    if not key:
+        return
+    fp = opening_fingerprint(comment)
+    if fp:
+        _author_opening_texts[key].append(fp)
+
+
+def remember_author_content_move(key: str, comment: str) -> None:
+    """A tartalmi mozdulat a SZERZO sajat gyűrűjebe."""
+    if not key:
+        return
+    move = content_move(comment)
+    if move:
+        _author_content_moves[key].append(move)
 
 
 def content_echo_gate_enabled(config: dict) -> bool:
@@ -2753,6 +2853,18 @@ _CHALLENGE_INTENTS = {"professional_opinion", "industry_debate"}
 # MIERT >= 1 TALALAT ITT, es miert >= 2 a kommentnel (`_CONTENT_MOVE_MIN_HITS`): a
 # komment 100+ szo, ott egy futo emlites meg nem a mozdulat. A feltetel EGY tagmondat
 # — ott az elso kereskedelmi terminus mar a feltetel lenyege.
+#
+# KORREKCIO (2026-08-11, engine v20): a fenti "OT-bol OT szerzodesi" MERES egy
+# egy-mintas detektor ARTEFAKTUMA volt, nem a modell tenyleges viselkedese. A
+# `_CONTENT_MOVES`-nek addig KIZAROLAG a `move:commercial_frame` mintaja volt,
+# tehat minden mas `thesis_condition` "" (nem kategorizalt) lett — LATHATATLAN a
+# gyűrű szamara, nem "nem letezo". Egy 91 soros kotegen a "" halmazt kezzel
+# atolvasva egy MASODIK, addig felugyelet nelkuli csalad rajzolodott ki (kozos
+# CDE/BIM execution plan/koordinata-rendszer hianya, 5-6x ismetlodve) — ez most
+# a `move:tool_interop_frame` mintaval fedve van. A tanulsag altalanos: egy
+# monokultura-szenzor csak annyi csaladot lat, amennyit a lista nevesit; a "0%
+# masik csalad" eredmeny ELOSZOR a detektor hianyat jelenti, masodszor a modell
+# viselkedeset.
 _CONDITION_FAMILY_MIN_HITS = 1
 
 # Csak az ELFOGADOTT (a strategiat tenylegesen eldonto) feltetelek kerulnek ide: egy
@@ -3147,6 +3259,9 @@ def _generate_comment(config: dict, post_text: str, author_name: str = "",
     if author_name or author_role:
         author_line = f"AUTHOR: {author_name or 'unknown'}" \
                       f"{' — ' + author_role if author_role else ''}\n"
+    # v21: a szerzonkenti gyűrűk kulcsa. Ismeretlen szerzonel ures ("") — ilyenkor
+    # minden `_author_*` lekeres ures listat ad, tehat a viselkedes valtozatlan.
+    akey = author_key(author_name)
 
     # A layer-dontes a REASON-hivas ELE kerul, mert eldonti, kell-e a kep:
     # kikapcsolt layer eseten az intent/szint a `_LAYER_OFF` par, tehat a kep
@@ -3218,12 +3333,19 @@ def _generate_comment(config: dict, post_text: str, author_name: str = "",
     # v16: a nyers pontszam SZURO (ki a jelolt), es a jelolt-halmazbol a kod dont —
     # a mert diagnozis szerint a pontozas nem rangsor (4-5 strategia mindig >= 7, a
     # maximum 13/21 sorban holtverseny). Kikapcsolva bajtra a v15-os argmax fut.
+    # v21: a globalis ES a szerzonkenti strategia-gyűrű egyutt szamit — igy A
+    # szerzo nem kaphatja ugyanazt a hangnemet ket egymas utani posztjara, meg
+    # akkor sem, ha kozben mas szerzok kommentjei mar kiuritettek a globalis
+    # gyűrűt.
+    combined_strategy_ring = list(_recent_strategies) + list(_author_strategies.get(akey, ()))
     if strategy_candidates_enabled(config):
         strategy_cands = strategy_candidates(reasoning["strategy_fit"], intent, level)
         reasoning["strategy"], strategy_reason = decide_strategy(
-            reasoning["strategy_fit"], post_text, intent, level)
+            reasoning["strategy_fit"], post_text, intent, level,
+            recent=combined_strategy_ring)
         print(f"[linkedin-tle] strategia-dontes: {strategy_reason} "
-              f"| gyűrű={list(_recent_strategies)}")
+              f"| gyűrű={list(_recent_strategies)}"
+              + (f" | szerzo-gyűrű={list(_author_strategies.get(akey, ()))}" if akey else ""))
     else:
         strategy_cands = []
         reasoning["strategy"] = pick_strategy(reasoning["strategy_fit"], intent, level)
@@ -3240,7 +3362,7 @@ def _generate_comment(config: dict, post_text: str, author_name: str = "",
         challenge_fires, challenge_reason = challenge_override(
             reasoning, post_text, intent, level,
             recent_conditions=list(_recent_condition_families),
-            recent_strategies=list(_recent_strategies))
+            recent_strategies=combined_strategy_ring)
     strategy_before_override = reasoning["strategy"]
     if challenge_fires:
         # A gyűrű CSAK elfogadott feltetelnel bővul: ez az a feltetel, ami tenylegesen
@@ -3302,9 +3424,14 @@ def _generate_comment(config: dict, post_text: str, author_name: str = "",
     # layer-blokkban van, tehat kijeloles nelkul a prompt valtozatlan.
     opening = ""
     if intent_layer and opening_variety_enabled(config):
-        opening = pick_opening(post_text, response_mode)
+        # v21: ugyanaz az elv, mint a strategia-gyűrűnel — a szerzo sajat nyitas-
+        # elozmenye is kizarja a formát, nem csak a globalis gyűrű.
+        opening = pick_opening(
+            post_text, response_mode,
+            recent=list(_recent_openings) + list(_author_openings.get(akey, ())))
         print(f"[linkedin-tle] nyitas={opening or '(a valaszforma dontötte el)'}"
-              f" | legutobbiak={list(_recent_openings)}")
+              f" | legutobbiak={list(_recent_openings)}"
+              + (f" | szerzo-legutobbiak={list(_author_openings.get(akey, ()))}" if akey else ""))
 
     # --- Stage 6.6: cel-szohossz a POSZT hosszabol (v7) ---
     # A hossz is regiszter: egy 53 szavas, eles poszt nem erdemel 110 szavas valaszt.
@@ -3315,10 +3442,12 @@ def _generate_comment(config: dict, post_text: str, author_name: str = "",
 
     # A visszhang-gyűrű a kapu szamara: a KIOSZTOTT forma sajat kerete kimarad, mert
     # az utasitast nem szabad sertesnek minositeni (`shape_frame` docstring).
-    echo_ring = echo_ring_for(opening)
+    # v21: mindket gyűrű a szerzo sajat elozmenyevel is bővul.
+    echo_ring = echo_ring_for(opening, extra=list(_author_opening_texts.get(akey, ())))
     # Ugyanez a tartalmi mozdulatra: a strategia sajat mozdulata kimarad
     # (`move_ring_for`) — a `business_impact` direktivaja EPPEN a kereskedelmi keret.
-    move_ring = move_ring_for(reasoning["strategy"])
+    move_ring = move_ring_for(reasoning["strategy"],
+                              extra=list(_author_content_moves.get(akey, ())))
 
     # --- Stage 6-7: compose, + Stage 9: kapu, ket vagy harom korrel ---
     comment, issues, rewrites = "", ["nem futott le"], 0
@@ -3390,6 +3519,12 @@ def _generate_comment(config: dict, post_text: str, author_name: str = "",
     # A VEGSO strategia (a kihivas-szenzor felulirasa utan) — az ment ki, tehat azt
     # kell a kovetkezo dontesbol kizarni.
     remember_strategy(reasoning["strategy"])
+    # v21: ugyanezek a SZERZO sajat gyűrűjebe is — csak akkor, ha ismert a szerzo.
+    if akey:
+        remember_author_opening(akey, opening)
+        remember_author_opening_text(akey, comment)
+        remember_author_content_move(akey, comment)
+        remember_author_strategy(akey, reasoning["strategy"])
 
     # `legacy_intent`, NEM `intent`: a fenti `intent` a Conversation Intent Layer
     # erteke, es ez a sor korabban elarnyekolta (a valasz-osszeallitas ezutan
@@ -3475,6 +3610,11 @@ def _generate_comment(config: dict, post_text: str, author_name: str = "",
         # vagy mert a frissesseg kizarta, vagy mert a sulyozott max mast adott.
         "strategy_candidates": strategy_cands,
         "strategy_recent": list(_recent_strategies),
+        # Szerzonkenti emlekezet (v21): a kulcs + a szerzo sajat gyűrűje a
+        # dontes idejeben. Enelkul nem lenne merheto, hogy a szerzonkenti
+        # ismetles-vedelem tenylegesen kizart-e valamit.
+        "author_key": akey,
+        "author_strategy_recent": list(_author_strategies.get(akey, ())) if akey else [],
         "strategy_decision_reason": strategy_reason,
         "strategy": reasoning["strategy"],
         "strategy_label": strat_label,
