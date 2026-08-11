@@ -737,6 +737,18 @@ linkedin:
   # kapcsoló nélkül is — épp ez mutatta ki a monokultúrát. Csak a KAPUZÁS áll le,
   # mert egy extra LLM-hívást fizet, és a sértés ugyanúgy kimegy.
   # Visszakapcsolás akkor indokolt, ha a `thesis_condition` sokfélesége helyreállt.
+  #
+  # KORREKCIÓ (2026-08-11, engine v20): az „ÖT thesis_condition-ből ÖT szerződési"
+  # diagnózis TÚLBECSÜLT volt — nem mérési hiba a naplóban, hanem a `condition_family`
+  # (ld. `_CONTENT_MOVES` a linkedin_engine.py-ban) egy-mintás detektor volt: csak a
+  # `move:commercial_frame`-et tudta nevesíteni, minden más feltétel „" (nem
+  # kategorizált) lett — LÁTHATATLAN a gyűrű számára, nem „nincs". Egy 91 soros
+  # kötegen újramérve a valóban nem kategorizált feltételek közül kiderült egy MÁSODIK,
+  # addig felügyelet nélküli család (közös CDE/BIM execution plan/koordináta-rendszer
+  # hiánya, 5-6x ismétlődve) — ezt most a `move:tool_interop_frame` minta fedi.
+  # A `content_echo_gate` off állása ettől NEM változott (a gyökér-ok — REASON lépés,
+  # nem kimeneti kapu — továbbra is áll), de a „sokféleség helyreállt" kérdést most már
+  # két ismert családdal, nem eggyel kell megválaszolni legközelebb.
   # IDÉZŐJEL KELL: a YAML az on/off szavakat booleanná alakítja (HANDOFF §4/17).
   content_echo_gate: 'off'
   # strategy_candidates — a nyers pontszám SZŰRŐ, nem rangsor (2026-08-11, v16).
