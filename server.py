@@ -104,14 +104,20 @@ def setup_logging() -> None:
 
     # A konzol-handler az eredeti stderr-re ír, mert a sys.stdout/stderr
     # lentebb átirányításra kerül a loggerbe (különben végtelen kör lenne).
-    console = logging.StreamHandler(sys.__stderr__)
-    console.setFormatter(fmt)
-    console.addFilter(redactor)
-
+    #
+    # `pythonw.exe` (vagy más konzol nélküli inditas, pl. Feladatütemező) alatt
+    # a `sys.__stderr__` None - egy StreamHandler(None) minden egyes log-hívást
+    # elbukik ("--- Logging error ---" végtelen árja, a fájl-napló pedig soha
+    # nem kap esélyt elindulni). A fájlba írás nem függ konzoltól, tehát ilyenkor
+    # csak azt hagyjuk el.
     root = logging.getLogger()
     root.setLevel(logging.INFO)
     root.addHandler(file_handler)
-    root.addHandler(console)
+    if sys.__stderr__ is not None:
+        console = logging.StreamHandler(sys.__stderr__)
+        console.setFormatter(fmt)
+        console.addFilter(redactor)
+        root.addHandler(console)
 
     sys.stdout = _StreamToLogger(logging.getLogger("stdout"), logging.INFO)
     sys.stderr = _StreamToLogger(logging.getLogger("stderr"), logging.ERROR)
