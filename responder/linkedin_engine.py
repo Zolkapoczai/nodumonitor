@@ -139,6 +139,7 @@ import hashlib
 import json
 import re
 import time
+import unicodedata
 from collections import deque
 
 from google import genai
@@ -146,7 +147,7 @@ from google.genai import types
 
 from env_secrets import get_secret
 
-ENGINE_VERSION = "linkedin-tle-v8"
+ENGINE_VERSION = "linkedin-tle-v19"
 
 # --- Stage 4: strategiak -----------------------------------------------------
 # Pontosan EGY strategia valasztodik kommentenkent. A `directive` a compose-
@@ -156,8 +157,20 @@ STRATEGIES: dict[str, dict[str, str]] = {
         "label": "Constructive Challenge",
         "directive": "Question exactly ONE assumption, respectfully and concretely. "
                      "Name the assumption, then say what it overlooks.",
-        "wins_when": "the post rests on a claim that is true only under conditions "
-                     "it does not state",
+        # 2026-08-11 (v12) — MERT OK az atirasra. A 33 soros naplo szerint a
+        # gyoztes-eloszlas nem a POSZTOKAT kovette, hanem a `wins_when` SZELESSEGET:
+        # a harom legkonnyebben teljesitheto feltetel vitte a 33 dontesbol 31-et
+        # (field_experience "a poszt elmeleti es a gyakorlat mas" — LinkedIn-en
+        # majdnem mindig igaz; practical_lesson "diagnosztizal, de nem ad teendot";
+        # business_impact "technikai marad, az uzleti kovetkezmeny kimondatlan").
+        # A CC eredeti feltetele volt a legszűkebb: a modellnek egy KIMONDATLAN
+        # FELTETELT kellett talalnia, mig a tobbieknek egy allapotot eleg volt
+        # felismernie. Az eredmeny: a CC nyers pontja 33 sorban EGYSZER SEM ment 7
+        # fole (min 3, max 7, atlag 5.45), a gyoztes viszont 32 sorban 9 volt.
+        # Az uj feltetel UGYANAZT a szakmai tartalmat keri (feltetelhez kotott
+        # allitas), de FELISMERHETO allapotkent — ugyanazon a szinten, mint a tobbi hat.
+        "wins_when": "the post states its central claim generally, and there is a "
+                     "common case where it does not hold",
     },
     "systems_thinking": {
         "label": "Systems Thinking",
@@ -606,6 +619,33 @@ _POST_TYPES = [
 ]
 
 # --- Stage 1-5: REASON ------------------------------------------------------
+#
+# TOROLVE A `strategy_fit`-BOL (2026-08-11, engine v18): a v8-as KALIBRACIOS
+# ELLENORZES. Ket szabaly volt benne — "ha negy vagy tobb strategianak adtal 7-est
+# vagy tobbet, pontozz ujra" es "a szoras legyen legalabb 5" —, es 50 telemetria-sor
+# megmerte, mit ernek:
+#
+#     verzio | atlag >=7 db | (1) sertes | atlag szoras | (2) sertes
+#     v8     |     4.3      |    86%     |     4.7      |    43%
+#     v9     |     4.0      |    73%     |     4.9      |    27%
+#     v13    |     4.9      |    100%    |     4.9      |    36%
+#     v15    |     5.0      |    100%    |     4.8      |    20%
+#
+# A modell SOHA nem tartotta be, es romlik, nem javul. Ugyanaz a hibaosztaly, mint az
+# authenticity-rubrika: a modell onpolicingja nem meroszam — es a projekt sajat
+# szabalya erre az volt, hogy kivezetni kell, nem erositeni.
+#
+# A v16 ota a dontes amugy sem tamaszkodik a RANGSORRA: a nyers pont SZURO
+# (`strategy_candidates`, sulyozott padlo 7), a valasztast a kod hozza
+# (`decide_strategy`). A ket szabaly tehat halott szoveg volt: minden hivasban kimegy,
+# semmit nem kenyszerit ki, es azt a latszatot adja, hogy a szoras garantalt.
+#
+# AMI SZANDEKOSAN MARADT: a negy horgony (0-2 / 3-5 / 6-8 / 9-10) es a jelentesuk — a
+# v16-os jelolt-padlo EPPEN ezekre a savokra epul ("6-8: a good fit" az, amit a modell
+# megbizhatoan megmond). Tovabba a "Score on professional value ALONE" mondat, ami most
+# fontosabb, mint valaha: a padlo a SULYOZOTT pontra megy, tehat ha a modell a nyers
+# pontban is beszamitana az intentet, a bias ketszer szamolna.
+# Visszaszivargas ellen teszt orzi: test_linkedin_concreteness.py L3-L5.
 _REASON_PROMPT = f"""
 You are a senior AEC/BIM industry analyst preparing a colleague to comment on a
 LinkedIn post. You produce REASONING ONLY — never the comment itself.
@@ -663,7 +703,29 @@ Fill the JSON fields in this order:
 13. missing_perspective — the STRONGEST dimension the post does not address,
     from the allowed list. Exactly one. Never a list.
 14. missing_perspective_reason — one sentence: why this omission matters here.
-15. strategy_fit — score EVERY strategy 0-10 on how much professional value it
+15. thesis_condition — look again at the core_thesis you just named. If it is
+    stated as if it held everywhere, name ONE common case where it does NOT hold,
+    in one clause. This is not a rebuttal and not a change of subject: it is the
+    boundary the author left unstated. "It depends on the project" is not a
+    condition — name the case ("when the model is federated late", "on refurbishment
+    work where the as-built is unreliable").
+    EMPTY STRING if the claim genuinely carries no such boundary: a definition, an
+    arithmetic fact, a report of something that already happened, or a personal
+    story about the author's own experience. Do not invent a condition to fill this
+    field — an empty answer here is a valid and frequent answer.
+    AVOID THE MOST AVAILABLE ANSWER. "When the contracts or the incentives are not
+    aligned" is a real condition, but it fits almost every claim in this industry,
+    which is exactly what makes it worth little to the author. Prefer the boundary
+    that belongs to THIS subject: a technical state (an export path, a schema, a
+    version, a coordinate system), a project situation (refurbishment, a discipline
+    joining late, a phase boundary, an existing building), or an organisational fact
+    (who holds the model, who is on site, who authored the family). Answer with
+    commercial or contractual terms only if the post is itself about commercial terms.
+16. thesis_quote — if thesis_condition is not empty, copy the EXACT words from the
+    post that state that claim, verbatim, nothing else. Empty string otherwise. Do
+    not paraphrase and do not stitch fragments together — the quote is looked up in
+    the post, and a quote that is not found there voids the condition.
+17. strategy_fit — score EVERY strategy 0-10 on how much professional value it
     would add to THIS post. Do not pick a winner; score them all honestly. The
     `missing_perspective` you gave above is an input to this scoring, not the
     answer to it.
@@ -675,19 +737,19 @@ Fill the JSON fields in this order:
       6-8  a good fit: the comment would say something worth reading
       9-10 the single best available move for THIS post; any other choice would
            produce a worse comment
-    CALIBRATION CHECK, and it is not optional. Most posts have only ONE strategy
-    in the 9-10 range, and SEVERAL that belong in 0-5 because they genuinely do
-    not fit this post. If you have given four or more strategies a 7 or higher,
-    you are rating the strategies IN THE ABSTRACT — which of them sounds
-    generally useful — instead of rating them against THIS post. Re-score.
-    The spread between your highest and lowest score should be at least 5.
     Score on professional value ALONE. Do NOT down-score a strategy because it
     seems to clash with the conversation_intent or the discourse_level — those
     are weighted separately, after you answer. Double-counting them here distorts
     the decision.
-16. strategy_reason — one sentence: what the comment has to accomplish for this
+    DISAGREEMENT IS NOT A RISK YOU ARE MANAGING. A confident, popular or
+    well-written post is not evidence that its central claim is unconditional. If
+    that claim is stated generally and you can name one common case where it does
+    not hold, then constructive_challenge IS the 9-10 move for this post — naming
+    that condition is worth more to the author than a fourth supporting example.
+    Scoring it 6-7 to stay safe is the known failure of this step.
+18. strategy_reason — one sentence: what the comment has to accomplish for this
     specific audience to be worth reading.
-17. explicit_tool_request — true ONLY if the post (or the author in it) directly
+19. explicit_tool_request — true ONLY if the post (or the author in it) directly
     asks the reader to name a tool, product, plugin, service or vendor.
     True examples: "what do you use for this?", "any tool recommendations?",
     "how do you solve this in practice — which software?", "milyen eszkozzel
@@ -695,10 +757,10 @@ Fill the JSON fields in this order:
     FALSE for: describing a problem, complaining, asking for opinions or advice
     in general, rhetorical questions, or asking "how" without asking "with what".
     Someone stating a pain is NOT asking for a product. Default to false.
-18. tool_request_quote — if explicit_tool_request is true, copy the EXACT words
+20. tool_request_quote — if explicit_tool_request is true, copy the EXACT words
     from the post that contain the request, verbatim, nothing else. Empty string
     if false. Do not paraphrase — the quote is verified against the post.
-19. vendor_promotion — true ONLY if this post is MARKETING MATERIAL published by
+21. vendor_promotion — true ONLY if this post is MARKETING MATERIAL published by
     the seller of the product it promotes. The markers are register, not topic:
     the brand written about in the third person, feature or integration counts
     ("30+ integrations"), benefit claims ("nothing falls through the cracks"),
@@ -707,11 +769,11 @@ Fill the JSON fields in this order:
     enthusiastically, even naming the vendor. A person sharing their own work is
     NOT vendor marketing. FALSE for a release note or version announcement made
     by a practitioner. When genuinely unsure, answer false.
-20. promotion_evidence — if vendor_promotion is true, copy the EXACT words from
+22. promotion_evidence — if vendor_promotion is true, copy the EXACT words from
     the post that make it marketing (the call to action or the benefit claim),
     verbatim, nothing else. Empty string if false. Do not paraphrase — the quote
     is verified against the post.
-21. insight — ONE original, specific claim that is NOT stated in the post and is
+23. insight — ONE original, specific claim that is NOT stated in the post and is
     not a restatement of it. This is the substance of the comment. Go deeper,
     not wider. No hedging, no generalities like "communication is important".
     The insight must sit at the `discourse_level` you reported above — on a
@@ -724,7 +786,7 @@ Fill the JSON fields in this order:
     The line: technical concreteness YES, invented project specifics NO. General
     domain facts are fair; numbers, client names and anecdotes from projects you
     cannot have seen are not.
-22. confidence — 0.0-1.0, your confidence in this reasoning.
+24. confidence — 0.0-1.0, your confidence in this reasoning.
 
 Hard rules:
 - Do NOT summarise the post anywhere.
@@ -757,6 +819,12 @@ _REASON_SCHEMA = {
         "core_thesis": {"type": "STRING"},
         "missing_perspective": {"type": "STRING", "enum": PERSPECTIVES},
         "missing_perspective_reason": {"type": "STRING"},
+        # Kihivas-szenzor (v13). UGYANAZ A MINTA, mint a tool_request/vendor-
+        # promotion parosnal: a modell ALLIT (van kimondatlan feltetel), es ad hozza
+        # egy SZO SZERINTI idezetet, amit a kod megkeres a posztban. A dontest nem a
+        # pontszam hozza — ld. `challenge_override`.
+        "thesis_condition": {"type": "STRING"},
+        "thesis_quote": {"type": "STRING"},
         # A modell PONTOZ, nem valaszt — a dontest a kod hozza (pick_strategy).
         "strategy_fit": {
             "type": "OBJECT",
@@ -778,7 +846,8 @@ _REASON_SCHEMA = {
         "expected_responder_role", "response_mode", "human_temperature",
         "topic_gravity", "author_objective", "audience", "technical_depth",
         "emotional_tone", "core_thesis", "missing_perspective",
-        "missing_perspective_reason", "strategy_fit", "strategy_reason",
+        "missing_perspective_reason", "thesis_condition", "thesis_quote",
+        "strategy_fit", "strategy_reason",
         "explicit_tool_request", "tool_request_quote",
         "vendor_promotion", "promotion_evidence", "insight", "confidence",
     ],
@@ -935,6 +1004,133 @@ def pick_strategy(fit: dict, intent: str = "general",
         if best_score is None or scores[slug] > best_score:
             best, best_score = slug, scores[slug]
     return best or "missing_perspective"
+
+
+# --- Stage 4b: a fit mint SZURO, nem rangsor (2026-08-11, engine v16) ---------
+#
+# A MERT DIAGNOZIS (50 sor, motorverziora bontva): a nyers `strategy_fit` NEM rangsor.
+#   - a het strategiabol 4-5 MINDIG 7 fole kerul (v15: atlag 5.0 db),
+#   - a v8-as prompt ket kimondott szabalya ("legfeljebb harom lehet >= 7", "a szoras
+#     legyen legalabb 5") a sorok 73-100%-aban serul, es ROMLIK, nem javul,
+#   - a nyers maximum 21 v13+ sorbol 13-ban HOLTVERSENY (2-3 strategia egy erteken),
+#   - egy kontrollalt kiserlet (a tezis-mezok a `strategy_fit` UTAN) a CC inflaciojanak
+#     felet megszuntette, de a LAPOSSAGON semmit nem valtoztatott -> a hiba szerkezeti,
+#     nem egy adott prompt-verzio kovetkezmenye.
+#
+# Vagyis a modell megbizhatoan megmondja, hogy egy strategia ELFOGADHATO-e ("6-8: a
+# good fit" — a sajat prompt-horgonyunk szavaival), de a "9-10: az EGYETLEN legjobb"
+# fokozatot rangsor-cimkeként hasznalja. A prompt-oldali onellenorzes HAROMSZOR nem
+# vezetett eredmenyre; a projekt sajat szabalya szerint (authenticity-rubrika) az ilyen
+# onpolicingot nem erositeni kell, hanem kivezetni.
+#
+# EZERT: a pontszam SZURO lesz (ki a jelolt), es a jelolt-halmazbol a KOD dont —
+# ugyanaz az elv, ami a nyitasnal es a hossznal mar bevalt: a varianciat kodban
+# allitjuk elo, nem a mintavetelre bizzuk. A `pick_strategy` VALTOZATLAN marad, es
+# ket dolgot szolgal tovabbra is: a kikapcsolt agat (`strategy_candidates: off`) es a
+# fallbacket, ha egy poszton egyetlen strategia sem eri el a padlot.
+STRATEGY_CANDIDATE_FLOOR = 7
+
+# MIERT SEKELYEBB ez a gyűrű a nyitas-gyűrűnel (4): ott NYOLC formabol valasztunk, itt
+# a jelolt-halmaz merve 4-5 elemű. Negy kizarasa a legtobb soron kiuritene a halmazt,
+# es a mechanizmus folyamatosan a vedoszabalyra esne vissza — vagyis latszolag mukodne,
+# valojaban nem tenne semmit. Kettovel ~3 valodi jelolt marad.
+_STRATEGY_RING_SIZE = 2
+_recent_strategies: deque = deque(maxlen=_STRATEGY_RING_SIZE)
+
+
+def strategy_candidates(fit: dict, intent: str = "general",
+                        discourse_level: str = "technical") -> list[str]:
+    """A jelolt-halmaz: a padlot elero SULYOZOTT pontszam, veto nelkul.
+
+    MIERT A SULYOZOTT ES NEM A NYERS PONT — ezt a J6 teszt talalta meg, es majdnem
+    ellenkezojere fordult a mechanizmus. A nyers pontra szűrve a v2 ota dokumentalt
+    ALAPHIBAT engedtuk volna vissza: a mesterseg-poszton a modell a
+    `business_impact`-nek adott 10-et, a `field_experience`-nek 6-ot. Nyers padlora
+    az elobbi vetozott, az utobbi KIESIK — es az egyetlen jelolt a
+    `systems_thinking` (7) lett volna, sulyozottan 5.0-tal, holott a bias a
+    `field_experience`-t 9.0-ra emeli.
+    A bias EPPEN a modell ismert felrepontozasat javitja (`_LEVEL_STRATEGY_BIAS`,
+    intent-bias); egy szűro, ami a bias ELOTT vag, kidobja azt a korrekciót, amiert
+    az intent layer letezik. A padlo ezert a sulyozott pontszamra megy.
+    """
+    scores, vetoed = score_strategies(fit, intent, discourse_level)
+    return [slug for slug in STRATEGIES          # stabil, deklaracios sorrend
+            if scores[slug] >= STRATEGY_CANDIDATE_FLOOR and slug not in vetoed]
+
+
+def decide_strategy(fit: dict, post_text: str, intent: str = "general",
+                    discourse_level: str = "technical",
+                    recent=None) -> tuple[str, str]:
+    """(strategia, indok) — a jelolt-halmazbol a kod dont.
+
+    HAROM lepes, mindegyik indokkal a naploba:
+      1. JELOLTEK: a padlot elero, nem vetozott strategiak. Ha egy sincs, a dontes a
+         valtozatlan `pick_strategy` (sulyozott argmax) — a padlo nem urithet ki.
+      2. FRISSESSEG: a legutobbi `_STRATEGY_RING_SIZE` strategia kiesik. Vedoszabaly:
+         ha ezzel ures lenne a halmaz, a teljes jelolt-lista marad (a rotacio nem
+         kenyszerithet ki egy amugy sem illeszkedo strategiat).
+      3. VALASZTAS a maradekbol: a sulyozott pontszam (a bias) dont, es CSAK
+         holtversenyben a poszt hash-e. Igy a bias ott hat, ahol dolga van —
+         kozel-egyenlok kozott valaszt —, es nem egy lapos savon o a teherhordo.
+
+    A hash-es dontobiro ugyanaz a harom kovetelmeny, mint a `pick_opening`-nal: NE
+    ismetlodjon, legyen REPRODUKALHATO (ugyanaz a poszt ugyanazt adja), es SZORODJON.
+    """
+    cands = strategy_candidates(fit, intent, discourse_level)
+    if not cands:
+        fallback = pick_strategy(fit, intent, discourse_level)
+        return fallback, (f"nincs jelolt a {STRATEGY_CANDIDATE_FLOOR}-es padlo felett "
+                          f"-> sulyozott argmax ({fallback})")
+
+    # ADAPTIV GYŰRŰ-MELYSEG (2026-08-11, v17). A MERT HIBA: nyolc eles posztbol
+    # kettonel mindossze KET jelolt volt, mindketto a ketmelysegű gyűrűben — a
+    # vedoszabaly ezert visszaadta a teljes listat, es a rotacio nem tett semmit
+    # (ismetles). A melyseg ezert a jelolt-szamhoz igazodik: legfeljebb annyit
+    # zarunk ki, hogy MINDIG maradjon legalabb egy valaszthato.
+    ring = list(_recent_strategies if recent is None else recent)
+    depth = max(0, min(_STRATEGY_RING_SIZE, len(cands) - 1))
+    used = set(ring[-depth:]) if depth else set()
+    fresh = [s for s in cands if s not in used]
+    excluded = [s for s in cands if s in used]
+    if not fresh:
+        # Elerhetetlen ag a fenti melyseg-szamitas mellett (|used ∩ cands| <= len-1),
+        # ezert teszt orzi (L19). Vedoszabalykent marad: ha valaha megis idejutunk, a
+        # rotacio ne urithesse ki a dontest.
+        fresh = cands
+        note = f"mind a {len(cands)} jelolt szerepelt a gyűrűben, ezert nincs kizaras"
+    else:
+        note = (f"{len(cands)} jelolt (gyűrű-melyseg {depth}), "
+                f"kizarva ismetles miatt: {excluded}" if excluded
+                else f"{len(cands)} jelolt (gyűrű-melyseg {depth}), nincs ismetles")
+
+    scores, _ = score_strategies(fit, intent, discourse_level)
+    top = max(scores[s] for s in fresh)
+    tied = [s for s in fresh if scores[s] == top]
+    if len(tied) == 1:
+        return tied[0], f"{note}; gyoztes: sulyozott max ({top:g})"
+    digest = hashlib.sha256((post_text or "").strip().lower().encode("utf-8")).digest()
+    chosen = sorted(tied)[int.from_bytes(digest[:8], "big") % len(tied)]
+    return chosen, (f"{note}; holtverseny {top:g}-en {sorted(tied)} "
+                    f"-> poszt-hash dontott")
+
+
+def remember_strategy(slug: str) -> None:
+    """A strategia a gyűrűbe — CSAK sikeres komment utan, mint a nyitasnal."""
+    if slug:
+        _recent_strategies.append(slug)
+
+
+def strategy_candidates_enabled(config: dict) -> bool:
+    """`linkedin.strategy_candidates`: on (default) | off. YAML-boolean (§4/17).
+
+    Kikapcsolva a dontes BAJTRA a v15-os: tiszta `pick_strategy` argmax. Igy a
+    valtas A/B-zheto ugyanazon a kodon — mint az `intent_layer`-nel es a
+    `length_scaling`-nal.
+    """
+    raw = (config.get("linkedin", {}) or {}).get("strategy_candidates", "on")
+    if isinstance(raw, bool):
+        return raw
+    return str(raw).strip().lower() not in ("off", "false", "0", "no", "none")
 
 # --- Stage 6.5: nyitas-rotacio (2026-08-09, v5) ------------------------------
 # A PROBLEMA, amit ez old meg — es amit egyik meglevo kapu sem tud elkapni:
@@ -1273,6 +1469,272 @@ def _opening_window(text: str) -> list[str]:
     return [p.strip() for p in parts if p.strip()][:_OPENING_SENTENCES]
 
 
+# --- Nyitas-visszhang: a MEGVALOSULT nyitas, nem a kijelolt forma (2026-08-11) ---
+#
+# A MERT HIBA (ot eles generalas, `bench_posts/01..05`): a rotacio HAROM KULONBOZO
+# formát osztott ki (`own_practice`, `strikes`, `pattern`), a modell megis
+# haromszor ugyanazzal a mondattal indult — "What strikes me ...". A forma-kijeloles
+# tehat UTASITAS, nem kikenyszeritett eredmeny, es a megvalosult nyitast eddig
+# semmi nem mérte.
+#
+# MIERT NEM A `_STOCK_OPENING_PATTERNS` BOVITESE: az szotari lista — csak azt
+# tiltja, amit valaki mar felvett ra, es a "What strikes me" eppen a sajat
+# katalogusunk (`OPENING_SHAPES['strikes']`) ajanlott formája. Tiltolistara tenni
+# annyi lenne, mint a sajat whitelistunk ellen kapuzni (ld. G1 teszt). A hiba nem
+# a kifejezesben van, hanem az ISMETLESBEN.
+#
+# A MEGOLDAS: a sajat elozo kimeneteinkhez merunk. Ugyanaz a fajta hiba, mint amire
+# a forma-rotacio szuletett — ket komment kulon-kulon hibatlan, sorozatban megis
+# felismerheto —, ezert ugyanaz a mintat kap: gyűrű + determinisztikus kapu.
+#
+# MIERT UGYANOLYAN MELY A KET GYŰRŰ (`_OPENING_RING_SIZE`): kulonben a ket
+# mechanizmus egymas ellen dolgozna. A forma-gyűrű 4 hivason at kizarja a mar
+# hasznalt formát; ha a visszhang-gyűrű ennel MELYEBB lenne, egy olyan formát is
+# megbuntetne, amit a rotacio joggal ad ki ujra. Egyetlen szammal a ket szabaly
+# definicio szerint konzisztens.
+_OPENING_ECHO_RING_SIZE = _OPENING_RING_SIZE
+_recent_opening_texts: deque = deque(maxlen=_OPENING_ECHO_RING_SIZE)
+
+# Hany szo az ujjlenyomat. HAROM, mert a mert eset pontosan ennyiben egyezett
+# ("What strikes me ABOUT THIS IS" / "...ABOUT THE DISCUSSION" / "...IS HOW OFTEN"),
+# es mert a negyedik szonal mar a tartalom kezdodik: annal hosszabb ujjlenyomat
+# ket azonos mozdulatot kulonbozonek latna. Ketto viszont tul rovid — az "I've
+# found" (`own_practice`) es az "I've run into" (`encountered`) ket KULONBOZO
+# ajanlott forma, amiket nem szabad egybemosni.
+_OPENING_FINGERPRINT_WORDS = 3
+
+# Minden nem betu/szam SZOKOZ lesz, tehat az "I've found" -> "i ve found": az
+# irasjel-valtozat (`'` vs a modell altal kedvelt `’`) ugyanarra a mozdulatra
+# ugyanazt az ujjlenyomatot adja. Az aposztrof igy egy szohatart is bevisz — ez
+# nem baj: "i ve found" (`own_practice`) es "i ve run" (`encountered`) a harmadik
+# szonal tovabbra is elvalik.
+#
+# EKEZET-HAJTOGATAS (2026-08-11, MERT HIBA): az elso valtozat `[^a-z0-9]`-t
+# hasznalt, ami a MAGYAR ekezetes betut is szohatarnak vette. Egy eles magyar
+# kommentnel ("Egy visszatérő mintát látok") az ujjlenyomat 'egy visszat r' lett —
+# vagyis harom szo helyett masfel, es a fragmentumok kozott sokkal konnyebb a
+# hamis egyezes. Ezert NFKD-vel bontunk es a kombinalo jeleket dobjuk el:
+# "visszatérő" -> "visszatero", egyetlen tokenkent. Melekhaszon: az ekezet nelkul
+# irt valtozat ("koszonom" vs "köszönöm") ugyanazt az ujjlenyomatot adja.
+# ISMERT KORLAT: a feloldott alak MAS ujjlenyomat ("i have found" != "i ve found").
+# Fail-open, azaz legfeljebb atengedi az ismetlest — nem hibas sertest ad.
+_OPENING_FP_STRIP = re.compile(r"[^a-z0-9]+")
+
+
+def _fold_accents(text: str) -> str:
+    """Ekezet -> alapbetu (NFKD + kombinalo jelek eldobasa)."""
+    return "".join(c for c in unicodedata.normalize("NFKD", text)
+                   if not unicodedata.combining(c))
+
+
+# --- Nyito-KERETEK: ugyanaz a mozdulat mas szavakkal (2026-08-11, engine v11) ---
+#
+# A MERT KIJATSZAS (n=2): a v9-es kapu blokkolta a "What strikes me"-t, a modell
+# masodik kore pedig "What's compelling about Frank's approach..."-szal indult.
+# Harom szo szerint MAS ujjlenyomat, retorikailag UGYANAZ a mozdulat: „megnevezem,
+# mi a feltuno a szerzo pontjaban". A lexikai ujjlenyomat a betűt meri, a mozdulat
+# viszont szemantikai — ugyanaz a hibaosztaly, mint a `post_overlap`-nal.
+#
+# A MEGOLDAS NEM TILTAS, HANEM KANONIZALAS. Ez a kulonbseg dönti el, miert nem esik
+# a szotar-csapdaba: a kifejezes tovabbra is HASZNALHATO (a `strikes` a sajat
+# katalogusunk formája), csak az ISMETLESE lathato. Egy keret-csaladra eso ket
+# egymas utani nyitas ugyanazt az ujjlenyomatot adja, akarhogy is variálja a szavakat.
+#
+# SZUK: csak MERT alakok es azok kozvetlen szinonimai, es CSAK az elso mondat ELEJEN
+# (`^`). A komment kozepen allo ugyanilyen fordulat nem nyitasi hiba — a poszt 13
+# kommentje ("I've run into similar challenges..., and what strikes me is...") ezert
+# szandekosan a sajat `i ve run` ujjlenyomatat kapja: a NYITASA valoban mas mozdulat.
+_OPENING_FRAMES: list[tuple[str, str]] = [
+    # A mert par: "What strikes me about this is..." es "What's compelling about..."
+    (r"^what(?:'s| is| has)? (?:strikes?|struck|stricken)? ?me\b", "frame:notable"),
+    (r"^what(?:'s| is)? (?:so )?(?:compelling|interesting|striking|notable|telling|"
+     r"remarkable|fascinating|noteworthy)\b", "frame:notable"),
+    (r"^what (?:i find|really) (?:compelling|interesting|striking|notable)\b",
+     "frame:notable"),
+]
+
+
+def opening_frame(sentence: str) -> str:
+    """A nyito mondat retorikai kerete, vagy "" ha egyik csaladba sem esik."""
+    text = (sentence or "").strip().lower()
+    for pattern, name in _OPENING_FRAMES:
+        if re.search(pattern, text):
+            return name
+    return ""
+
+
+def shape_frame(opening_key: str) -> str:
+    """A KIOSZTOTT forma sajat kerete (a katalogus peldajabol), vagy "".
+
+    MIERT KELL: a keret-kanonizalas megbontana a ket gyűrű szimmetriajat. A
+    forma-gyűrű 4 hivason at kizarja a `strikes` formát, de egy MAS formát kapott
+    komment is elhasznalhatja a `frame:notable` keretet (mérve: a 12-es komment
+    `stood_out` kiosztassal indult "What strikes me"-vel). Ha ezutan a rotacio
+    kiadja a `strikes`-ot, a modell a SAJAT UTASITASA miatt kapna sertest. Ezert a
+    hivo a kiosztott forma keretet kiveszi az osszehasonlitasbol: az utasitas
+    mindig eros'ebb, mint a visszhang-tilalom.
+    """
+    shape = OPENING_SHAPES.get(opening_key or "")
+    if not shape:
+        return ""
+    return opening_frame(shape["example"].strip('"'))
+
+
+def echo_ring_for(opening_key: str) -> list[str]:
+    """A KAPUNAK atadott gyűrű: a kiosztott forma sajat kerete kimarad belole.
+
+    Kulon fuggveny es nem egy sor a hivo oldalon, mert ez a szabaly a ket
+    mechanizmus kozotti szerzodes (`shape_frame` docstring), es igy tesztelheto
+    onmagaban. Ures `own` eseten semmi nem esik ki: ures ujjlenyomat sosem kerul
+    a gyűrűbe.
+    """
+    own = shape_frame(opening_key)
+    return [fp for fp in _recent_opening_texts if fp != own]
+
+
+def opening_fingerprint(comment: str) -> str:
+    """A komment nyitasanak ujjlenyomata.
+
+    Ket lepes: eloszor a KERET (`_OPENING_FRAMES`) — ha a nyito mondat egy ismert
+    retorikai csaladba esik, a csalad neve az ujjlenyomat, tehat a szo-szintű
+    varialas nem bujik el. Kulonben az ELSO mondat elso harom szava.
+
+    Miert csak az elso mondat (szemben a kapu ket-mondatos ablakaval): ez a
+    szabaly a retorikai MOZDULAT ismetleset meri, es azt az elso mondat hordozza.
+    A masodik mondat mar tartalom — ket komment ott joggal indulhat hasonloan.
+    """
+    window = _opening_window(comment)
+    if not window:
+        return ""
+    frame = opening_frame(window[0])
+    if frame:
+        return frame
+    folded = _fold_accents(window[0].lower())
+    words = [w for w in _OPENING_FP_STRIP.sub(" ", folded).split() if w]
+    return " ".join(words[:_OPENING_FINGERPRINT_WORDS])
+
+
+def remember_opening_text(comment: str) -> None:
+    """A megvalosult nyitas a gyűrűbe — CSAK sikeres komment utan, mint a formánal.
+
+    Egy hibara futott (soha meg nem jelent) komment nyitasa nem okoz ismetlodest,
+    tehat nem is kell kizarni a kovetkezobol.
+    """
+    fp = opening_fingerprint(comment)
+    if fp:
+        _recent_opening_texts.append(fp)
+
+
+def reset_opening_state() -> None:
+    """MIND AZ OT varianciа-gyűrűt nullazza (forma, nyitas, mozdulat, feltetel, strategia).
+
+    MIERT KELL: mind a ketto processz-eletű varianciа-allapot, es egy teszt, ami
+    hivas-sorozatokra allit (pl. "tiszta elso kor -> nincs ujrairas"), csak akkor
+    izolalt, ha MINDKETTO tiszta. Amikor a visszhang-gyűrű bejott, harom meglevo
+    teszt azonnal elbukott, mert csak a forma-gyűrűt nullaztak — ezert egy helyen
+    van, es nem hivasonkent ket sorban: a kovetkezo gyűrű igy nem ejti ugyanabba a
+    csapdaba a kovetkezo tesztet.
+    """
+    _recent_openings.clear()
+    _recent_opening_texts.clear()
+    _recent_content_moves.clear()
+    _recent_condition_families.clear()
+    _recent_strategies.clear()
+
+
+def opening_echo_gate_enabled(config: dict) -> bool:
+    """`linkedin.opening_echo_gate`: on (default) | off. YAML-boolean kezelve (§4/17).
+
+    Kikapcsolva a `check_quality` NEM kap gyűrűt, tehat bajtra a 2026-08-10-i kapu
+    fut — ugyanaz az A/B-elv, mint az `opening_variety`-nel es a `length_scaling`-nel.
+    """
+    raw = (config.get("linkedin", {}) or {}).get("opening_echo_gate", "on")
+    if isinstance(raw, bool):
+        return raw
+    return str(raw).strip().lower() not in ("off", "false", "0", "no", "none")
+
+
+# --- Tartalmi mozdulat: a GONDOLAT visszhangja (2026-08-11, engine v14) -------
+#
+# A MERT HIBA: a kihivas-szenzor (v13) utan a `constructive_challenge` vegre nyert —
+# es HET CC-kommentbol HAT ugyanoda futott ki: „a valodi kerdes a szerzodes /
+# incentiva-struktura". Szo szerinti idezetek: „clear contractual ask" · „shift in
+# contractual frameworks" · „the contractual structure itself" · „legal and
+# commercial frameworks … liability" · „contractual incentives". A strategia
+# diverzifikalodott, a GONDOLAT nem.
+#
+# Ez ugyanaz a hibaosztaly, mint a nyitas-visszhang: ket komment kulon-kulon
+# hibatlan, sorozatban megis egy hangot ad. Ezert ugyanazt a mintat kapja —
+# KANONIZALAS es gyűrű, NEM tiltolista. A kereskedelmi keretezes nem hiba: a
+# `business_impact` strategia direktivaja EPPEN ezt keri. A hiba az ISMETLESE.
+#
+# MIERT >= 2 TALALAT: egy futo emlites nem a komment mozdulata. A mert sorokban 2-4
+# kulonbozo terminus volt; egyetlen "incentive"-nel (41. sor) meg nem allithato,
+# hogy a komment EZ. Ugyanaz a kuszob-logika, mint az `ai_fingerprint_terms`-nel.
+_CONTENT_MOVES: list[tuple[str, str]] = [
+    # A `procurement`, `compensat*` es a puszta `fees` UTOLAG kerult be, mert a mert
+    # adatban ott voltak es a lista kihagyta oket: „when the client's PROCUREMENT
+    # process does not explicitly define and COMPENSATE for knowledge transfer"
+    # (elfogadott feltetel), illetve „design FEES aren't always structured to fully
+    # cover that coordination effort" (a v14-es kapu lexikai kicsuszasa). Ugyanaz a
+    # szotar-hianyossag, mint a 2026-08-10-i ragozas-javitasnal: a hiany ALULSZAMOL.
+    (r"\b(?:contract|contracts|contractual|contracting)\b|\bincentiv\w+\b|"
+     r"\bliabilit\w+\b|\bbillable\b|\bhourly billing\b|\bfee structure\b|"
+     r"\bfees?\b|\bprocurement\b|\bcompensat\w+\b|"
+     r"\bcommercial model\w*\b|\bpayment milestone\w*\b|\breimburs\w+\b",
+     "move:commercial_frame"),
+]
+_CONTENT_MOVE_MIN_HITS = 2
+
+# A gyűrű melysege ugyanaz, mint a masik kettonel — ld. `_OPENING_ECHO_RING_SIZE`
+# indoklasa: kulonbozo melysegű gyűrűk egymas ellen dolgoznak.
+_recent_content_moves: deque = deque(maxlen=_OPENING_RING_SIZE)
+
+# Az a strategia, aminek a kereskedelmi keretezes a SAJAT direktivaja („Translate
+# the technical issue into its business consequence"). Ott a mozdulat utasitas, nem
+# visszhang — ugyanaz a szerzodes, mint a `shape_frame`-nel: az utasitas erosebb.
+_MOVE_EXEMPT_STRATEGY = {"move:commercial_frame": "business_impact"}
+
+
+def content_move(comment: str) -> str:
+    """A komment tartalmi mozdulata, vagy "" ha egyik ismert csaladba sem esik."""
+    low = (comment or "").lower()
+    for pattern, name in _CONTENT_MOVES:
+        if len(set(m.group(0).lower() for m in re.finditer(pattern, low))) \
+                >= _CONTENT_MOVE_MIN_HITS:
+            return name
+    return ""
+
+
+def remember_content_move(comment: str) -> None:
+    """A megvalosult mozdulat a gyűrűbe — CSAK sikeres komment utan."""
+    move = content_move(comment)
+    if move:
+        _recent_content_moves.append(move)
+
+
+def move_ring_for(strategy: str) -> list[str]:
+    """A kapunak atadott mozdulat-gyűrű: a strategia sajat mozdulata kimarad."""
+    own = next((m for m, s in _MOVE_EXEMPT_STRATEGY.items() if s == strategy), "")
+    return [m for m in _recent_content_moves if m != own]
+
+
+def content_echo_gate_enabled(config: dict) -> bool:
+    """`linkedin.content_echo_gate`: on (kod-default) | off. YAML-boolean (§4/17).
+
+    A MERES VERDIKTJE: a config 'off'-ra allitja, mert ot eles futasban a kapu
+    DETEKTALT, de NEM GYOGYITOTT — harom elsules, ketto sertessel kiment, es
+    egyetlen komment sem hagyta el a kereskedelmi keretet. A valodi ok feljebb van:
+    ot `thesis_condition`-bol ot szerzodesi jellegű volt, tehat a monokultura a
+    REASON lepesben keletkezik. A `content_move` MERESE kapcsolo nelkul is fut —
+    csak a kapuzas all le. Reszletes indoklas: `config.yaml`, `content_echo_gate`.
+    """
+    raw = (config.get("linkedin", {}) or {}).get("content_echo_gate", "on")
+    if isinstance(raw, bool):
+        return raw
+    return str(raw).strip().lower() not in ("off", "false", "0", "no", "none")
+
+
 _EM_DASH_PATTERN = re.compile(r"[—]")
 
 # Csak a komment VEGEN vizsgaljuk: onmagukban ezek a szavak lehetnek igazak, de
@@ -1411,6 +1873,60 @@ _MARKETING_CLICHE_PATTERNS: list[tuple[str, str]] = [
     (r"\bforradalmasit(?:ja|ani)\b|\bforradalmasít(?:ja|ani)\b", "revolutionize (HU)"),
 ]
 
+# --- Stage 9e: tanacsadoi hang, EGESZ kommentre (2026-08-11, engine v10) ------
+# A MERES, ami ezt kikenyszeritette: a "We (often) see/found" szerkezet a 32 kiadott
+# kommentbol TIZBEN benne volt (31%) — messze a leggyakoribb tell a korpuszban:
+#   "We've often found" 5x | "We often see" 4x (ebbol 2 a 3. MONDATBAN) | "We often rebuild" 1x
+#
+# MIERT NEM A NYITAS-ABLAK SZELESITESE: a `_STOCK_OPENING_PATTERNS` ket mondatot
+# mer, es ez SZANDEKOS — a 2026-08-10-i dontes kimondta, hogy egy sablonos fordulat
+# a 8. mondatban nem NYITASI hiba, ott a cimke felrevezeto lenne. A megfigyelt
+# viselkedes viszont pont az volt, hogy a frazis KIHATRALT az ablakbol: a v9 ket
+# kommentjeben a 3. mondatban all, ahol semmi nem fogta. A szotar volt hianyos, nem
+# az ablak szűk: ez a szerkezet SEM az `_AI_FINGERPRINT_PATTERNS`-ben, SEM a
+# `_MARKETING_CLICHE_PATTERNS`-ben nem volt.
+#
+# MIERT FELTETEL NELKUL MER: ugyanaz az érv, mint a marketing-klisenel. A tanacsadoi
+# altalanositas ("mi gyakran azt latjuk...") nem szint-fuggo hiba — egy gyakorlo
+# szakember kommentjeben semmilyen sikon nem jo iras, mert megnevezetlen tapasztalatra
+# hivatkozik konkretum helyett. A szerzohoz relativizalas (`ai_fingerprint_terms`
+# mintaja) itt ezert nem kell: ez retorikai allas, nem szakszo, amit a szerzo
+# "engedelyezhetne".
+#
+# SZUK ES VEDHETO — ami SZANDEKOSAN KIMARAD:
+#   - "One pattern I've noticed" (4 talalat): ez a SAJAT katalogusunk `pattern`
+#     formája (`OPENING_SHAPES`). Tiltolistara tenni ugyanaz az onellentmondas
+#     lenne, amit a G1 teszt orz — az ismetlest a nyitas-visszhang kapu kezeli.
+#   - "the real work / challenge / hit / advantage" (8 talalat): NEM kerul be, pedig
+#     a szamok alapjan indokolt lehetne. A v7-es A/B-ben eppen egy ilyen mondat volt
+#     az elso vagas nelkul kiposztolhato komment magja ("the real hit is often
+#     downstream"). Ez TARTALMI szerkezet, nem tic; a lezaras ismetlodese cross-
+#     komment jelenseg, tehat ha kell, a visszhang-kapuhoz hasonlo mechanizmus a
+#     helyes valasz, nem szotar.
+#   - "in practice" / "in our experience": az elso mar a nyitas-listan van, a
+#     masodikra NULLA talalat — meres nelkul nem veszunk fel semmit.
+_CONSULTANT_VOICE_PATTERNS: list[tuple[str, str]] = [
+    # A mert alak es minden ragozott valtozata. A `we've/we have` azert van benne,
+    # mert a tiz talalatbol OT eppen ez volt ("We've often found"), negy a
+    # "We often see", egy a "We often rebuild" — egyetlen minta fogja mind a harmat.
+    (r"\bwe(?:'ve| have)? (?:often|frequently|commonly|typically|usually|routinely|"
+     r"generally) (?:see|seen|find|found|observe|observed|notice|noticed|encounter|"
+     r"encountered|run into|rebuild)\b", "tanacsadoi hang (We often see/found)"),
+    # Az ELSO SZEMELYU valtozat NEM volt a mert adatban. Megis bekerul, mert a
+    # pronomen-csere a legkezenfekvobb kijatszas ugyanarra a szerkezetre — ugyanaz
+    # a teljesseg-erv, ami a 2026-08-10-i szotar-ragozas javitasa mogott allt
+    # (`standardizing` != `standardi[sz]ation`). NEM utkozik az `own_practice`
+    # formával ("I've found..."): ott nincs altalanosito hatarozo a ket szo kozott.
+    (r"\bi(?:'ve| have)? (?:often|frequently|commonly|typically|usually|routinely|"
+     r"generally) (?:see|seen|find|found|observe|observed|notice|noticed|encounter|"
+     r"encountered|run into)\b", "tanacsadoi hang (I often find)"),
+    # A magyar megfelelo: egyetlen mert eset (a magyar `--force` futas 2. mondata),
+    # de szo szerint ugyanaz a mozdulat. A "gyakorlatban" ONMAGABAN legitim
+    # ("a gyakorlatban ez 10 mm"), ezert a minta megkoveteli a tapasztalat-igét.
+    (r"\ba gyakorlatban azt tapasztal(?:juk|om|tuk|tam)\b",
+     "tanacsadoi hang (HU: a gyakorlatban azt tapasztaljuk)"),
+]
+
 # Azok az intentek, ahol a munkaparancs KIFEJEZETTEN tiltja az uzleti keretezest,
 # fuggetlenul attol, mit mondott a discourse_level. Ha a szint-osztalyozas
 # tevedne, ez a masodik halo.
@@ -1515,6 +2031,34 @@ def target_length(post_text: str) -> tuple[int, int]:
 # all, tehat nem harcol a prompttal, de tovabbra is kifogja az elfajzott egysorost
 # es a felig ures valaszt. A 60 azert volt karos, mert egy jogosan rovid valaszt
 # (az otodik meresnel a jo verzio ~45 szo lett volna) TOMESRE kenyszeritett.
+# --- Ujrairo korok (2026-08-11, engine v14) ----------------------------------
+# A MERT HIBA: negy komment SERTESSEL ment ki (28., 38., 49., 50. sor). A ciklus
+# `range(2)` volt, tehat ket elutasitas utan a motor visszaadta a kommentet — es a
+# mert mintazat mindig ugyanaz: az 1. kor "We often see"-re bukott, a 2. kor pedig
+# UGYANANNAK a mozdulatnak mas alakjat hozta ("I often find"). A modell valtozatot
+# cserelt, nem viselkedest.
+#
+# MIERT NEM EGYSZERUEN range(3): egy harmadik hivas MINDEN makacs esetben fizetne,
+# akkor is, ahol a maradek sertes nem szoválasztas kerdese (pl. "tul rovid", vagy
+# uzleti absztrakcio technikai beszelgetesben — ott a modellnek MAS gondolatot kell
+# talalnia, nem mas szot). A harmadik kor ezert CSAK az ismetles-osztalyra jar: ott
+# a javitas biztosan lehetseges, mert csak a megfogalmazast kell cserelni.
+#
+# A negy mert eset MINDEGYIKE ebbe az osztalyba esett.
+MAX_COMPOSE_ATTEMPTS = 3
+
+# A cimke-prefixek, amiket egy ujrafogalmazas biztosan meg tud oldani: mind a HOGYAN
+# fogalmazunk, nem a MIT mondunk. A tobbi sertes (hossz, absztrakcio-szivargas,
+# kep-hivatkozas, poszt-atfedes) tartalmi valtozast kiván, arra nem jar plusz kor.
+_REPHRASABLE_PREFIXES = ("ismetlodo nyitas", "tanacsadoi nyitas", "tanacsadoi hang")
+
+
+def only_rephrasable(issues: list[str]) -> bool:
+    """Kizarolag ujrafogalmazassal javithato sertesek? (ures lista: nem)"""
+    return bool(issues) and all(
+        any(i.startswith(p) for p in _REPHRASABLE_PREFIXES) for i in issues)
+
+
 MIN_WORDS = 35
 MAX_WORDS = 175
 MAX_PARAGRAPHS = 2
@@ -1747,7 +2291,9 @@ def concreteness(comment: str, post_text: str) -> dict:
 def check_quality(comment: str, post_text: str, brand_allowed: bool = False,
                   intent: str = "", discourse_level: str = "",
                   human_temperature: str = "",
-                  image_attached: bool = False) -> list[str]:
+                  image_attached: bool = False,
+                  recent_openings: list[str] | None = None,
+                  recent_moves: list[str] | None = None) -> list[str]:
     """Stage 9 — deterministikus kapu. Visszaadja a KONKRET serteseket.
 
     A lista uressege a "mehet" jel. A hivo ezt a listat adja at az ujrairo
@@ -1778,6 +2324,12 @@ def check_quality(comment: str, post_text: str, brand_allowed: bool = False,
 
     `image_attached` (2026-07-31): ha a REASON kepet is kapott, a kommentben a
     KEPRE hivatkozas sertes — az ilyen allitast kodban nem tudjuk ellenorizni.
+
+    `recent_openings` (2026-08-11): a legutobbi kommentek nyitas-ujjlenyomatai
+    (`opening_fingerprint`). Ha a mostani nyitas kozottuk van, az sertes. None vagy
+    ures lista eseten a kapu nem meri — igy a REGI hivasok es a kikapcsolt
+    `opening_echo_gate` bajtra a korabbi viselkedest adjak. A fuggveny TISZTA marad:
+    a gyűrűt a hivo adja at, nem a modul-allapotbol olvassuk.
     """
     issues: list[str] = []
     text = (comment or "").strip()
@@ -1797,6 +2349,13 @@ def check_quality(comment: str, post_text: str, brand_allowed: bool = False,
         if re.search(pattern, low, re.IGNORECASE | re.MULTILINE):
             issues.append(f"marketing-klise ({label})")
 
+    # Tanacsadoi hang: az EGESZ kommentre mer, nem csak a nyitasra — a mert hiba
+    # eppen az volt, hogy a frazis a 3. mondatba hatralt ki a nyitas-ablakbol.
+    # Feltetel nelkul, mint a marketing-klise; ld. `_CONSULTANT_VOICE_PATTERNS`.
+    for pattern, label in _CONSULTANT_VOICE_PATTERNS:
+        if re.search(pattern, low, re.IGNORECASE | re.MULTILINE):
+            issues.append(label)
+
     if shaping_active:
         # Az ELSO KET MONDATRA merunk, nem csak sorelejere — ld. `_opening_window`.
         # A mintak `^`-hoz kotottek, ezert mondatonkent illesztunk; MULTILINE itt
@@ -1810,6 +2369,27 @@ def check_quality(comment: str, post_text: str, brand_allowed: bool = False,
         for pattern, label in _EFFICIENCY_ENDING_PATTERNS:
             if re.search(pattern, tail, re.IGNORECASE | re.MULTILINE):
                 issues.append(label)
+
+    # Nyitas-visszhang: nem szotarhoz, hanem a SAJAT legutobbi kimeneteinkhez mer.
+    # Szandekosan a `shaping_active` blokkon KIVUL: a mert hiba (haromszor "What
+    # strikes me") nem az intent layertol fugg, hanem attol, hogy a modell ugyanazt
+    # a mozdulatot ismetli. A hatokort a hivo szabja meg azzal, hogy atadja-e a
+    # gyűrűt (`opening_echo_gate`).
+    if recent_openings:
+        opening_fp = opening_fingerprint(text)
+        if opening_fp and opening_fp in set(recent_openings):
+            issues.append(f"ismetlodo nyitas (a legutobbi kommentek egyikevel "
+                          f"azonos kezdes: '{opening_fp}')")
+
+    # Tartalmi mozdulat: ugyanaz a mechanizmus egy szinttel beljebb — nem a NYITAS,
+    # hanem a GONDOLAT ismetlodese. NEM ismetles-osztaly (`_REPHRASABLE_PREFIXES`):
+    # ezt nem mas szoval, hanem MAS gondolattal kell javitani, ezert nem is jar ra
+    # harmadik kor.
+    if recent_moves:
+        move = content_move(text)
+        if move and move in set(recent_moves):
+            issues.append(f"ismetlodo gondolat (a legutobbi kommentek egyike "
+                          f"ugyanide futott ki: '{move}')")
 
     # Absztrakcio-szivargas: uzleti/vezetoi szotar olyan beszelgetesben, amit a
     # szerzo technikai szinten tartott. Csak akkor mer, ha van mihez mernie —
@@ -2116,6 +2696,179 @@ def _quote_in_post(quote: str, post_text: str, min_words: int = 3) -> bool:
     if not q or len(q.split()) < min_words:
         return False
     return q in p
+
+
+# --- Kihivas-szenzor (2026-08-11, engine v13) --------------------------------
+# A MERT PROBLEMA: a `constructive_challenge` 33 generalasbol EGYSZER SEM nyert. A
+# diagnozis kizart ket magyarazatot:
+#   - NEM a bias: a CC nyers pontja sosem ment 7 fole, a gyoztes 32 sorban 9 volt,
+#     tehat +2..+9,5 kellett volna. Nulla olyan sor, ahol 1 pont eleg — egy ilyen
+#     bias mar teherhordo, amit a v8 dontes kizar.
+#   - NEM redundancia: kenyszeritett CC-vel (`bench_linkedin.py --strategy`) az
+#     egyik poszton a korpusz legjobb regiszter-erteket adta (anchors 1, hedges 0,
+#     rewrites 0), es pont a kimondatlan feltetelt talalta meg.
+# A hiba tehat a KIVALASZTASBAN van: a modell a 9-est rangsor-cimkeként hasznalja,
+# amire egy strategia nem tud "felkapaszkodni".
+#
+# A MEGOLDAS a projekt sajat mintaja (`explicit_tool_request` + igazolt idezet ->
+# markaemlites): a modell SZENZOR, a kod BIRO. Nem uj sulyt adunk, hanem uj TENYT —
+# es a tenyt kodbol ellenorizzuk.
+_CHALLENGE_INTENTS = {"professional_opinion", "industry_debate"}
+
+# A PADLO-FELTETEL (2026-08-11, v19-ben atirva): a szenzornak van egy "a modell maga is
+# jonak jelolte" feltetele. A v13-ban ez egy KULON konstans volt (`CHALLENGE_FIT_FLOOR
+# = 7`, a CC akkori tortenelmi maximuma) a NYERS ponton. Ket dolog tortent azota:
+#
+#   1. NO-OP LETT. A v13-as `thesis_condition`-kerdes (ami a pontozas ELOTT all)
+#      megemelte a CC nyers pontjat 5.7-rol 8.6-ra (v15: 9.0), tehat a 7-es padlo a
+#      mert eloszlason SOSEM kot. Egy feltetel, ami mindig teljesul, ugy olvasodik,
+#      mintha vedelem lenne — pedig nem az.
+#   2. KETTOS DEFINICIO. A v16 bevezette a `STRATEGY_CANDIDATE_FLOOR`-t ugyanarra a
+#      fogalomra ("a modell elfogadhatonak jelolte"), csak a SULYOZOTT ponton — es a
+#      J6 teszt megmutatta, miert az a helyes (a nyers ponton szűrve a bias-korrekcio
+#      kiesik). Ket kulon konstans ugyanarra a fogalomra drift-hazard: az egyiket
+#      atirja valaki, a masikat elfelejti.
+#
+# EZERT: a szenzor a `strategy_candidates`-re delegal — EGY definicio, sulyozott
+# ponton, a vetoval egyutt. A feltetel MARAD (nem toroltuk, mint a v18-as halott
+# prompt-szoveget), mert regresszio-vedelem: ha a CC pontozasa valaha visszaesik (pl.
+# a v12-es DISAGREEMENT-horgony kivezetesekor), a szenzor ne leptessen elo egy rosszul
+# illeszkedo strategiat. Hogy elsul-e, az a `challenge_reason`-bol megszamolhato.
+
+# --- A FELTETEL-MONOKULTURA (2026-08-11, engine v15) -------------------------
+# A MERT HIBA: a v13-as szenzor bevezetese utan OT eles futasbol OT `thesis_condition`
+# szerzodesi/incentiva-jellegű volt. A v14-es kimeneti kapu ezt DETEKTALTA, de nem
+# gyogyitotta (harom elsules, ketto sertessel kiment, nulla elhagyta a keretet) —
+# mert kimeneti kapu nem javit BEMENETI monokulturat.
+#
+# KET REZ, mert kulon egyik sem eleg:
+#   1. PROMPT: a `thesis_condition` leirasa megnevezi a legkonnyebben elerheto
+#      valaszt es elteriti tole (ugyanaz a technika, ami a v8-as kalibracios
+#      ellenorzesnel es a v12-es "disagreement is not a risk" horgonynal bevalt).
+#      Ez a MERT attraktort kezeli.
+#   2. BIRO: ha a feltetel csaladja megegyezik a legutobbi ELFOGADOTT felteteleivel,
+#      a feltetel nem szamit TENYNEK -> a szenzor nem sul el. Ez a KOVETKEZO
+#      attraktort is kezeli, barmi is legyen az, es nem a modell jóindulatan all.
+#
+# MIERT >= 1 TALALAT ITT, es miert >= 2 a kommentnel (`_CONTENT_MOVE_MIN_HITS`): a
+# komment 100+ szo, ott egy futo emlites meg nem a mozdulat. A feltetel EGY tagmondat
+# — ott az elso kereskedelmi terminus mar a feltetel lenyege.
+_CONDITION_FAMILY_MIN_HITS = 1
+
+# Csak az ELFOGADOTT (a strategiat tenylegesen eldonto) feltetelek kerulnek ide: egy
+# el nem sult szenzor feltetele nem befolyasolt kommentet, tehat nem is kell kizarnia
+# egy kesobbit. Ugyanaz az elv, mint a nyitas-gyűrűnel ("csak sikeres komment utan").
+_recent_condition_families: deque = deque(maxlen=_OPENING_RING_SIZE)
+
+
+def condition_family(condition: str) -> str:
+    """A kimondatlan feltetel csaladja, vagy "" ha egyik ismert csaladba sem esik."""
+    low = (condition or "").lower()
+    for pattern, name in _CONTENT_MOVES:
+        if len(set(m.group(0).lower() for m in re.finditer(pattern, low))) \
+                >= _CONDITION_FAMILY_MIN_HITS:
+            return name
+    return ""
+
+
+def remember_condition_family(condition: str) -> None:
+    """Az ELFOGADOTT feltetel csaladja a gyűrűbe — csak ha a szenzor elsult."""
+    family = condition_family(condition)
+    if family:
+        _recent_condition_families.append(family)
+
+# Az idezet-hossz padloja a TEZISRE. A `_quote_in_post` alapertelmezese 3 szo, ami a
+# `tool_request_quote`-ra van kalibralva ("which software?" — egy rovid kerdes eleg
+# bizonyitek). Egy TEZIS viszont ALLITAS: alany es allitmany kell hozza. Teszt
+# talalta meg (K5.1): a "the concept model" harom szoval atment, holott az egy
+# fonevi szerkezet, nem a poszt kozponti allitasa.
+THESIS_QUOTE_MIN_WORDS = 6
+
+
+def challenge_sensor_enabled(config: dict) -> bool:
+    """`linkedin.challenge_sensor`: on (default) | off. YAML-boolean kezelve (§4/17).
+
+    Kikapcsolva a dontes bajtra a v12-es (tiszta `pick_strategy` argmax), tehat a
+    szenzor A/B-zheto — ugyanaz az elv, mint az `opening_echo_gate`-nel.
+    """
+    raw = (config.get("linkedin", {}) or {}).get("challenge_sensor", "on")
+    if isinstance(raw, bool):
+        return raw
+    return str(raw).strip().lower() not in ("off", "false", "0", "no", "none")
+
+
+def challenge_override(reasoning: dict, post_text: str, intent: str,
+                       level: str,
+                       recent_conditions: list[str] | None = None,
+                       recent_strategies: list[str] | None = None) -> tuple[bool, str]:
+    """Legyen-e `constructive_challenge` a strategia? (dontes, indok)
+
+    HET feltetel, mind ellenorizhető, es az indok mindig visszajon (naplozzuk, hogy
+    a dontes utolag megmagyarazhato legyen — `brand_mention_allowed` mintaja):
+      1. a beszelgetes velemeny-jellegű (`_CHALLENGE_INTENTS`),
+      2. a modell talalt kimondatlan feltetelt (`thesis_condition`),
+      3. a feltetel csaladja NEM ismetli a legutobbi elfogadottakat (v15 — a mert
+         monokultura: ot feltetelbol ot szerzodesi volt),
+      4. az allitast SZO SZERINT idezte, es az idezet TENYLEG a posztban van,
+      5. a szint nem vetozza a CC-t (`_LEVEL_VETO` — a mechanizmus tiszteletben
+         tartasa; ma egyetlen szint sem vetozza),
+      6. a CC JELOLT, azaz a modell sulyozott pontja eleri a `STRATEGY_CANDIDATE_FLOOR`-t
+         (v19: `strategy_candidates`-re delegalva — egy definicio, nem ket konstans),
+      7. a CC nincs a strategia-gyűrűben (v17 — a szenzor eloleptet, nem kenyszerit;
+         a rotaciot nem irhatja felul).
+
+    `recent_conditions`: a legutobbi ELFOGADOTT feltetel-csaladok. None/ures eseten a
+    3. feltetel nem mer — igy a regi hivasok es a kikapcsolt szenzor valtozatlanok,
+    es a fuggveny TISZTA marad (a gyűrűt a hivo adja at).
+    """
+    if intent not in _CHALLENGE_INTENTS:
+        return False, f"az intent ({intent}) nem velemeny-jellegű"
+
+    condition = str(reasoning.get("thesis_condition") or "").strip()
+    if not condition:
+        return False, "a modell nem talalt kimondatlan feltetelt a tezisben"
+
+    family = condition_family(condition)
+    if recent_conditions and family and family in set(recent_conditions):
+        return False, (f"a feltetel ugyanabba a csaladba esik, mint a legutobbi "
+                       f"elfogadottak ({family}) — nem uj teny")
+
+    quote = reasoning.get("thesis_quote", "")
+    if not _quote_in_post(quote, post_text, min_words=THESIS_QUOTE_MIN_WORDS):
+        return False, f"az idezett tezis nem talalhato a posztban ({quote[:60]!r})"
+
+    # A VETO ELOSZOR, hogy a specifikus indok nyerjen: a `strategy_candidates` a
+    # vetozottakat is kiszűri, tehat utana mar nem lehetne megkulonboztetni a "kemeny
+    # kapu" es a "padlo alatt" esetet. A telemetriaban ez ket kulonbozo jelenseg.
+    if "constructive_challenge" in _LEVEL_VETO.get(level, set()):
+        return False, f"a(z) {level} szint vetozza a CC-t"
+
+    # EGY definicio a "modell elfogadhatonak jelolte"-re: `strategy_candidates`
+    # (sulyozott pont, `STRATEGY_CANDIDATE_FLOOR`). Ide erve a veto mar kizarva, tehat
+    # ha nem jelolt, az csak a padlo lehet.
+    fit_source = reasoning.get("strategy_fit") or {}
+    if "constructive_challenge" not in strategy_candidates(fit_source, intent, level):
+        weighted = score_strategies(fit_source, intent, level)[0]["constructive_challenge"]
+        return False, (f"a modell maga is alacsonyra tette a CC-t (sulyozva {weighted:g} "
+                       f"< {STRATEGY_CANDIDATE_FLOOR})")
+
+    # A ROTACIO TISZTELETBEN TARTASA (2026-08-11, v17). A MERT HIBA: a szenzor a
+    # `decide_strategy` UTAN fut, tehat visszahozta a CC-t akkor is, amikor a
+    # strategia-gyűrű epp kizarta — igy ket egymas utani CC-komment lett.
+    #
+    # MIERT NEM ALL ITT az "utasitas erosebb a visszhang-tilalomnal" elv (ami a
+    # `shape_frame`-nel igen): ott a modell KAPOTT egy utasitast, es azt buntetni
+    # ellentmondas lett volna. A szenzor viszont nem utasitas, hanem ELOLEPTETES: a
+    # dolga az, hogy a CC LEHETSEGES legyen, nem az, hogy elkerulhetetlen.
+    #
+    # MIERT EZ AZ UTOLSO FELTETEL: igy az indok-string megkulonboztetheto — "a teny jo
+    # volt, csak a rotacio zarta" vs. "nem volt teny". A telemetriaban ez ket
+    # kulonbozo jelenseg, es kulon kell tudni szamolni oket.
+    if recent_strategies and "constructive_challenge" in set(recent_strategies):
+        return False, ("igazolt feltetel, de a CC a strategia-gyűrűben van "
+                       "(rotacio) — nem sul el")
+
+    return True, f"igazolt kimondatlan feltetel: {condition[:80]}"
 
 
 def brand_mention_allowed(config: dict, reasoning: dict,
@@ -2461,10 +3214,43 @@ def _generate_comment(config: dict, post_text: str, author_name: str = "",
     reasoning["response_mode"] = response_mode
     reasoning["human_temperature"] = human_temperature
 
-    # Stage 4: a dontest a kod hozza a modell pontszamaibol (ld. pick_strategy).
-    reasoning["strategy"] = pick_strategy(reasoning["strategy_fit"], intent, level)
+    # Stage 4: a dontest a kod hozza a modell pontszamaibol.
+    # v16: a nyers pontszam SZURO (ki a jelolt), es a jelolt-halmazbol a kod dont —
+    # a mert diagnozis szerint a pontozas nem rangsor (4-5 strategia mindig >= 7, a
+    # maximum 13/21 sorban holtverseny). Kikapcsolva bajtra a v15-os argmax fut.
+    if strategy_candidates_enabled(config):
+        strategy_cands = strategy_candidates(reasoning["strategy_fit"], intent, level)
+        reasoning["strategy"], strategy_reason = decide_strategy(
+            reasoning["strategy_fit"], post_text, intent, level)
+        print(f"[linkedin-tle] strategia-dontes: {strategy_reason} "
+              f"| gyűrű={list(_recent_strategies)}")
+    else:
+        strategy_cands = []
+        reasoning["strategy"] = pick_strategy(reasoning["strategy_fit"], intent, level)
+        strategy_reason = "jelolt-szűres KIKAPCSOLVA -> sulyozott argmax"
     strategy_scores, strategy_vetoed = score_strategies(
         reasoning["strategy_fit"], intent, level)
+
+    # Stage 4.5: kihivas-szenzor (v13). A pontszam nem tudta megvalasztani a
+    # `constructive_challenge`-t (33/0), ezert itt egy IGAZOLT TENY dont, nem suly.
+    # A `pick_strategy` eredmenyet megorizzuk a naploban: igy utolag latszik, mit
+    # irt felul a szenzor, es mennyire volt indokolt.
+    challenge_fires, challenge_reason = (False, "kikapcsolva")
+    if intent_layer and challenge_sensor_enabled(config):
+        challenge_fires, challenge_reason = challenge_override(
+            reasoning, post_text, intent, level,
+            recent_conditions=list(_recent_condition_families),
+            recent_strategies=list(_recent_strategies))
+    strategy_before_override = reasoning["strategy"]
+    if challenge_fires:
+        # A gyűrű CSAK elfogadott feltetelnel bővul: ez az a feltetel, ami tenylegesen
+        # eldontotte a strategiat. Akkor is bővit, ha a `pick_strategy` mar CC-t adott —
+        # a feltetelt ott is felhasznaltuk, tehat a kovetkezonek tudnia kell rola.
+        remember_condition_family(reasoning.get("thesis_condition", ""))
+    if challenge_fires and reasoning["strategy"] != "constructive_challenge":
+        reasoning["strategy"] = "constructive_challenge"
+        print(f"[linkedin-tle] KIHIVAS-SZENZOR: {strategy_before_override} -> "
+              f"constructive_challenge ({challenge_reason})")
     print(f"[linkedin-tle] intent={intent} | szint={level} | szerep={responder_role} | "
           f"forma={response_mode} | gravity={(reasoning.get('topic_gravity') or '-')!r}"
           + (f" | kep={image_role}" if use_image else "")
@@ -2527,20 +3313,32 @@ def _generate_comment(config: dict, post_text: str, author_name: str = "",
         print(f"[linkedin-tle] cel-hossz={length_band[0]}-{length_band[1]} szo "
               f"(poszt: {len(_words(post_text))} szo)")
 
-    # --- Stage 6-7: compose, + Stage 9: kapu, legfeljebb egy ujrairassal ---
+    # A visszhang-gyűrű a kapu szamara: a KIOSZTOTT forma sajat kerete kimarad, mert
+    # az utasitast nem szabad sertesnek minositeni (`shape_frame` docstring).
+    echo_ring = echo_ring_for(opening)
+    # Ugyanez a tartalmi mozdulatra: a strategia sajat mozdulata kimarad
+    # (`move_ring_for`) — a `business_impact` direktivaja EPPEN a kereskedelmi keret.
+    move_ring = move_ring_for(reasoning["strategy"])
+
+    # --- Stage 6-7: compose, + Stage 9: kapu, ket vagy harom korrel ---
     comment, issues, rewrites = "", ["nem futott le"], 0
     # Az ELSO kor sertesei kulon. A telemetria eddig csak a VEGSO `quality_issues`-t
     # naplozta (ures = atengedve), tehat egy `rewrites: 1`-es sornal nem lehetett
     # megtudni, MI valtotta ki az ujrairast — a 2026-08-10-i naplo-elemzes talalta
     # meg ezt a hianyt. A javito kort igy visszamenoleg is meg lehet magyarazni.
     issues_first: list[str] = []
-    for attempt in range(2):
+    # AKKUMULALT sertesek. A mert hibamod (49./50. sor): az 1. kor "We often see"-re
+    # bukott, a 2. kor pedig ugyanannak a mozdulatnak MAS alakjaval jott ("I often
+    # find") — vagyis a modell valtozatot cserelt, nem viselkedest. Ha csak az utolso
+    # kor serteset adjuk at, a modell nem is tudja, hogy az elozo alak is tilos.
+    seen_issues: list[str] = []
+    for attempt in range(MAX_COMPOSE_ATTEMPTS):
         # A nyitas-forma az ujrairo korben is UGYANAZ: az ujrairas a kapu konkret
         # serteseit javitja, nem a retorikai formát valtoztatja. Uj forma itt
         # ujabb valtozot vinne egy amugy is celzott javitasba.
         user_msg = _compose_user_msg(
             post_text, author_line, reasoning, brand_allowed,
-            issues if attempt else None, intent_layer=intent_layer,
+            seen_issues if attempt else None, intent_layer=intent_layer,
             opening=opening, length_band=length_band,
         )
         try:
@@ -2558,6 +3356,12 @@ def _generate_comment(config: dict, post_text: str, author_name: str = "",
             discourse_level=level if intent_layer else "",
             human_temperature=human_temperature if intent_layer else "",
             image_attached=use_image,
+            # A gyűrű MEG NEM tartalmazza ezt a kommentet (a `remember_opening_text`
+            # csak siker utan bővit), tehat a komment nem utkozhet onmagaval.
+            # A KIOSZTOTT forma sajat kerete kimarad az osszehasonlitasbol — ld.
+            # `shape_frame`: az utasitas erosebb, mint a visszhang-tilalom.
+            recent_openings=(echo_ring if opening_echo_gate_enabled(config) else None),
+            recent_moves=(move_ring if content_echo_gate_enabled(config) else None),
         )
         if attempt == 0:
             issues_first = list(issues)
@@ -2565,6 +3369,12 @@ def _generate_comment(config: dict, post_text: str, author_name: str = "",
             break
         rewrites = attempt + 1
         print(f"[linkedin-tle] kapu elutasitotta ({attempt + 1}. kor): {', '.join(issues)}")
+        for issue in issues:
+            if issue not in seen_issues:
+                seen_issues.append(issue)
+        # A HARMADIK kor csak ismetles-osztalyra jar — ld. `_REPHRASABLE_PREFIXES`.
+        if attempt >= 1 and not only_rephrasable(issues):
+            break
 
     if not comment:
         return {"error": "A kompozíciós lépés üres kommentet adott."}
@@ -2572,6 +3382,14 @@ def _generate_comment(config: dict, post_text: str, author_name: str = "",
     # A gyűrű CSAK itt bővul: egy meg nem jelent (hibara futott) komment nyitasa
     # nem okoz ismetlodest, tehat nem is kell kizarni a kovetkezo valasztasbol.
     remember_opening(opening)
+    # Ugyanez a MEGVALOSULT nyitasra. Akkor is bővit, ha a kapu vegul atengedte a
+    # kommentet serteessel (ket kor utan a motor visszaadja) — a komment ki fog
+    # menni, tehat a kovetkezonek tudnia kell rola.
+    remember_opening_text(comment)
+    remember_content_move(comment)
+    # A VEGSO strategia (a kihivas-szenzor felulirasa utan) — az ment ki, tehat azt
+    # kell a kovetkezo dontesbol kizarni.
+    remember_strategy(reasoning["strategy"])
 
     # `legacy_intent`, NEM `intent`: a fenti `intent` a Conversation Intent Layer
     # erteke, es ez a sor korabban elarnyekolta (a valasz-osszeallitas ezutan
@@ -2612,6 +3430,30 @@ def _generate_comment(config: dict, post_text: str, author_name: str = "",
         # rotacio ki van kapcsolva.
         "opening_shape": opening,
         "opening_recent": list(_recent_openings),
+        # A MEGVALOSULT nyitas (2026-08-11). A `opening_shape` eddig csak azt mondta
+        # meg, mit KERTUNK; ot eles generalas mutatta meg, hogy a modell haromszor
+        # ugyanugy kezdett harom kulonbozo kijeloles mellett. Ez a ket mezo teszi a
+        # kulonbseget merhetove. Mint az `opening_recent`, a gyűrű MAR tartalmazza
+        # ezt a kommentet — a sor onmagaban is olvashato marad.
+        "opening_fingerprint": opening_fingerprint(comment),
+        "opening_echo_recent": list(_recent_opening_texts),
+        # Tartalmi mozdulat (v14): a GONDOLAT visszhangja. A CC-kommentek 7-bol 6-szor
+        # ugyanoda futottak ki (szerzodes/incentiva) — enelkul a ket mezo nelkul csak
+        # azt latnank, hogy a strategia diverzifikalodott.
+        "content_move": content_move(comment),
+        "content_echo_recent": list(_recent_content_moves),
+        # NYELV (2026-08-11). A naplo eddig egyaltalan nem tudta, milyen nyelven ment
+        # ki a komment — pedig a merőszamaink FELE angolra kalibralt: a `concreteness`
+        # horgony- es absztrakcio-lexikonja angol es BIM-specifikus, a hossz-sav pedig
+        # angol szoszamon all. Egy magyar sort ugyanabba az atlagba szamolni azt jelenti,
+        # hogy nem tudjuk, mit mertunk. Ez a ket mezo teszi a szegmentalast lehetsegesse
+        # (`bench_report.py` §2). Tisztan additiv -> `TELEMETRY_SCHEMA` nem emelkedik.
+        #
+        # MIERT A MEGLEVO `looks_english` ES NEM NYELVFELISMERO KONYVTAR: a fuggveny
+        # mar itt van (a gondolatjel-kapu hasznalja), determinisztikus, es a kerdes
+        # amit fel kell tennunk binaris — "erre a sorra allnak-e az angol kalibraciok".
+        "post_language": "en" if looks_english(post_text) else "other",
+        "reply_language": "en" if looks_english(comment) else "other",
         # Cel-szohossz (v7): a KOD altal a poszt hosszabol szamolt sav. Naplozva, hogy
         # merheto legyen, betartja-e a modell — a sav utasitas, nem kapu.
         #
@@ -2628,11 +3470,30 @@ def _generate_comment(config: dict, post_text: str, author_name: str = "",
         "intent_layer": intent_layer,
         "strategy_scores": strategy_scores,          # sulyozott pontszamok
         "strategy_vetoed": sorted(strategy_vetoed),  # amit a szint kizart
+        # v16: a jelolt-halmaz, a gyűrű es a dontes INDOKA. Enelkul nem lehetne
+        # utolag megmondani, hogy egy strategia azert nem nyert, mert nem volt jelolt,
+        # vagy mert a frissesseg kizarta, vagy mert a sulyozott max mast adott.
+        "strategy_candidates": strategy_cands,
+        "strategy_recent": list(_recent_strategies),
+        "strategy_decision_reason": strategy_reason,
         "strategy": reasoning["strategy"],
         "strategy_label": strat_label,
         "core_thesis": reasoning.get("core_thesis", ""),
         "missing_perspective": reasoning.get("missing_perspective", ""),
         "insight": reasoning.get("insight", ""),
+        # Kihivas-szenzor (v13): a MODELL allitasa, a KOD dontese es az INDOK, kulon.
+        # Igy meg akkor is merheto, ha a szenzor nem sult el: latszik, melyik feltetel
+        # bukott el (`challenge_reason`), es hogy a modell talalt-e egyaltalan
+        # kimondatlan feltetelt. Enelkul csak azt latnank, hogy a CC ismet nem nyert.
+        "thesis_condition": reasoning.get("thesis_condition", ""),
+        "thesis_quote": reasoning.get("thesis_quote", ""),
+        "challenge_override": challenge_fires,
+        "challenge_reason": challenge_reason,
+        # A feltetel CSALADJA + a gyűrű (v15). Enelkul csak az egyedi szovegeket
+        # latnank, es a monokulturat ujra kezzel kellene eszrevenni.
+        "condition_family": condition_family(reasoning.get("thesis_condition", "")),
+        "condition_echo_recent": list(_recent_condition_families),
+        "strategy_before_override": strategy_before_override,
         "strategy_fit": reasoning.get("strategy_fit", {}),   # auditalhato dontes
         "explicit_tool_request": bool(reasoning.get("explicit_tool_request")),
         "tool_request_quote": reasoning.get("tool_request_quote", ""),

@@ -242,6 +242,76 @@ check("F5 legitim BIM-zsargon nincs a listan (architecture / pipeline / single s
       not hits(_MARKETING_CLICHE_PATTERNS,
                "the information architecture and the IFC pipeline are the single source of truth"))
 
+# --- F') tanacsadoi hang: EGESZ kommentre mer (2026-08-11, engine v10) -------
+# A MERES: a "We (often) see/found" szerkezet a 32 kiadott kommentbol TIZBEN volt
+# benne, es a v9 ket kommentjeben mar a 3. MONDATBAN — vagyis kihatralt a
+# ket-mondatos nyitas-ablakbol, ahol semmi nem fogta. SZO SZERINTI reszletek:
+LEAK_3RD = ("I've run into similar challenges with adoption, and the inertia is real. "
+            "It's often not about the perceived value of the new tool itself. "
+            "We often see that the real bottleneck for users isn't just learning a new "
+            "interface, but the broader ecosystem change it implies, and that is where "
+            "the migration cost of existing project data starts to dominate everything.")
+iss_leak = check_quality(LEAK_3RD, POST, False, intent="reflection",
+                         discourse_level="technical", human_temperature="reflective")
+check("F6 a 3. MONDATBAN levo 'We often see' MOST sertes (a nyitas-ablak nem latta)",
+      any("tanacsadoi hang" in i for i in iss_leak), str(iss_leak))
+check("F6.1 a cimke NEM 'ismetlodo nyitas' (nem nyitasi hiba, nem is annak hivjuk)",
+      not any("ismetlodo nyitas" in i for i in iss_leak), str(iss_leak))
+
+PERFECT_TENSE = ("The handover is where this usually bites. We've often found that the "
+                 "shared parameter file drifts once someone rebuilds it, and the schedule "
+                 "mapping detaches without a single warning in the model itself. "
+                 "Versioning that file as project data is what held up for us over time.")
+check("F7 a 'We've often found' valtozat is sertes (ez volt a leggyakoribb alak)",
+      any("tanacsadoi hang" in i for i in
+          check_quality(PERFECT_TENSE, POST, False, intent="engineering_problem",
+                        discourse_level="technical", human_temperature="practical")))
+
+for level in ("technical", "management", "business"):
+    check(f"F8 '{level}' sikon is mer (nincs szint-feltetel, mint a klisenel)",
+          any("tanacsadoi hang" in i for i in
+              check_quality(LEAK_3RD, POST, False, intent="professional_opinion",
+                            discourse_level=level, human_temperature="practical")))
+
+# A KATALOGUS SAJAT FORMAI nem eshetnek a listaba: az `own_practice` ("I've found")
+# es a `learned` ("We've learned") nyitas legitim — a tic az ALTALANOSITO hatarozo
+# ("often"), nem a tapasztalat-ige. Kulonben minden ilyen komment ujrairast kapna.
+check("F9 'I've found that...' (own_practice) NEM sertes",
+      not any("tanacsadoi hang" in i for i in
+              check_quality("I've found that the GUID travels with the definition file, "
+                            "not with the model, so the mapping detaches on rebuild. "
+                            "Versioning that file as project data is what fixed it here.",
+                            POST, False, intent="engineering_problem",
+                            discourse_level="technical", human_temperature="practical")))
+check("F10 'We've learned...' (learned forma) NEM sertes",
+      not any("tanacsadoi hang" in i for i in
+              check_quality("We've learned to version the shared parameter file as project "
+                            "data rather than a local resource, because the drift only "
+                            "shows up weeks later when a schedule stops matching.",
+                            POST, False, intent="engineering_problem",
+                            discourse_level="technical", human_temperature="practical")))
+check("F11 a 'gyakorlatban' onmagaban NEM sertes (csak a tapasztalat-igevel)",
+      not any("tanacsadoi hang" in i for i in
+              check_quality("A gyakorlatban ez tipikusan 10 mm alatti elmozdulas, "
+                            "es eppen az a resz szokott lemaradni a jegyzokonyvbol.",
+                            POST, False, intent="engineering_problem",
+                            discourse_level="technical", human_temperature="practical")))
+check("F12 a MERT magyar alak sertes",
+      any("tanacsadoi hang" in i for i in
+          check_quality("Ahogy felveted, ez kulcskerdes. A gyakorlatban azt tapasztaljuk, "
+                        "hogy a tenyek gyakran inkonzisztensek a vallalati rendszerekben.",
+                        POST, False, intent="engineering_problem",
+                        discourse_level="technical", human_temperature="practical")))
+# A "the real X" SZANDEKOSAN kimaradt: a v7-es A/B-ben eppen egy ilyen mondat volt a
+# sorozat elso kiposztolhato kommentjenek magja. Ez tartalmi szerkezet, nem tic.
+check("F13 'the real hit is downstream' NEM sertes (szandekos kihagyas, v7 A/B)",
+      not any("tanacsadoi hang" in i for i in
+              check_quality("When a custom stair form pushes us to generic models, the real "
+                            "hit is often downstream: the 'I' in BIM vanishes on IFC export, "
+                            "losing its data for facility management or quantity take-off.",
+                            POST, False, intent="engineering_problem",
+                            discourse_level="technical", human_temperature="frustrated")))
+
 # --- H) user-dontes 1: framework-reflex a MANAGEMENT sikon is ---------------
 # A 2026-08-10-i eles, kenyszeritett generalas SZO SZERINTI reszlete. Ket uj
 # framework-kifejezest hozott (governance + consistently), a szint `management` volt,
@@ -509,12 +579,23 @@ check("L1 a skala mind a negy fokozata horgonyozva van",
 check("L2 a horgonyok KIMONDJAK, mit jelentenek (nem csak szamok)",
       "would MISS what the post is about" in _REASON_PROMPT
       and "single best available move" in _REASON_PROMPT)
-check("L3 van kalibracios ellenorzes a tomorodes ellen",
-      "CALIBRATION CHECK" in _REASON_PROMPT
-      and "four or more strategies a 7 or higher" in _REASON_PROMPT)
-check("L4 a prompt megnevezi a KONKRET hibat (absztrakt vs. EZ a poszt)",
-      "rating the strategies IN THE ABSTRACT" in _REASON_PROMPT)
-check("L5 minimum-szoras eloirva", "at least 5" in _REASON_PROMPT)
+# L3-L5 MEGFORDITVA (2026-08-11, v18). Eddig azt allitottak, hogy a v8-as kalibracios
+# ellenorzes BENNE van a promptban. 50 telemetria-sor megmerte, hogy a modell soha nem
+# tartotta be ("negy vagy tobb 7 fole" sertes: v8 86%, v9 73%, v13-v15 100%; a szoras
+# soha nem erte el az 5-ot), es a v16 ota a dontes nem is tamaszkodik a rangsorra — a
+# nyers pont SZURO, a valasztast a kod hozza. Ezert a szabalyokat kivezettuk, es ez a
+# harom check mostantol a VISSZASZIVARGAST orzi: ugyanaz a banasmod, mint az
+# authenticity-rubrikanal (torles + teszt, ami nem engedi vissza).
+check("L3 a v8-as kalibracios ellenorzes NINCS a promptban (mert: soha nem tartotta be)",
+      "CALIBRATION CHECK" not in _REASON_PROMPT
+      and "four or more strategies a 7 or higher" not in _REASON_PROMPT)
+check("L4 az absztrakt-vs-EZ-a-poszt mondat sincs vissza",
+      "rating the strategies IN THE ABSTRACT" not in _REASON_PROMPT)
+check("L5 minimum-szoras nincs eloirva (a v16 nem tamaszkodik a rangsorra)",
+      "at least 5" not in _REASON_PROMPT)
+check("L5.1 ami MARADT: a duplaszamolas tilalma (a padlo a SULYOZOTT pontra megy)",
+      "Score on professional value ALONE" in _REASON_PROMPT
+      and "weighted separately" in _REASON_PROMPT)
 check("L6 a fallback-levonas VALTOZATLAN (a diagnozis szerint o mukodik)",
       _STRATEGY_BIAS == {"missing_perspective": -1.5}, str(_STRATEGY_BIAS))
 check("L7 a strategia-keszlet valtozatlan (nem szuritettunk)", len(STRATEGIES) == 7)
@@ -573,19 +654,25 @@ CFG = {"linkedin": {"telemetry": "on",
 _real = eng._client
 eng._client = lambda config: (_FakeClient(), "gemini-2.5-flash", None)
 try:
-    eng._recent_openings.clear()
+    eng.reset_opening_state()
     res_skip = eng.generate_comment(CFG, POST)
     calls_skip = list(calls); calls.clear()
 
+    # Nullazas MINDEN forgatokonyv elott: a harom hivas ugyanazt a (fake) kommentet
+    # adja vissza, tehat a nyitas-visszhang gyűrűje kulonben a masodiktol kezdve
+    # ujrairast valtana ki, es a hivas-szamra allito checkek elbuknanak. Ez
+    # teszt-izolacio, nem a kapu engedelye — v9, ld. test_linkedin_opening I).
+    eng.reset_opening_state()
     res_force = eng.generate_comment(CFG, POST, force=True)
     calls_force = list(calls); calls.clear()
 
+    eng.reset_opening_state()
     res_off = eng.generate_comment(
         {**CFG, "linkedin": {**CFG["linkedin"], "skip_vendor_promotion": "off"}}, POST)
     calls_off = list(calls)
 finally:
     eng._client = _real
-    eng._recent_openings.clear()
+    eng.reset_opening_state()
 
 check("G1 vendor-hirdetes -> skipped=True", res_skip.get("skipped") is True, str(res_skip.get("skip_reason")))
 check("G2 a skip MEGSPOROLJA a COMPOSE-hivast (csak reason futott)",

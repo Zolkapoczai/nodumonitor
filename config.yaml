@@ -648,13 +648,135 @@ linkedin:
   # tehát mérhető, betartja-e a modell.
   # IDÉZŐJEL KELL: a YAML az on/off szavakat booleanná alakítja (HANDOFF §4/17).
   length_scaling: 'on'
+  # opening_echo_gate — a MEGVALÓSULT nyitás ismétlése sértés (2026-08-11, engine v9).
+  #   'on'  — (ALAPÉRTELMEZÉS) a kapu megkapja a legutóbbi négy komment nyitás-
+  #           ujjlenyomatát; egyezés esetén újraírás.
+  #   'off' — a kapu nem kapja meg a gyűrűt, bájtra a 2026-08-10-i viselkedés.
+  # A MÉRT HIBA (öt éles generálás, bench_posts/01..05): a rotáció HÁROM KÜLÖNBÖZŐ
+  # formát osztott ki (`own_practice`, `strikes`, `pattern`), a modell mégis
+  # háromszor ugyanazzal a mondattal indult — „What strikes me …". Vagyis a
+  # forma-kijelölés UTASÍTÁS, nem kikényszerített eredmény, és amit a modell
+  # valójában írt, azt eddig semmi nem mérte.
+  # MIÉRT NEM A TILTÓLISTA BŐVÍTÉSE: a „What strikes me" a SAJÁT katalógusunk
+  # (`OPENING_SHAPES['strikes']`) ajánlott formája — tiltólistára tenni annyi lenne,
+  # mint a saját whitelistünk ellen kapuzni (G1 teszt őrzi, hogy ez ne fordulhasson
+  # elő). A hiba nem a kifejezésben van, hanem az ISMÉTLÉSBEN, ezért a kapu a saját
+  # előző kimeneteinkhez mér, nem szótárhoz.
+  # Az ujjlenyomat az első mondat első HÁROM szava (`opening_fingerprint`), a gyűrű
+  # mélysége pontosan annyi, mint a forma-gyűrűé (`_OPENING_RING_SIZE`) — különben a
+  # kapu olyan formát büntetne, amit a rotáció joggal ad ki újra.
+  # MÉRHETŐ: az `opening_fingerprint` és az `opening_echo_recent` a naplóban van,
+  # tehát utólag látszik, mennyi újraírást hozott és szór-e tényleg a nyitás.
+  # IDÉZŐJEL KELL: a YAML az on/off szavakat booleanná alakítja (HANDOFF §4/17).
+  opening_echo_gate: 'on'
+  # challenge_sensor — a `constructive_challenge` kiválasztása TÉNY alapján (v13).
+  #   'on'  — (ALAPÉRTELMEZÉS) ha a REASON igazolt kimondatlan feltételt talált a
+  #           poszt tézisében, a KÓD a `constructive_challenge`-et választja.
+  #   'off' — bájtra a v12-es viselkedés (tiszta `pick_strategy` argmax).
+  # A MÉRT PROBLÉMA: a CC 33 generálásból egyszer sem nyert. A diagnózis KIZÁRT két
+  # magyarázatot: (a) nem a bias — a CC nyers pontja sosem ment 7 fölé, a győztes 32
+  # sorban 9 volt, tehát +2..+9,5 kellett volna (nulla sor, ahol 1 pont elég), egy
+  # ilyen bias pedig már teherhordó, amit a v8 döntés kizár; (b) nem redundancia —
+  # kényszerített CC-vel (`bench_linkedin.py --strategy`) az egyik poszton a korpusz
+  # legjobb regiszter-értékét adta (anchors 1, hedges 0, rewrites 0), és pont a
+  # kimondatlan feltételt találta meg. A hiba a KIVÁLASZTÁSBAN volt: a modell a
+  # 9-est rangsor-címkeként használja, amire egy stratégia nem tud „felkapaszkodni".
+  # A MEGOLDÁS a projekt saját mintája (`explicit_tool_request` + igazolt idézet →
+  # márkaemlítés): a modell SZENZOR, a kód BÍRÓ. Öt feltétel, mind ellenőrizhető:
+  # vélemény-jellegű intent, van `thesis_condition`, a `thesis_quote` TÉNYLEG a
+  # posztban van, a szint nem vetózza, és a CC JELÖLT (a súlyozott pontja eléri a
+  # `STRATEGY_CANDIDATE_FLOOR`-t) — így a kód a rangsor-artefaktumot javítja, nem a
+  # modell ítéletét írja felül.
+  # A PADLÓ v19-ben a jelölt-halmazra lett delegálva. Előtte külön konstans volt
+  # (`CHALLENGE_FIT_FLOOR = 7`) a NYERS ponton, és két dolog történt vele: (a) NO-OP
+  # lett, mert a v13-as `thesis_condition`-kérdés a CC nyers pontját 5.7-ről 8.6-ra
+  # emelte, tehát a 7-es padló a mért eloszláson sosem kötött; (b) a v16-os
+  # `STRATEGY_CANDIDATE_FLOOR` ugyanarra a fogalomra jött be, csak a SÚLYOZOTT ponton
+  # — és a J6 teszt megmutatta, miért az a helyes (nyers ponton szűrve a bias-korrekció
+  # kiesik). Két konstans egy fogalomra drift-hazard, ezért most egy van.
+  # A feltétel MEGMARADT (nem töröltük): regresszió-védelem, ha a CC pontozása valaha
+  # visszaesik. Hogy elsül-e, az a `challenge_reason`-ből megszámolható.
+  # MÉRHETŐ: `challenge_override`, `challenge_reason`, `strategy_before_override`,
+  # `thesis_condition`, `thesis_quote` a naplóban — az indokból látszik, melyik
+  # feltétel bukott el, ha nem sült el.
+  # IDÉZŐJEL KELL: a YAML az on/off szavakat booleanná alakítja (HANDOFF §4/17).
+  challenge_sensor: 'on'
+  # content_echo_gate — a GONDOLAT ismétlése sértés (2026-08-11, engine v14).
+  #   'on'  — (ALAPÉRTELMEZÉS) a kapu megkapja a legutóbbi négy komment tartalmi
+  #           mozdulatát; egyezés esetén újraírás.
+  #   'off' — bájtra a v13-as viselkedés.
+  # A MÉRT HIBA: a kihívás-szenzor után a `constructive_challenge` végre nyert — és
+  # HÉT CC-kommentből HAT ugyanoda futott ki: „a valódi kérdés a szerződés /
+  # incentíva-struktúra". („clear contractual ask" · „shift in contractual
+  # frameworks" · „the contractual structure itself" · „legal and commercial
+  # frameworks … liability" · „contractual incentives".) A stratégia
+  # diverzifikálódott, a GONDOLAT nem.
+  # UGYANAZ A MINTA, mint a nyitás-visszhangnál: kanonizálás és gyűrű, NEM tiltólista.
+  # A kereskedelmi keretezés nem hiba — a `business_impact` direktívája ÉPPEN ezt kéri,
+  # ezért annál a stratégiánál a mozdulat kimarad a tilalomból (`move_ring_for`).
+  # A hiba az ISMÉTLÉSE. Küszöb: legalább KÉT különböző terminus, mert egy futó
+  # említés még nem a komment mozdulata (ugyanaz a logika, mint az
+  # `ai_fingerprint_terms`-nél). MÉRHETŐ: `content_move`, `content_echo_recent`.
+  # NEM ismétlés-osztály: ezt nem más szóval, hanem MÁS GONDOLATTAL kell javítani,
+  # ezért nem jár rá harmadik kör (`_REPHRASABLE_PREFIXES`).
+  #
+  # A MÉRÉS VERDIKTJE: 'off' — A KAPU DETEKTÁL, DE NEM GYÓGYÍT. Öt éles futás
+  # ugyanazon a poszt-készleten: a kapu 3 kommentnél elsült, ebből 2 a két elutasítás
+  # után SÉRTÉSSEL ment ki (a harmadik kör szándékosan nem jár tartalmi hibára), és
+  # egyetlen komment sem hagyta el a kereskedelmi keretet. Kettő pedig lexikailag
+  # kicsúszott: „design fees aren't always structured" ugyanaz a mozdulat, más
+  # szavakkal, tehát a `content_move` üres maradt.
+  # A VALÓDI OK FELJEBB VAN, és a napló bizonyítja: az ÖT `thesis_condition`-ből ÖT
+  # szerződési/incentíva-jellegű volt („when project contracts do not explicitly
+  # reward…", „when the contractual frameworks and operational incentives align…",
+  # „when the client's procurement process does not…"). A v13-as kihívás-szenzor
+  # kérdésének („nevezz meg egy esetet, ahol az állítás nem áll") HATALMAS attraktora
+  # van, és a compose-kapu egy olyan döntés ellen küzd, ami a REASON lépésben már
+  # megszületett. Kimeneti kapu nem javít bemeneti monokultúrát.
+  # A MÉRÉS MARAD: a `content_move` és a `content_echo_recent` a naplóban van
+  # kapcsoló nélkül is — épp ez mutatta ki a monokultúrát. Csak a KAPUZÁS áll le,
+  # mert egy extra LLM-hívást fizet, és a sértés ugyanúgy kimegy.
+  # Visszakapcsolás akkor indokolt, ha a `thesis_condition` sokfélesége helyreállt.
+  # IDÉZŐJEL KELL: a YAML az on/off szavakat booleanná alakítja (HANDOFF §4/17).
+  content_echo_gate: 'off'
+  # strategy_candidates — a nyers pontszám SZŰRŐ, nem rangsor (2026-08-11, v16).
+  #   'on'  — (ALAPÉRTELMEZÉS) jelöltek = akik elérik a `STRATEGY_CANDIDATE_FLOOR`-t
+  #           (7) és nincsenek vetózva; a legutóbbi kettő kiesik (frissesség); a
+  #           maradékból a súlyozott max dönt, holtversenyben a poszt-hash.
+  #   'off' — bájtra a v15-ös viselkedés: tiszta `pick_strategy` argmax.
+  # A MÉRT DIAGNÓZIS (50 sor, motorverzióra bontva): a nyers `strategy_fit` NEM rangsor.
+  #   • a hét stratégiából 4-5 MINDIG 7 fölé kerül (v15: átlag 5.0 db),
+  #   • a v8-as prompt két kimondott szabálya („legfeljebb három lehet >= 7", „a szórás
+  #     legyen legalább 5") a sorok 73-100%-ában sérül, és ROMLIK, nem javul,
+  #   • a nyers maximum 21 v13+ sorból 13-ban HOLTVERSENY (2-3 stratégia egy értéken),
+  #   • egy kontrollált kísérlet (a tézis-mezők a `strategy_fit` UTÁN) a CC
+  #     inflációjának felét megszüntette, de a LAPOSSÁGON semmit nem változtatott —
+  #     tehát a hiba szerkezeti, nem egy adott prompt-verzió következménye.
+  # A modell megbízhatóan megmondja, hogy egy stratégia ELFOGADHATÓ-e („6-8: a good
+  # fit" — a saját prompt-horgonyunk szavaival), de a „9-10: az EGYETLEN legjobb"
+  # fokozatot rangsor-címkeként használja. A prompt-oldali önellenőrzés HÁROMSZOR nem
+  # vezetett eredményre; a projekt saját szabálya szerint (authenticity-rubrika) az
+  # ilyen önpolicingot nem erősíteni kell, hanem kivezetni.
+  # A GYŰRŰ SEKÉLYEBB (2), mint a nyitás-gyűrű (4): ott nyolc formából választunk, itt
+  # a jelölt-halmaz mérve 4-5 elemű — négy kizárása kiürítené, és a mechanizmus
+  # látszólag működne, valójában folyton a védőszabályra esne vissza.
+  # MÉRHETŐ: `strategy_candidates`, `strategy_recent`, `strategy_decision_reason`.
+  # IDÉZŐJEL KELL: a YAML az on/off szavakat booleanná alakítja (HANDOFF §4/17).
+  strategy_candidates: 'on'
   # telemetry — soronként egy generált komment döntési nyoma (2026-08-09).
   #   'on'  — minden hívás egy JSON-sort ír a `telemetry_path` fájlba.
   #   'off' — (KÓD-DEFAULT) nem ír semmit.
   # MIÉRT: a motor minden döntést visszaad a válaszban, de a válasz a HTTP-körrel
   # eltűnik. Emiatt négy fontos kérdésre ma nem tudsz felelni:
-  #   1. nyer-e valaha a `constructive_challenge` (a bias-terv szerint vélemény- és
-  #      debate-poszton nyerhetne — de méri ezt valaki?)
+  #   1. (MEGVÁLASZOLVA 2026-08-11: NEM nyert, 33 generálásból egyszer sem. A napló
+  #      két dolgot mutatott meg. (a) A „bias-terv szerint vélemény- és debate-
+  #      poszton nyerhetne" állítás TÉVES VOLT: a `professional_opinion` és az
+  #      `industry_debate` intent bias-a a `constructive_challenge`-re NULLA — nyolc
+  #      másik intent viszont MÍNUSZT ad neki. (b) A bias nem is javíthatta volna:
+  #      a CC nyers pontja 33 sorban egyszer sem ment 7 fölé, a győztes 32 sorban 9
+  #      volt, tehát +2..+9,5 kellett volna — nulla olyan sor, ahol 1 pont elég. Egy
+  #      ilyen bias már nem nudge, hanem teherhordó, amit a v8 döntés kizár. A
+  #      javítás ezért a SKÁLÁN van: v12, `wins_when` + prompt-horgony.)
   #   2. (MEGVÁLASZOLVA 2026-08-10: az authenticity-rubrika három mérés után
   #      törölve — nulla variancia, mindháromszor 10/10. A napló adta a választ.)
   #   3. hat-e a hívásonkénti hőmérséklet-bontás

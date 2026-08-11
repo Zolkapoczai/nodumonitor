@@ -86,7 +86,13 @@ TELEMETRY_SCHEMA = 2
 _COPIED_FIELDS = (
     # dontes
     "engine", "strategy", "strategy_label", "strategy_fit", "strategy_scores",
-    "strategy_vetoed", "conversation_intent", "discourse_level",
+    "strategy_vetoed",
+    # v16: a fit mint SZURO. A jelolt-halmaz, a frissesseg-gyűrű es a dontes INDOKA.
+    # A mert diagnozis: 4-5 strategia mindig >= 7, a nyers maximum 13/21 sorban
+    # holtverseny — a pontozas nem rangsor. Enelkul nem lehet megmondani, MIERT nem
+    # nyert egy strategia (nem volt jelolt / kizarta a frissesseg / mas volt a max).
+    "strategy_candidates", "strategy_recent", "strategy_decision_reason",
+    "conversation_intent", "discourse_level",
     "expected_responder_role", "response_mode", "human_temperature",
     "topic", "post_type", "technical_depth", "topic_gravity", "intent_layer",
     # A REASON GONDOLATMENETE (2026-08-10). Miert kellett: az otodik eles meres egy
@@ -100,8 +106,32 @@ _COPIED_FIELDS = (
     # a szo szerinti szovege — vagyis kevesbe erzekeny, mint a mar tarolt
     # `post_excerpt`. A `missing_perspective` enum, az `insight` a sajat kimenetunk.
     "insight", "core_thesis", "missing_perspective",
+    # Kihivas-szenzor (2026-08-11, v13): a modell allitasa (`thesis_condition` +
+    # `thesis_quote`), a kod dontese (`challenge_override`), az INDOK, es hogy mit
+    # irt felul (`strategy_before_override`). Az indok azert kell, mert a szenzor
+    # OT feltetelen bukhat el — enelkul csak azt latnank, hogy a CC ismet nem nyert.
+    "thesis_condition", "thesis_quote", "challenge_override", "challenge_reason",
+    "strategy_before_override",
+    # A feltetel CSALADJA es a gyűrű (2026-08-11, v15). A mert monokultura: ot
+    # elfogadott feltetelbol ot szerzodesi/incentiva-jellegű volt. Csalad nelkul a
+    # kovetkezo ilyen mintat ujra kezzel kellene megtalalni.
+    "condition_family", "condition_echo_recent",
     # nyitas-rotacio
     "opening_shape", "opening_recent",
+    # nyitas-visszhang (2026-08-11): a MEGVALOSULT nyitas ujjlenyomata + a gyűrű.
+    # Miert kellett: az `opening_shape` csak a KERT formát mutatta, es ot eles
+    # generalasbol haromban a modell mas formát kapott, megis ugyanazzal a mondattal
+    # indult. A kijeloles es az eredmeny elteresét csak ez a ket mezo teszi
+    # merhetove. Tisztan additiv -> a `TELEMETRY_SCHEMA` NEM emelkedik.
+    "opening_fingerprint", "opening_echo_recent",
+    # tartalmi mozdulat (2026-08-11, v14): a GONDOLAT visszhangja. A CC-kommentek
+    # 7-bol 6-szor ugyanoda futottak ki (szerzodes/incentiva-keret) — enelkul csak
+    # az latszott, hogy a STRATEGIA diverzifikalodott.
+    "content_move", "content_echo_recent",
+    # nyelv (2026-08-11): a merőszamaink fele angolra kalibralt (a `concreteness`
+    # lexikonja es a hossz-sav szoszama), ezert egy magyar sor ugyanabba az atlagba
+    # szamolva elmossa a merest. Szegmentalasra kell, nem kapuzasra.
+    "post_language", "reply_language",
     # cel-szohossz (2026-08-10, v7): a poszt hosszabol szamolt sav. A `reply_words`
     # mellett igy merheto, betartja-e a modell — es hogy a skalazas egyaltalan hat-e.
     "target_length",

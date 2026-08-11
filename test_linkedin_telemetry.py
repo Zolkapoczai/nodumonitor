@@ -258,11 +258,11 @@ E2E_CFG = {"linkedin": {"telemetry": "on", "telemetry_path": e2e,
 _real = eng._client
 eng._client = lambda config: (_FakeClient(), "gemini-2.5-flash", None)
 try:
-    eng._recent_openings.clear()
+    eng.reset_opening_state()
     res = eng.generate_comment(E2E_CFG, POST)
 finally:
     eng._client = _real
-    eng._recent_openings.clear()
+    eng.reset_opening_state()
 
 # Hibas ut STUB NELKUL: kikapcsolt Gemini -> a motor korán visszater.
 res_err = eng.generate_comment(

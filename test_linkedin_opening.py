@@ -16,6 +16,14 @@ E) A gyűrű
 F) Config-kapcsolo
 G) A sajat nyitasok nem sertik a sajat kaput
 H) Vegponttol vegpontig
+
+I) NYITAS-VISSZHANG (2026-08-11, engine v9) — a MEGVALOSULT nyitas kapuja.
+A forma-rotacio egy meresen elbukott: ot eles generalasbol haromban HAROM
+KULONBOZO forma volt kiosztva (`own_practice`, `strikes`, `pattern`), a modell
+megis mindharomszor ugyanazzal a mondattal indult ("What strikes me ..."). A
+kijeloles tehat utasitas, nem eredmeny. Ez a szekcio azt orzi, hogy a kapu a
+SAJAT elozo kimeneteinkhez mer (nem szotarhoz), es hogy a ket gyűrű nem dolgozik
+egymas ellen.
 """
 import os
 import subprocess
@@ -36,6 +44,10 @@ from responder.linkedin_engine import (  # noqa: E402
     _COMPOSE_PROMPT, _STOCK_OPENING_PATTERNS, _FORBIDDEN_PATTERNS,
     _recent_openings, pick_opening, remember_opening, opening_variety_enabled,
     _compose_user_msg,
+    # I) nyitas-visszhang (v9)
+    _recent_opening_texts, _OPENING_ECHO_RING_SIZE, _OPENING_FINGERPRINT_WORDS,
+    opening_fingerprint, remember_opening_text, opening_echo_gate_enabled,
+    check_quality,
 )
 
 POST = "How do you keep shared parameters aligned across linked Revit models?"
@@ -162,7 +174,7 @@ check("D1 ket kulon processz, kulon PYTHONHASHSEED -> UGYANAZ a forma",
       bool(d1) and d1 == d2, f"{d1!r} vs {d2!r} | {e1[-200:]}{e2[-200:]}")
 
 # --- E) a gyűrű -------------------------------------------------------------
-_recent_openings.clear()
+eng.reset_opening_state()
 remember_opening("pattern")
 remember_opening("strikes")
 check("E1 a gyűrű a kijelolt formakat orzi",
@@ -170,14 +182,14 @@ check("E1 a gyűrű a kijelolt formakat orzi",
 check("E2 ures kulcs nem kerul be (szabad valaszforma nem eget el helyet)",
       (remember_opening(""), list(_recent_openings) == ["pattern", "strikes"])[1])
 
-_recent_openings.clear()
+eng.reset_opening_state()
 for k in list(OPENING_SHAPES):
     remember_opening(k)
 check("E3 a gyűrű a legutobbi _OPENING_RING_SIZE elemre van vagva",
       len(_recent_openings) == _OPENING_RING_SIZE
       and list(_recent_openings) == list(OPENING_SHAPES)[-_OPENING_RING_SIZE:],
       str(list(_recent_openings)))
-_recent_openings.clear()
+eng.reset_opening_state()
 
 # --- F) config --------------------------------------------------------------
 check("F1 default: bekapcsolva", opening_variety_enabled({}) is True)
@@ -196,7 +208,13 @@ import re as _re  # noqa: E402
 collisions = []
 for key, shape in OPENING_SHAPES.items():
     probe = shape["example"].strip('"')
-    for pattern, label in _STOCK_OPENING_PATTERNS + _FORBIDDEN_PATTERNS:
+    # 2026-08-11: a `_CONSULTANT_VOICE_PATTERNS` is bekerult a korbe. Az uj lista
+    # eppen "we/i + often + find/see" alakokat tilt, a katalogusban pedig ott van az
+    # "I've found..." (`own_practice`) es a "We've learned..." (`learned`) — ha a
+    # minta az altalanosito hatarozo nelkul is illeszkedne, MINDEN ilyen nyitasu
+    # komment ujrairast kapna. Ez a check pontosan ezt zarja ki.
+    for pattern, label in (_STOCK_OPENING_PATTERNS + _FORBIDDEN_PATTERNS
+                           + eng._CONSULTANT_VOICE_PATTERNS):
         if _re.search(pattern, probe, _re.IGNORECASE | _re.MULTILINE):
             collisions.append(f"{key} -> {label}")
 check("G1 egyetlen ajanlott nyitas sem esik a sajat kapuba",
@@ -259,19 +277,19 @@ class _FakeClient:
 _real = eng._client
 eng._client = lambda config: (_FakeClient(), "gemini-2.5-flash", None)
 try:
-    _recent_openings.clear()
+    eng.reset_opening_state()
     res_on = eng.generate_comment({"linkedin": {}}, POST)
     ring_after = list(_recent_openings)
     msg_on = compose_msgs[-1]
 
-    _recent_openings.clear()
+    eng.reset_opening_state()
     res_off = eng.generate_comment(
         {"linkedin": {"opening_variety": "off"}}, POST)
     msg_off = compose_msgs[-1]
     ring_off = list(_recent_openings)
 finally:
     eng._client = _real
-    _recent_openings.clear()
+    eng.reset_opening_state()
 
 check("H1 nincs hiba", "error" not in res_on, str(res_on.get("error", "")))
 check("H2 a valasz visszaadja a kijelolt formát (auditalhato)",
@@ -291,6 +309,262 @@ check("H7 a DASHBOARD-SZERZODES all (8 legacy mezo)",
                                 "reply_text", "rationale")))
 check("H8 az uj mezok additivak, a UI-t nem torik",
       "opening_shape" in res_on and "opening_recent" in res_on)
+
+# --- I) nyitas-visszhang: a MEGVALOSULT nyitas kapuja (v9) --------------------
+# A MERT ESET, szo szerint a harom eles kommentbol (bench_posts/01, 04, 05):
+ECHO_1 = ("What strikes me about this is the challenge of disambiguating intent "
+          "when a single stroke could represent a new element.")
+ECHO_2 = ("What strikes me about the discussion around as-built accuracy is how "
+          "often the biggest challenge isn't technical, but commercial.")
+ECHO_3 = ("What strikes me is how often this perceived 'delay' in coordination is "
+          "worsened by how we structure payments.")
+
+# 2026-08-11 (v11): a VART ERTEK 'what strikes me' -> 'frame:notable'. A teszt
+# ALLITASA valtozatlan (a harom mert nyitas EGY ujjlenyomatra esik) — csak az
+# ujjlenyomat lett a keret neve, mert a szo-szintű varialas kijatszotta a harom-szavas
+# valtozatot. Ld. J) szekcio.
+check("I1 a harom MERT nyitas ugyanarra az ujjlenyomatra esik",
+      opening_fingerprint(ECHO_1) == opening_fingerprint(ECHO_2)
+      == opening_fingerprint(ECHO_3) == "frame:notable",
+      f"{opening_fingerprint(ECHO_1)!r} / {opening_fingerprint(ECHO_2)!r} / "
+      f"{opening_fingerprint(ECHO_3)!r}")
+
+# A batch tobbi ket kommentjenek nyitasa — ezek NEM eshetnek egybe egymassal sem,
+# sem a fentiekkel, kulonben a kapu hamis pozitivot adna ugyanarra a kotegre.
+OTHER_1 = ("I've found that the conceptual stage often suffers most from undefined "
+           "data ownership.")
+OTHER_2 = "One thing that stood out in your example is how much the benefits go beyond."
+check("I2 kulonbozo mozdulat -> kulonbozo ujjlenyomat (nincs hamis pozitiv)",
+      len({opening_fingerprint(t) for t in (ECHO_1, OTHER_1, OTHER_2)}) == 3,
+      str([opening_fingerprint(t) for t in (ECHO_1, OTHER_1, OTHER_2)]))
+
+# A harom-szavas szabaly a KERETBE NEM eso nyitasokra all (a keret egy token).
+check("I3 keret nelkuli nyitas: pontosan _OPENING_FINGERPRINT_WORDS szo",
+      len(opening_fingerprint(OTHER_1).split()) == _OPENING_FINGERPRINT_WORDS,
+      opening_fingerprint(OTHER_1))
+check("I4 csak az ELSO mondat szamit (a masodik mar tartalom)",
+      opening_fingerprint("Short one. What strikes me about this.") == "short one",
+      opening_fingerprint("Short one. What strikes me about this."))
+check("I5 az irasjel-valtozat nem hoz letre ket ujjlenyomatot",
+      opening_fingerprint("I've found that X.") == opening_fingerprint("I’ve found that X."))
+check("I6 ures komment -> ures ujjlenyomat, nem kivetel", opening_fingerprint("") == "")
+
+# MERT HIBA (2026-08-11, eles magyar futas): az elso valtozat `[^a-z0-9]`-t
+# hasznalt, ezert az ekezetes betu SZOHATAR lett -> 'egy visszat r' (masfel szo,
+# harom helyett). Az ekezet-hajtogatas ezt javitja.
+HU = "Egy visszatérő mintát látok, ahogy a „pipálgatós” auditok kudarcot vallanak."
+check("I6.1 magyar nyitas: EGESZ szavak, nem ekezet-fragmentumok",
+      opening_fingerprint(HU) == "egy visszatero mintat", opening_fingerprint(HU))
+check("I6.2 az ekezet nelkul irt valtozat ugyanaz az ujjlenyomat",
+      opening_fingerprint("Egy visszatero mintat latok.") == opening_fingerprint(HU))
+
+# A kapu maga — TISZTA fuggveny, a gyűrűt a hivo adja at.
+eng.reset_opening_state()
+echo_issues = check_quality(ECHO_2, POST, intent="engineering_problem",
+                           discourse_level="technical",
+                           recent_openings=["frame:notable"])
+check("I7 a kapu kifogja az ismetlodo MEGVALOSULT nyitast",
+      any("azonos kezdes" in i for i in echo_issues), str(echo_issues))
+check("I8 a sertes megnevezi a konkret ujjlenyomatot (az ujrairas igy celzott)",
+      any("'frame:notable'" in i for i in echo_issues), str(echo_issues))
+check("I9 gyűrű nelkul (None) a kapu NEM meri — regi hivas valtozatlan",
+      not any("azonos kezdes" in i
+              for i in check_quality(ECHO_2, POST, intent="engineering_problem",
+                                     discourse_level="technical")))
+check("I10 ures gyűrű -> nincs sertes",
+      not any("azonos kezdes" in i
+              for i in check_quality(ECHO_2, POST, intent="engineering_problem",
+                                     discourse_level="technical",
+                                     recent_openings=[])))
+check("I11 mas nyitas ugyanazzal a gyűrűvel atmegy",
+      not any("azonos kezdes" in i
+              for i in check_quality(OTHER_1 + " " + OTHER_2, POST,
+                                     intent="engineering_problem",
+                                     discourse_level="technical",
+                                     recent_openings=["what strikes me"])))
+
+# A gyűrű
+eng.reset_opening_state()
+remember_opening_text(ECHO_1)
+check("I12 sikeres komment utan a visszhang-gyűrű bővult",
+      list(_recent_opening_texts) == ["frame:notable"], str(list(_recent_opening_texts)))
+remember_opening_text("")
+check("I13 ures komment nem eget el helyet a gyűrűben",
+      list(_recent_opening_texts) == ["frame:notable"], str(list(_recent_opening_texts)))
+for i in range(_OPENING_ECHO_RING_SIZE + 3):
+    remember_opening_text(f"Sentence number {i} here.")
+check("I14 a gyűrű a legutobbi _OPENING_ECHO_RING_SIZE elemre van vagva",
+      len(_recent_opening_texts) == _OPENING_ECHO_RING_SIZE, str(list(_recent_opening_texts)))
+
+# A KET GYŰRŰ EGYUTT: ha a visszhang-gyűrű melyebb lenne, olyan formát buntetne,
+# amit a rotacio joggal ad ki ujra — ezert egyetlen szambol jon mindketto.
+check("I15 a ket gyűrű egyforma melysegű (nem dolgoznak egymas ellen)",
+      _OPENING_ECHO_RING_SIZE == _OPENING_RING_SIZE,
+      f"{_OPENING_ECHO_RING_SIZE} vs {_OPENING_RING_SIZE}")
+
+# Ugyanaz az onvedelem, mint a G1-nel: a sajat katalogusunk formai nem eshetnek
+# egybe, kulonben ket egymas utani, KULONBOZO forma is sertest kapna.
+_fps = {}
+for key, shape in OPENING_SHAPES.items():
+    fp = opening_fingerprint(shape["example"].strip('"'))
+    _fps.setdefault(fp, []).append(key)
+_fp_collisions = {fp: keys for fp, keys in _fps.items() if len(keys) > 1}
+check("I16 a katalogus formai kulonbozo ujjlenyomatot adnak",
+      not _fp_collisions, str(_fp_collisions))
+
+check("I17 config default: bekapcsolva", opening_echo_gate_enabled({}) is True)
+check("I18 'off' -> kikapcsolva",
+      opening_echo_gate_enabled({"linkedin": {"opening_echo_gate": "off"}}) is False)
+check("I19 YAML-boolean False -> kikapcsolva",
+      opening_echo_gate_enabled({"linkedin": {"opening_echo_gate": False}}) is False)
+check("I20 reset_opening_state MINDKET gyűrűt nullazza",
+      (remember_opening("strikes"), remember_opening_text(ECHO_1),
+       eng.reset_opening_state(),
+       not _recent_openings and not _recent_opening_texts)[3])
+eng.reset_opening_state()
+
+# --- J) nyito-KERETEK: ugyanaz a mozdulat mas szavakkal (v11) -----------------
+# A MERT KIJATSZAS: a v9-es kapu blokkolta a "What strikes me"-t, es a modell
+# masodik kore "What's compelling about Frank's approach..."-szal indult. Harom szo
+# szerint mas ujjlenyomat, retorikailag ugyanaz a mozdulat.
+BYPASS = "What's compelling about Frank's approach is the clarity it brings to drawings."
+check("J1 a MERT kijatszas-par ugyanarra az ujjlenyomatra esik",
+      opening_fingerprint(ECHO_1) == opening_fingerprint(BYPASS) == "frame:notable",
+      f"{opening_fingerprint(ECHO_1)!r} vs {opening_fingerprint(BYPASS)!r}")
+check("J2 a keret-csalad tovabbi szinonimai is ugyanide esnek",
+      all(opening_fingerprint(t) == "frame:notable" for t in (
+          "What is interesting here is the ownership question.",
+          "What struck me was the missing dimension case.",
+          "What's so telling about this is the payment structure.")))
+
+# A KOMMENT KOZEPEN allo ugyanilyen fordulat NEM nyitasi hiba: a poszt 13 kommentje
+# valoban mas mozdulattal indult, csak kesobb hasznalta a keretet.
+MID = ("I've run into similar challenges with adoption, and what strikes me is how "
+       "much inertia there is against switching tools.")
+check("J3 a mondat KOZEPEN levo keret nem kanonizal (a nyitas valoban mas)",
+      opening_fingerprint(MID) == "i ve run", opening_fingerprint(MID))
+
+check("J4 negativ: nem minden 'What...' kezdes keret",
+      all(opening_fingerprint(t) != "frame:notable" for t in (
+          "What matters here is who maintains the script.",
+          "What about the handover case?",
+          "What a project like this needs is a versioned parameter file.")),
+      str([opening_fingerprint(t) for t in (
+          "What matters here is who maintains the script.",
+          "What about the handover case?",
+          "What a project like this needs is a versioned parameter file.")]))
+
+eng.reset_opening_state()
+check("J5 a kapu MOST kifogja a kijatszast (a gyűrűben csak a keret van)",
+      any("azonos kezdes" in i for i in
+          check_quality(BYPASS + " " + " ".join(["word"] * 40), POST,
+                        intent="product_demonstration", discourse_level="management",
+                        recent_openings=["frame:notable"])))
+
+# A KET MECHANIZMUS SZERZODESE: ha a rotacio EPPEN a `strikes` formát adta ki, a
+# `frame:notable` nem lehet sertes — kulonben a modell a sajat utasitasa miatt kapna
+# ujrairast. (Merve: egy `stood_out` kiosztasu komment is elhasznalta a keretet.)
+check("J6 csak a `strikes` formának van sajat kerete",
+      eng.shape_frame("strikes") == "frame:notable"
+      and all(eng.shape_frame(k) == "" for k in OPENING_SHAPES if k != "strikes"),
+      str({k: eng.shape_frame(k) for k in OPENING_SHAPES}))
+eng.reset_opening_state()
+remember_opening_text(ECHO_1)          # a gyűrűben: frame:notable
+check("J7 kiosztott `strikes` -> a sajat kerete KIMARAD a kapunak adott gyűrűből",
+      eng.echo_ring_for("strikes") == [], str(eng.echo_ring_for("strikes")))
+check("J8 MAS kiosztott forma -> a keret BENENE marad (a visszhang sertes)",
+      eng.echo_ring_for("own_practice") == ["frame:notable"],
+      str(eng.echo_ring_for("own_practice")))
+check("J9 ures kiosztas (szabad valaszforma) -> a gyűrű valtozatlan",
+      eng.echo_ring_for("") == ["frame:notable"], str(eng.echo_ring_for("")))
+eng.reset_opening_state()
+
+# --- K) nyelv-mezok: szegmentalas, nem kapuzas (v11) -------------------------
+# A merőszamaink FELE angolra kalibralt (a `concreteness` lexikonja es a hossz-sav
+# szoszama), a naplo viszont eddig nem tudta, milyen nyelven ment ki a komment.
+HU_REPLY = ("Ahogy felveted, az, hogy az AI nemcsak elolvassa, hanem ertelmezi is a "
+            "szabalyzatokat egy uzleti helyzetben, kulcsfontossagu kihivas.")
+EN_REPLY = ("I have found that the shared parameter GUID travels with the definition "
+            "file and not with the model itself.")
+check("K1 a magyar komment nem 'en'", eng.looks_english(HU_REPLY) is False)
+check("K2 az angol komment 'en'", eng.looks_english(EN_REPLY) is True)
+
+# --- L) tartalmi mozdulat + a harmadik kor (v14) -----------------------------
+# A MERT HIBA 1: a kihivas-szenzor utan HET CC-kommentbol HAT ugyanoda futott ki
+# (szerzodes/incentiva-keret). SZO SZERINTI reszletek a naplobol:
+MOVE_1 = ("What strikes me is the inherent shift in contractual frameworks it implies. "
+          "Current contracts typically define a clear end to the design team's "
+          "responsibility, so we would need engagement models that incentivise "
+          "continuous data integrity beyond handover.")
+MOVE_2 = ("One thing I've observed is that the real pressure point is aligning "
+          "contractual incentives across all parties. Without that, the motivation to "
+          "spend upfront on clash resolution isn't always there.")
+NO_MOVE = ("The GUID travels with the definition file, not with the model, so once "
+           "someone rebuilds that file the schedule mapping quietly detaches and "
+           "nothing warns you about it until a schedule stops matching.")
+ONE_HIT = ("The incentive to model early is real, but the IFC property sets are where "
+           "this actually breaks down on export.")
+
+check("L1 a ket MERT komment ugyanarra a mozdulatra esik",
+      eng.content_move(MOVE_1) == eng.content_move(MOVE_2) == "move:commercial_frame",
+      f"{eng.content_move(MOVE_1)!r} / {eng.content_move(MOVE_2)!r}")
+check("L2 technikai komment: nincs mozdulat", eng.content_move(NO_MOVE) == "",
+      eng.content_move(NO_MOVE))
+check("L3 EGY futo emlites nem a komment mozdulata (kuszob: 2 kulonbozo terminus)",
+      eng.content_move(ONE_HIT) == "", eng.content_move(ONE_HIT))
+check("L4 a kuszob dokumentalt es 2", eng._CONTENT_MOVE_MIN_HITS == 2)
+
+check("L5 a kapu kifogja az ismetlodo GONDOLATOT",
+      any("ismetlodo gondolat" in i for i in
+          check_quality(MOVE_2 + " " + " ".join(["word"] * 30), POST,
+                        intent="professional_opinion", discourse_level="business",
+                        recent_moves=["move:commercial_frame"])),
+      str(check_quality(MOVE_2, POST, recent_moves=["move:commercial_frame"])))
+check("L6 gyűrű nelkul (None) NEM mer — regi hivas valtozatlan",
+      not any("ismetlodo gondolat" in i for i in
+              check_quality(MOVE_2, POST, intent="professional_opinion",
+                            discourse_level="business")))
+
+# A SZERZODES a strategiaval: a `business_impact` direktivaja EPPEN a kereskedelmi
+# kovetkezmeny — ott a mozdulat utasitas, nem visszhang.
+eng.reset_opening_state()
+eng.remember_content_move(MOVE_1)
+check("L7 a gyűrű bővult", list(eng._recent_content_moves) == ["move:commercial_frame"],
+      str(list(eng._recent_content_moves)))
+check("L8 `business_impact` -> a sajat mozdulata KIMARAD a gyűrűből",
+      eng.move_ring_for("business_impact") == [], str(eng.move_ring_for("business_impact")))
+check("L9 MAS strategia -> a mozdulat BENNE marad",
+      eng.move_ring_for("constructive_challenge") == ["move:commercial_frame"],
+      str(eng.move_ring_for("constructive_challenge")))
+check("L10 a mozdulat-gyűrű ugyanolyan mely, mint a masik ketto",
+      eng._recent_content_moves.maxlen == _OPENING_RING_SIZE,
+      f"{eng._recent_content_moves.maxlen} vs {_OPENING_RING_SIZE}")
+check("L11 reset_opening_state MINDHAROM gyűrűt nullazza",
+      (eng.reset_opening_state(), not eng._recent_content_moves
+       and not _recent_openings and not _recent_opening_texts)[1])
+
+check("L12 config default: bekapcsolva", eng.content_echo_gate_enabled({}) is True)
+check("L13 'off' -> kikapcsolva",
+      eng.content_echo_gate_enabled({"linkedin": {"content_echo_gate": "off"}}) is False)
+
+# A MERT HIBA 2: negy komment SERTESSEL ment ki, mert a ciklus `range(2)` volt es a
+# modell a 2. korben ugyanannak a mozdulatnak MAS alakjat hozta ("We often see" ->
+# "I often find"). A harmadik kor CSAK az ismetles-osztalyra jar.
+check("L14 a harmadik kor letezik", eng.MAX_COMPOSE_ATTEMPTS == 3,
+      str(eng.MAX_COMPOSE_ATTEMPTS))
+check("L15 a NEGY mert eset mind ismetles-osztaly (ezert jar rajuk a 3. kor)",
+      all(eng.only_rephrasable(iss) for iss in (
+          ["ismetlodo nyitas (We often see)"],
+          ["tanacsadoi hang (We often see/found)"],
+          ["tanacsadoi hang (We often see/found)",
+           "ismetlodo nyitas (a legutobbi kommentek egyikevel azonos kezdes: 'i ve found')"],
+          ["tanacsadoi hang (We often see/found)", "tanacsadoi hang (I often find)"])))
+check("L16 tartalmi sertes NEM ismetles-osztaly (arra nincs plusz kor)",
+      not eng.only_rephrasable(["tul rovid (19 szo, min 35)"])
+      and not eng.only_rephrasable(["ismetlodo gondolat (move:commercial_frame)"])
+      and not eng.only_rephrasable(["ismetlodo nyitas (x)", "tul hosszu (200 szo)"]))
+check("L17 ures lista nem 'csak ujrafogalmazhato' (a siker nem ok a 3. korre)",
+      not eng.only_rephrasable([]))
 
 print()
 bad = 0

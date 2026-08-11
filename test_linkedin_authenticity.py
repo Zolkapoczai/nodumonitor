@@ -320,18 +320,18 @@ class _FakeClient:
 _real = eng._client
 eng._client = lambda config: (_FakeClient(), "gemini-2.5-flash", None)
 try:
-    eng._recent_openings.clear()
+    eng.reset_opening_state()
     compose_outputs[:] = [BAD_FIRST, GOOD]          # 1. kor sertes -> ujrairas
     res = eng.generate_comment({"linkedin": {"temperature": 0.3}}, POST)
     calls_scored = list(calls)
     calls.clear()
-    eng._recent_openings.clear()
+    eng.reset_opening_state()
     compose_outputs[:] = [GOOD]                      # mar az 1. kor tiszta
     res_off = eng.generate_comment({"linkedin": {"temperature": "default"}}, POST)
     calls_off = list(calls)
 finally:
     eng._client = _real
-    eng._recent_openings.clear()
+    eng.reset_opening_state()
 
 check("F1 nincs hiba", "error" not in res, str(res.get("error", "")))
 check("F2 a KAPU-SERTES pontosan EGY ujrairast valtott ki (1 reason + 2 compose)",
