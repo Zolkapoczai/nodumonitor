@@ -364,6 +364,68 @@ check("F11 a DASHBOARD-SZERZODES all (8 legacy mezo)",
       all(k in res for k in ("topic", "post_type", "engagement_intent", "reply_style",
                              "brand_mode", "confidence", "reply_text", "rationale")))
 
+
+# --- H) a KIADHATATLAN sertes nem mehet ki (v22) -----------------------------
+# A MERT HIBA, amit ez zar (naplo, post_id eb39ea74446b980f): a kapu elkapta a
+# „We often see" tanacsadoi hangot, a motor haromszor ujrairta, mind a harom kor
+# ugyanazt adta — es a hurok a MEG MINDIG SERTO szoveget adta vissza sikerkent.
+# A `quality_issues` benne volt a valaszban, de a hivo csak az `error` kulcsot
+# vizsgalja, tehat a sertes csendben kiment a felhasznalonak.
+from responder.linkedin_engine import (  # noqa: E402
+    _BLOCKING_PREFIXES, _REPHRASABLE_PREFIXES, blocking_issues,
+)
+
+CONSULTANT_ALL_ROUNDS = ("We often see that shared parameter definitions drift once "
+                         "the model leaves the originating office, and the GUID no "
+                         "longer resolves against the linked file. The definition "
+                         "travels with the txt, not with the model itself, so a "
+                         "rebuild silently repoints every tagged instance.")
+
+eng._client = lambda config: (_FakeClient(), "gemini-2.5-flash", None)
+try:
+    calls.clear()
+    eng.reset_opening_state()
+    # MIND A HAROM kor ugyanazt a tiltott fordulatot adja — pontosan a mert eset.
+    compose_outputs[:] = [CONSULTANT_ALL_ROUNDS]
+    res_blocked = eng.generate_comment({"linkedin": {"temperature": 0.3}}, POST)
+    calls_blocked = list(calls)
+finally:
+    eng._client = _real
+    eng.reset_opening_state()
+
+check("H1 harom sikertelen kor utan HIBAT ad, nem kommentet",
+      "error" in res_blocked, str(res_blocked.get("reply_text", ""))[:60])
+check("H2 a hiba MEGNEVEZI a kiadhatatlan serteset (nem general 'nem sikerult')",
+      "tanacsadoi hang" in (res_blocked.get("error") or ""),
+      str(res_blocked.get("error"))[:120])
+check("H3 a diagnosztika a hibas uton is visszajon (merheto marad)",
+      res_blocked.get("quality_issues") and res_blocked.get("blocking_issues")
+      and res_blocked.get("rewrites") == 3, str(res_blocked.get("rewrites")))
+check("H4 tenylegesen HAROM compose-kort futott (a rephrasable-osztaly jar plusz kort)",
+      [c["stage"] for c in calls_blocked] == ["reason", "compose", "compose", "compose"],
+      str([c["stage"] for c in calls_blocked]))
+# A gyűrű-invariáns: egy soha meg nem jelent komment nem szennyezheti a kovetkezo
+# dontest. A `remember_*` a kemeny bukas UTAN van, tehat itt ures kell maradnia.
+check("H5 a bukott komment NEM kerult a nyitas-gyűrűbe",
+      not list(eng._recent_opening_texts) and not list(eng._recent_strategies),
+      str(list(eng._recent_opening_texts)))
+
+# A ket halmaz KULON kerdesre valaszol, es szandekosan atfed: a rephrasable azt
+# mondja meg, JAR-E plusz kor, a blocking azt, hogy KIADHATO-E a vegen.
+check("H6 a 'tanacsadoi hang' MINDKET halmazban szerepel (plusz kor JAR, de nem adhato ki)",
+      any("tanacsadoi hang".startswith(p) or p == "tanacsadoi hang"
+          for p in _REPHRASABLE_PREFIXES)
+      and any(p == "tanacsadoi hang" for p in _BLOCKING_PREFIXES))
+check("H7 a hossz/bekezdes/ismetles NEM blokkol (meresi fokozat, nem szegyen)",
+      blocking_issues(["tul rovid (30 szo, min 35)", "tul sok bekezdes (3, max 2)",
+                       "ismetlodo nyitas (...)", "ismetlodo gondolat (...)"]) == [])
+check("H8 az AI-jelek es a hamis kep-hivatkozas BLOKKOL",
+      len(blocking_issues([
+          "tiltott fordulat (Great post)", "AI-ujjlenyomat / enterprise-regiszter (robust)",
+          "gondolatjel angol kommentben (AI-jel)", "emoji",
+          "a komment a kepre hivatkozik (kep-hivatkozas)",
+          "markaemlites, holott nincs engedelyezve"])) == 6)
+
 print()
 bad = 0
 for name, ok, detail in results:

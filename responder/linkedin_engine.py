@@ -147,7 +147,7 @@ from google.genai import types
 
 from env_secrets import get_secret
 
-ENGINE_VERSION = "linkedin-tle-v21"
+ENGINE_VERSION = "linkedin-tle-v22"
 
 # --- Stage 4: strategiak -----------------------------------------------------
 # Pontosan EGY strategia valasztodik kommentenkent. A `directive` a compose-
@@ -2159,6 +2159,47 @@ def only_rephrasable(issues: list[str]) -> bool:
         any(i.startswith(p) for p in _REPHRASABLE_PREFIXES) for i in issues)
 
 
+# --- KIADHATATLAN sertesek (2026-08-11, engine v22) --------------------------
+# A MERT HIBA (naplo, post_id eb39ea74446b980f): a kapu elkapta a „We often see"
+# tanacsadoi hangot, a motor HAROMSZOR ujrairta, mind a harom kor ugyanazt adta
+# vissza — es a hurok ezutan a MEG MINDIG SERTO szoveget adta ki sikerkent. A
+# `quality_issues` ott volt a valaszban, de a hivo (`ui/app.py`) csak az `error`
+# kulcsot vizsgalja, tehat a sertes lathatatlanul kiment.
+#
+# EZ NEM ugyanaz a halmaz, mint a `_REPHRASABLE_PREFIXES`, es a ketto SZANDEKOSAN
+# atfed (`tanacsadoi hang` mindkettoben szerepel): a rephrasable azt mondja meg,
+# JAR-E ra plusz kor (ujrafogalmazassal javithato-e), ez pedig azt, hogy ha a
+# korok elfogytak, KIADHATO-E. Egy sertes lehet egyszerre „erdemes ujra probalni"
+# es „de sose menjen ki igy".
+#
+# A VONAL: ide az kerul, ami a kommentet nyilvanosan vallalhatatlanna vagy
+# tenyszeruen hamissa teszi — nem az, ami csak meresi/fokozati kerdes. A hossz, a
+# bekezdes-szam es a sorozat-szintű ismetles ezert NEM blokkol: egy 33 szavas vagy
+# a legutobbihoz hasonloan kezdodo komment nem szegyen, egy „Great post!" nyitas,
+# egy emoji, egy nem letezo kepre hivatkozas vagy egy engedely nelkuli
+# markaemlites viszont az.
+_BLOCKING_PREFIXES = (
+    "tiltott fordulat",          # explicit tiltolista (egyetertes/dicseret)
+    "tanacsadoi hang",           # a MERT eset: „We often see/found"
+    "tanacsadoi nyitas",
+    "marketing-klise",
+    "AI-ujjlenyomat",
+    "gondolatjel angol kommentben",   # a kod maga „AI-jel"-nek nevezi
+    "angol frazis nem-angol kommentben",  # fel-forditott mondat = gep-iras
+    "a komment a kepre hivatkozik",   # ellenorizhetetlen/hamis allitas
+    "markaemlites, holott nincs engedelyezve",
+    "emoji",
+    "hashtag",
+    "felkialtojel",
+)
+
+
+def blocking_issues(issues: list[str]) -> list[str]:
+    """Azok a sertesek, amikkel a komment NEM adhato ki (ld. `_BLOCKING_PREFIXES`)."""
+    return [i for i in (issues or [])
+            if any(i.startswith(p) for p in _BLOCKING_PREFIXES)]
+
+
 MIN_WORDS = 35
 MAX_WORDS = 175
 MAX_PARAGRAPHS = 2
@@ -2388,12 +2429,34 @@ def concreteness(comment: str, post_text: str) -> dict:
     }
 
 
+# A fog-pontszam (absztrakt fonevek + tompitasok) padloja, ami MELLETT a nulla
+# hozott horgony mar sertes. A 96 soros naplon mert szakadekba esik: a 0-horgonyu
+# tiszta sorok 0-7-ig tomorulnek, 8-on EGYETLEN sor sincs, 9-tol jonnek a kiugrok
+# (9, 10, 11, 13, 15). Ld. a reszletes indoklast a `check_quality` homalyossag-
+# blokkjaban. Ujrameres eseten ITT kell allitani, es a naplobol ellenorizni, hogy
+# a szakadek nem vandorolt-e el.
+FOG_SCORE_FLOOR = 8
+
+
+def concreteness_gate_enabled(config: dict) -> bool:
+    """`linkedin.concreteness_gate`: on (kod-default) | off. YAML-boolean (§4/17).
+
+    Kikapcsolva a kapu BAJTRA a v21-es: a `concreteness` tovabbra is MERVE van a
+    naploban, csak nem kapuz — ugyanaz az elv, mint a `content_echo_gate`-nel.
+    """
+    raw = (config.get("linkedin", {}) or {}).get("concreteness_gate", "on")
+    if isinstance(raw, bool):
+        return raw
+    return str(raw).strip().lower() not in ("off", "false", "0", "no", "none")
+
+
 def check_quality(comment: str, post_text: str, brand_allowed: bool = False,
                   intent: str = "", discourse_level: str = "",
                   human_temperature: str = "",
                   image_attached: bool = False,
                   recent_openings: list[str] | None = None,
-                  recent_moves: list[str] | None = None) -> list[str]:
+                  recent_moves: list[str] | None = None,
+                  concreteness_gate: bool = True) -> list[str]:
     """Stage 9 — deterministikus kapu. Visszaadja a KONKRET serteseket.
 
     A lista uressege a "mehet" jel. A hivo ezt a listat adja at az ujrairo
@@ -2512,6 +2575,34 @@ def check_quality(comment: str, post_text: str, brand_allowed: bool = False,
         # lista 2026-08-10 ota tulmutat a framework->process->governance klaszteren
         # (`robust`, `leverage`).
         issues.append(f"AI-ujjlenyomat / enterprise-regiszter ({', '.join(fingerprint[:3])})")
+
+    # HOMALYOSSAG (2026-08-11, v22): a `concreteness` eddig CSAK diagnosztika volt
+    # („a kapu nem hasznalja"). Egy eles komment megmutatta, miert kell kapu is:
+    # nulla hozott horgony, HET absztrakt fonev (collaboration, framework, potential,
+    # challenge, stakeholder(s), capabilities) es NEGY tompitas 115 szoban — a kapu
+    # minden meglevo szabalyt teljesitett, es tisztan kiengedte. A komment nem
+    # hibas, hanem SULYTALAN: pontosan az, amit egy tanacsado ir, hogy okosnak
+    # tunjon, es amire senki nem valaszol.
+    #
+    # A KUSZOB MERT, NEM TALALT: a 96 soros naplon a 0-horgonyu tiszta sorok
+    # fog-pontszama (absztrakt + tompitas) 0-7 kozott tomorul, a 8 URES, es 9-tol
+    # jonnek a kiugrok. A kuszob ezert 8 — a mert szakadekba esik, tehat egy kis
+    # elmozdulas sem billent at sort. Igy a mert korpusz tiszta sorainak 6%-a
+    # bukna el rajta, nem a 71%-a (annyinak van 0 horgonya — ezert nem szabad
+    # magara a horgony-hianyra kapuzni: az a NORMAL allapot, nem a hiba).
+    #
+    # KET FELTETEL EGYUTT: a horgony-hiany onmagaban nem hiba (a szotar szűk), a
+    # sok absztrakcio onmagaban sem (egy business-szintű beszelgetes joggal
+    # absztrakt). A KETTO EGYUTT az, ami azt jelenti: a komment semmit nem nevez
+    # meg, es kozben tele van kodszoval.
+    if concreteness_gate:
+        co = concreteness(text, post_text)
+        fog = co["abstract_count"] + co["hedges"]
+        if co["anchors_added"] == 0 and fog >= FOG_SCORE_FLOOR:
+            issues.append(
+                f"homalyos, konkretum nelkul (0 hozott horgony, "
+                f"fog-pontszam {fog}: {co['abstract_count']} absztrakt + "
+                f"{co['hedges']} tompitas)")
 
     # Kep-hivatkozas: csak akkor mer, ha tenylegesen volt kep. A kep besorolasi
     # kontextus — amit csak azon lattunk, az nem allithato egy nyilvanos
@@ -3461,6 +3552,11 @@ def _generate_comment(config: dict, post_text: str, author_name: str = "",
     # find") — vagyis a modell valtozatot cserelt, nem viselkedest. Ha csak az utolso
     # kor serteset adjuk at, a modell nem is tudja, hogy az elozo alak is tilos.
     seen_issues: list[str] = []
+    # A LEGJOBB kor, nem az UTOLSO (2026-08-11, v22). A hurok eddig azt a szoveget
+    # adta ki, amit eppen utolsonak kapott — holott a 3. kor lehet ROSSZABB, mint az
+    # 1. (a modell egy sertes javitasa kozben ujat vihet be). A jobbat eldobni tiszta
+    # veszteseg: ugyanannyi hivas, rosszabb kimenet.
+    best_comment, best_issues = "", None
     for attempt in range(MAX_COMPOSE_ATTEMPTS):
         # A nyitas-forma az ujrairo korben is UGYANAZ: az ujrairas a kapu konkret
         # serteseit javitja, nem a retorikai formát valtoztatja. Uj forma itt
@@ -3491,9 +3587,17 @@ def _generate_comment(config: dict, post_text: str, author_name: str = "",
             # `shape_frame`: az utasitas erosebb, mint a visszhang-tilalom.
             recent_openings=(echo_ring if opening_echo_gate_enabled(config) else None),
             recent_moves=(move_ring if content_echo_gate_enabled(config) else None),
+            concreteness_gate=concreteness_gate_enabled(config),
         )
         if attempt == 0:
             issues_first = list(issues)
+        # A rangsor: eloszor a BLOKKOLO sertesek szama dont, aztan az osszes. Igy egy
+        # ket apro hosszhibas, de kiadhato kor nyer egy egyetlen AI-jelet tartalmazo
+        # korrel szemben — nem a puszta darabszam.
+        if best_issues is None or (
+                (len(blocking_issues(issues)), len(issues))
+                < (len(blocking_issues(best_issues)), len(best_issues))):
+            best_comment, best_issues = comment, list(issues)
         if not issues:
             break
         rewrites = attempt + 1
@@ -3505,8 +3609,35 @@ def _generate_comment(config: dict, post_text: str, author_name: str = "",
         if attempt >= 1 and not only_rephrasable(issues):
             break
 
+    comment, issues = best_comment, (best_issues if best_issues is not None else issues)
+
     if not comment:
         return {"error": "A kompozíciós lépés üres kommentet adott."}
+
+    # KEMENY BUKAS a kiadhatatlan serteseknel (v22). Eddig a hurok kimeneteként a meg
+    # mindig serto szoveg SIKERKENT ment vissza, es a hivo (`ui/app.py`) csak az
+    # `error` kulcsot vizsgalja — vagyis a sertes csendben kiment a felhasznalonak.
+    # Inkabb ne adjunk kommentet, mint olyat, ami „Great post!"-tal nyit vagy nem
+    # letezo kepre hivatkozik: a hurok itt mar HAROMSZOR probalta megjavitani.
+    # A gyűrűk EZ ELOTT vannak, tehat egy soha meg nem jelent komment nem szennyezi
+    # a kovetkezo dontest — ugyanaz az invariáns, mint a `remember_*`-eknel.
+    blocked = blocking_issues(issues)
+    if blocked:
+        print(f"[linkedin-tle] KIADHATATLAN {rewrites} ujrairas utan: {', '.join(blocked)}")
+        return {
+            "error": ("A kapu " + str(rewrites) + " újraírás után is hibát talált, "
+                      "ezért nem adok ki kommentet: " + "; ".join(blocked)
+                      + ". Próbáld újra (a modell mintavétele változik), vagy "
+                        "fogalmazd át kézzel."),
+            # A diagnosztika a hibás uton is visszajon: enelkul a naploban csak egy
+            # `ok: false` sor lenne, es nem lehetne megtudni, MI bukott el.
+            "quality_issues": issues,
+            "quality_issues_first": issues_first,
+            "blocking_issues": blocked,
+            "rewrites": rewrites,
+            "reply_text": comment,   # a UI nem mutatja (error-ag), de merheto marad
+            "engine": ENGINE_VERSION,
+        }
 
     # A gyűrű CSAK itt bővul: egy meg nem jelent (hibara futott) komment nyitasa
     # nem okoz ismetlodest, tehat nem is kell kizarni a kovetkezo valasztasbol.

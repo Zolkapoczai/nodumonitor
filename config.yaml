@@ -751,6 +751,32 @@ linkedin:
   # két ismert családdal, nem eggyel kell megválaszolni legközelebb.
   # IDÉZŐJEL KELL: a YAML az on/off szavakat booleanná alakítja (HANDOFF §4/17).
   content_echo_gate: 'off'
+  # concreteness_gate — a HOMÁLYOSSÁG is mérhető sértés (2026-08-11, engine v22).
+  #   'on'  — (ALAPÉRTELMEZÉS) nulla hozott horgony ÉS `FOG_SCORE_FLOOR` (8) fölötti
+  #           fog-pontszám (absztrakt főnevek + tompítások) esetén újraírás.
+  #   'off' — bájtra a v21-es viselkedés: a `concreteness` mérve van, de nem kapuz.
+  # A MÉRT ESET: egy éles komment MINDEN meglévő szabályt teljesített
+  # (`quality_issues: []`, `rewrites: 0`), és mégis súlytalan volt — nulla hozott
+  # horgony, HÉT absztrakt főnév (collaboration, framework, potential, challenge,
+  # stakeholder(s), capabilities) és NÉGY tompítás 115 szóban. Nem hibás: pontosan
+  # az, amit egy tanácsadó ír, hogy okosnak tűnjön, és amire senki nem válaszol.
+  # A `concreteness` 2026-08-10 óta mérve volt, de a saját docstringje szerint „a
+  # kapu nem használja" — ez a bejegyzés zárja ezt a rést.
+  # A KÜSZÖB MÉRT, NEM TALÁLT: a 96 soros naplón a 0-horgonyú, kapun tisztán átment
+  # sorok fog-pontszáma 0-7 között tömörül, a 8-on EGYETLEN sor sincs, és 9-től
+  # jönnek a kiugrók (9, 10, 11, 13, 15). A padló ezért 8 — a mért szakadékba esik,
+  # tehát egy kis eltolódás sem billent át sort. Így a korpusz tiszta sorainak 6%-a
+  # bukna el rajta.
+  # MIÉRT KÉT FELTÉTEL: a horgony-hiány ÖNMAGÁBAN nem hiba — a sorok 71%-ának nulla
+  # hozott horgonya van, tehát az a NORMÁL állapot (a horgony-szótár szűk), és arra
+  # kapuzni a mezőny héttizedét büntetné. A sok absztrakció önmagában sem hiba: egy
+  # business-szintű beszélgetés joggal absztrakt. A KETTŐ EGYÜTT az, ami azt jelenti:
+  # a komment semmit nem nevez meg, és közben tele van kódszóval.
+  # NEM ismétlés-osztály (nem jár rá harmadik kör): a homályosságot nem más SZÓVAL,
+  # hanem más GONDOLATTAL kell javítani. És NEM kiadhatatlan (`_BLOCKING_PREFIXES`):
+  # a mérés proxy, ezért inkább menjen ki megjelölve, mint hogy ne legyen komment.
+  # IDÉZŐJEL KELL: a YAML az on/off szavakat booleanná alakítja (HANDOFF §4/17).
+  concreteness_gate: 'on'
   # strategy_candidates — a nyers pontszám SZŰRŐ, nem rangsor (2026-08-11, v16).
   #   'on'  — (ALAPÉRTELMEZÉS) jelöltek = akik elérik a `STRATEGY_CANDIDATE_FLOOR`-t
   #           (7) és nincsenek vetózva; a legutóbbi kettő kiesik (frissesség); a

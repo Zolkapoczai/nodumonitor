@@ -705,6 +705,77 @@ check("G13 a skip-sor is parosithato a benchmarkhoz (van post_id)",
 
 shutil.rmtree(TMP, ignore_errors=True)
 
+
+# --- M) HOMALYOSSAG-KAPU (2026-08-11, v22) -----------------------------------
+# A MERT ESET, amiert a kapu megszuletett: egy eles komment MINDEN meglevo
+# szabalyt teljesitett (`quality_issues: []`, `rewrites: 0`), es megis sulytalan
+# volt — nulla hozott horgony, 6-7 absztrakt fonev es 4 tompitas 115 szoban.
+# A `concreteness` addig CSAK diagnosztika volt.
+from responder.linkedin_engine import (  # noqa: E402
+    FOG_SCORE_FLOOR, concreteness_gate_enabled, check_quality as _cq,
+    _REPHRASABLE_PREFIXES, _BLOCKING_PREFIXES, blocking_issues as _bi,
+)
+
+M_POST = ("Governments are making BIM mandatory on public projects, and the firms "
+          "that haven't caught up will feel it. Clash detection alone pays for it.")
+# A MERT komment (log, 2026-08-11T20:58): 0 horgony, fog-pontszam 10.
+M_VAGUE = ("The point about governments making BIM mandatory is certainly changing "
+           "the landscape. We've found that while the technical capabilities of BIM "
+           "are clear, the real challenge often lies in the contractual frameworks "
+           "we operate under. In many lump-sum projects the incentives for early "
+           "collaboration and detailed data sharing can be minimal. The benefits "
+           "often depend on stakeholders investing time upfront, but if contracts "
+           "don't reward that investment, firms default to traditional methods.")
+# Ugyanaz a MONDANIVALO, de megnevez konkretumot -> at kell mennie.
+M_CONCRETE = ("The mandate helps, but what changes on site is narrower than it "
+              "sounds. On a lump-sum job last year the model was contractually a "
+              "deliverable, so the shared parameter GUIDs were never maintained "
+              "past handover and every schedule detached when the family was "
+              "rebuilt. The clash report was signed off; the asset data was not. "
+              "Which of the two does your mandate actually name?")
+
+_m_vague = [i for i in _cq(M_VAGUE, M_POST, False, "professional_opinion", "management")
+            if i.startswith("homalyos")]
+check("M1 a MERT homalyos komment elsul a kapun", bool(_m_vague), str(_m_vague))
+check("M2 az indok MERHETO szamokat ad (utolag megmagyarazhato)",
+      _m_vague and "fog-pontszam" in _m_vague[0] and "horgony" in _m_vague[0],
+      str(_m_vague[:1]))
+check("M3 a konkretumot megnevezo valtozat ATMEGY (nem a temaja a baj)",
+      not [i for i in _cq(M_CONCRETE, M_POST, False, "professional_opinion", "management")
+           if i.startswith("homalyos")],
+      str(_cq(M_CONCRETE, M_POST, False, "professional_opinion", "management")))
+check("M4 a kill switch bajtra kikapcsolja (A/B-zheto, mint a tobbi kapu)",
+      not [i for i in _cq(M_VAGUE, M_POST, False, "professional_opinion", "management",
+                          concreteness_gate=False) if i.startswith("homalyos")])
+check("M5 config: on a kod-default, 'off' kikapcsol, YAML-boolean kezelve",
+      concreteness_gate_enabled({}) is True
+      and concreteness_gate_enabled({"linkedin": {"concreteness_gate": "off"}}) is False
+      and concreteness_gate_enabled({"linkedin": {"concreteness_gate": False}}) is False)
+
+# A KUSZOB nem talalt szam: a mert szakadekba esik (0-7 tomorul, 8 ures, 9-tol
+# kiugrok). Ha valaki elirja vagy "kerekiti", ez a teszt megfogja.
+check("M6 a fog-padlo a mert szakadekban van (8)", FOG_SCORE_FLOOR == 8,
+      str(FOG_SCORE_FLOOR))
+
+# A KETTOS FELTETEL: egyik jel sem elegendo onmagaban. A naplo szerint a sorok
+# 71%-anak nulla hozott horgonya van — arra kapuzni a NORMAL allapotot buntetne.
+check("M7 a puszta horgony-hiany NEM sertes (a 0 horgony a normal allapot)",
+      not [i for i in _cq("I ran the same migration twice and the second pass held. "
+                          "The difference was where the definition lived, nothing else. "
+                          "What did yours look like when it stopped matching for you?",
+                          M_POST, False, "professional_opinion", "management")
+           if i.startswith("homalyos")])
+
+# OSZTALYBA SOROLAS: a homalyossagot nem MAS SZOVAL, hanem MAS GONDOLATTAL kell
+# javitani (mint az `ismetlodo gondolat`), ezert nem jar ra harmadik kor. Es NEM
+# blokkolo: a mero proxy, tehat inkabb menjen ki megjelolve, mint hogy ne legyen
+# komment — ellentetben az AI-jelekkel.
+check("M8 a homalyossag NEM ismetles-osztaly (nincs rajta harmadik kor)",
+      not any("homalyos".startswith(p) for p in _REPHRASABLE_PREFIXES))
+check("M9 a homalyossag NEM kiadhatatlan (proxy-meres -> megjelolve mehet)",
+      _bi(["homalyos, konkretum nelkul (0 hozott horgony, fog-pontszam 10)"]) == []
+      and not any(p.startswith("homalyos") for p in _BLOCKING_PREFIXES))
+
 print()
 bad = 0
 for name, ok, detail in results:
