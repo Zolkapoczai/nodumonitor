@@ -246,43 +246,122 @@
 
   .example-box .row .v { flex: 1; }
 
-  .checks li .why {
-    color: var(--muted);
-    font-size: 14.5px;
-    display: block;
-    margin-top: 2px;
-  }
-
   /* ---------- checklist ---------- */
 
   .checklist {
     margin: 48px 0;
   }
 
+  /* Racs-elrendezes: minden sor harom cellaja (jelolo / szabaly / miert)
+     UGYANAZT a harom oszlopszelesseget kapja, mert az `ul` maga a grid, es
+     az `li`-k `display: contents`-szel "feloldodnak" bele — igy a masodik
+     oszlop minden sorban pontosan ugyanott kezdodik, fuggetlenul attol,
+     hogy az elozo sor szovege hany sorra tordelt. */
   ul.checks {
     list-style: none;
     margin: 0;
     padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
+    display: grid;
+    grid-template-columns: 10px minmax(200px, 300px) 1fr;
+    column-gap: 20px;
+    row-gap: 0;
   }
 
   ul.checks li {
-    display: flex;
-    gap: 12px;
-    align-items: flex-start;
-    font-size: 16px;
+    display: contents;
   }
 
-  ul.checks li::before {
-    content: "";
-    flex: 0 0 auto;
+  ul.checks li .mark {
     width: 8px;
     height: 8px;
-    margin-top: 7px;
+    margin-top: 8px;
     border-radius: 1px;
     background: var(--accent);
+  }
+
+  ul.checks li .rule {
+    padding: 14px 0;
+    border-bottom: 1px solid var(--rule);
+    font-size: 16px;
+    line-height: 1.45;
+  }
+
+  ul.checks li .why {
+    padding: 14px 0;
+    border-bottom: 1px solid var(--rule);
+    color: var(--muted);
+    font-size: 14.5px;
+    line-height: 1.55;
+  }
+
+  ul.checks li:last-child .rule,
+  ul.checks li:last-child .why {
+    border-bottom: none;
+  }
+
+  @media (max-width: 620px) {
+    ul.checks {
+      grid-template-columns: 10px 1fr;
+    }
+    ul.checks li .why {
+      grid-column: 2;
+      padding-top: 0;
+      padding-bottom: 14px;
+    }
+    ul.checks li .rule {
+      padding-bottom: 6px;
+    }
+  }
+
+  /* ---------- NODU Monitor: heti poszt-javaslat ---------- */
+
+  .monitor-box {
+    margin: 48px 0;
+  }
+
+  .monitor-flow {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+
+  .monitor-flow .stage {
+    display: grid;
+    grid-template-columns: 130px 1fr;
+    gap: 16px;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--rule);
+    background: var(--surface);
+    font-size: 15px;
+  }
+
+  .monitor-flow .stage:last-child { border-bottom: none; }
+
+  .monitor-flow .stage .tag {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: var(--accent);
+    padding-top: 2px;
+  }
+
+  .monitor-note {
+    background: var(--accent-soft);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 20px 24px;
+    margin-top: 16px;
+    font-size: 15px;
+  }
+
+  .monitor-note p { margin: 0; }
+  .monitor-note p + p { margin-top: 10px; }
+
+  @media (max-width: 560px) {
+    .monitor-flow .stage { grid-template-columns: 1fr; gap: 4px; }
   }
 
   /* ---------- closing note ---------- */
@@ -555,28 +634,80 @@
   <div class="checklist">
     <div class="section-label">Mit ellenőriz magán, mielőtt elkészülne</div>
     <ul class="checks">
-      <li>Nem kezdi és nem zárja a kommentet elcsépelt, gépiesen ismerős fordulattal.
+      <li>
+        <span class="mark"></span>
+        <span class="rule">Nem kezdi és nem zárja a kommentet elcsépelt, gépiesen ismerős fordulattal.</span>
         <span class="why">Ezek a fordulatok azonnal elárulják, hogy nem ember írta — a rendszer ezeket felismeri és kerüli.</span>
       </li>
-      <li>Nem ismétli ugyanazt a nyitást vagy ugyanazt a gondolatot, mint a legutóbbi kommentjei.
+      <li>
+        <span class="mark"></span>
+        <span class="rule">Nem ismétli ugyanazt a nyitást vagy ugyanazt a gondolatot, mint a legutóbbi kommentjei — ugyanennek a szerzőnek sem.</span>
         <span class="why">Egy-egy komment külön-külön jó lehet, de ha mindig ugyanoda fut ki, az sorozatban gépiesnek tűnik.</span>
       </li>
-      <li>Se nem túl rövid, se nem túl hosszú, és nem tördeli túl sok bekezdésre.
+      <li>
+        <span class="mark"></span>
+        <span class="rule">Se nem túl rövid, se nem túl hosszú, és nem tördeli túl sok bekezdésre.</span>
         <span class="why">Egy LinkedIn-kommentnek van egy természetes hossza — ennél rövidebb súlytalan, hosszabb untat.</span>
       </li>
-      <li>Nem hivatkozik képre, ha a poszthoz nem volt kép csatolva.
+      <li>
+        <span class="mark"></span>
+        <span class="rule">Nem hivatkozik képre, ha a poszthoz nem volt kép csatolva.</span>
         <span class="why">Ha nincs mire hivatkozni, az ilyen mondat hamis benyomást kelt, mintha látott volna valamit.</span>
       </li>
-      <li>Nem másolja szóról szóra a poszt mondatait.
+      <li>
+        <span class="mark"></span>
+        <span class="rule">Nem másolja szóról szóra a poszt mondatait.</span>
         <span class="why">A komment adjon hozzá valamit — ne csak megismételje, amit a szerző már leírt.</span>
       </li>
-      <li>Nem említi a saját márkát engedély nélkül.
+      <li>
+        <span class="mark"></span>
+        <span class="rule">Nem említi a saját márkát engedély nélkül.</span>
         <span class="why">Egy komment alatt nem szabad reklámnak tűnnie — a márkaemlítés mindig külön jóváhagyást kap.</span>
       </li>
-      <li>Ha a beszélgetés nyelve magyar, nem csúszik bele idegen kifejezésekbe.
+      <li>
+        <span class="mark"></span>
+        <span class="rule">Ha a beszélgetés nyelve magyar, nem csúszik bele idegen kifejezésekbe.</span>
         <span class="why">A keveredő nyelvhasználat töri meg a hangot és odafigyelést von el a tartalomtól.</span>
       </li>
     </ul>
+  </div>
+
+  <div class="monitor-box">
+    <div class="section-label">Egy másik funkció: a heti poszt-javaslat</div>
+    <p style="color: var(--muted); margin: 0 0 16px; max-width: 62ch;">
+      Ez nem a fenti kommentelő része, hanem egy külön, heti ütemben futó
+      funkció — nem másokra reagál, hanem saját posztötleteket ad.
+    </p>
+    <div class="monitor-flow">
+      <div class="stage">
+        <span class="tag">Forrás</span>
+        <span>A NODU Monitor az elmúlt hét (alapesetben 7 nap) figyelt közösségi felvetései közül csak azokat nézi, amiket korábban már <b>valódi problémának</b> minősített — nem a nyers kulcsszó-gyakoriságot, hanem a már kiértékelt, súlyozott jelzéseket.</span>
+      </div>
+      <div class="stage">
+        <span class="tag">Rangsorolás</span>
+        <span>A jelzéseket sorba rendezi: előre kerül, amiben szó van a NODU-ról, amiben vásárlási szándék látszik, és ami súlyosabb probléma — a többit háttérbe rakja.</span>
+      </div>
+      <div class="stage">
+        <span class="tag">Kitalálás</span>
+        <span>A legfontosabb felvetésekből egy blogcikk-vázlatot és mellé néhány (alapesetben 2) rövid, kísérő LinkedIn-posztot fogalmaz — ezek a cikkre hívják fel a figyelmet, nem önmagukban állnak.</span>
+      </div>
+      <div class="stage">
+        <span class="tag">Korlátok</span>
+        <span>Rögzített szabályok: a saját céget csak finoman, legfeljebb a poszt végén említheti; egyetlen világos felhívás van (egy link); nincs emoji; legfeljebb 2-3 hashtag; nem ígérhet túl.</span>
+      </div>
+      <div class="stage">
+        <span class="tag">Kimenet</span>
+        <span>A javaslat <b>nem megy ki automatikusan</b> a LinkedInre — egy csapat-üzenetben landol a blogötlettel és a posztokkal együtt, és valaki eldönti, mi lesz belőle.</span>
+      </div>
+    </div>
+    <div class="monitor-note">
+      <p>
+        A különbség a fenti kommentelőhöz képest: az reagál — mindig valaki
+        más posztjára válaszol. Ez a funkció viszont javaslattesz — saját
+        tartalmi ötletet ad, amit egy ember hagy jóvá, mielőtt bárhova is
+        kikerülne.
+      </p>
+    </div>
   </div>
 
   <div class="note">
