@@ -749,6 +749,24 @@ linkedin:
   # A `content_echo_gate` off állása ettől NEM változott (a gyökér-ok — REASON lépés,
   # nem kimeneti kapu — továbbra is áll), de a „sokféleség helyreállt" kérdést most már
   # két ismert családdal, nem eggyel kell megválaszolni legközelebb.
+  #
+  # A KIVÉTEL MÉRTÉKE JAVÍTVA (2026-08-11, v22) — `_MOVE_EXEMPT_GRACE`. A
+  # `business_impact` eddig ÖRÖK mentességet kapott a kereskedelmi keret alól: a
+  # kivétel a mozdulat MINDEN előfordulását kivette a gyűrűből, tehát a gyűrűben
+  # három `move:commercial_frame` mellett is ÜRES gyűrűt kapott. Amíg ez a stratégia
+  # nyert, a monokultúra korlátlanul futhatott — és ezt a kapu visszakapcsolása sem
+  # orvosolta volna. A kivétel INDOKA helyes (a direktívája éppen ezt kéri), ezért
+  # nem töröltük: mostantól EGYSZERI kegyelem jár, a többi előfordulás számít.
+  #
+  # AMIT A NAPLÓ MOND A MÉRETÉRŐL — és amiért ez önmagában kevés: 13 kereskedelmi
+  # keretű kommentből mindössze KETTŐ jött `business_impact`-ból. A többség (8) a
+  # `constructive_challenge`-ből, ami NEM kivételezett — vagyis azokat ez a kapu
+  # elkapná, ha be lenne kapcsolva. A monokultúra tehát 4 különböző stratégián át
+  # fut, és a valódi forrás továbbra is a REASON lépés (a kihívás-szenzor kedvenc
+  # kimondatlan feltétele szerződési/incentíva-jellegű) — ezt a `condition_family`
+  # gyűrű őrzi, nem ez a kapu.
+  # FIGYELEM: amíg ez 'off', a fenti kegyelem-javításnak NINCS futásidejű hatása —
+  # a `content_move` mérve van, de nem kapuz.
   # IDÉZŐJEL KELL: a YAML az on/off szavakat booleanná alakítja (HANDOFF §4/17).
   content_echo_gate: 'off'
   # concreteness_gate — a HOMÁLYOSSÁG is mérhető sértés (2026-08-11, engine v22).

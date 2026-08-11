@@ -1723,6 +1723,26 @@ _recent_content_moves: deque = deque(maxlen=_OPENING_RING_SIZE)
 # visszhang — ugyanaz a szerzodes, mint a `shape_frame`-nel: az utasitas erosebb.
 _MOVE_EXEMPT_STRATEGY = {"move:commercial_frame": "business_impact"}
 
+# EGYSZERI KEGYELEM, NEM OROK MENTESSEG (2026-08-11, v22).
+#
+# A MERT HIBA: a kivetel EDDIG a mozdulat MINDEN elofordulasat kivette a gyűrűből,
+# tehat a `business_impact` sosem bukhatott kereskedelmi visszhangon — akkor sem,
+# ha az azt megelozo NEGY komment mindegyike kereskedelmi keretben zart. Merve: a
+# gyűrűben harom `move:commercial_frame` mellett a `business_impact`-nak atadott
+# gyűrű URES volt. Vagyis amig ez a strategia nyer, a monokultura korlatlanul
+# futhat, es a kapu visszakapcsolasa sem valtoztatna rajta semmit.
+#
+# A KIVETEL EREDETI INDOKA HELYES, ezert nem toroljuk: a strategia direktivaja
+# EPPEN a kereskedelmi keretezest keri, tehat az ELSO ilyen komment nem visszhang,
+# hanem utasitas-kovetes. Amit javitunk, az a MERTEK: egy sajat-mozdulat kiesik
+# (a kegyelem), a TOBBI szamit. Igy a szerzodes valtozatlan marad — „az utasitas
+# erosebb, mint a visszhang-tilalom" —, de csak EGYSZER, nem vegtelenszer.
+#
+# Kovetkezmeny a gyakorlatban (gyűrű-melyseg 4): a `business_impact` akkor bukik,
+# ha a legutobbi kommentek kozott MAR LEGALABB KETTO kereskedelmi volt. Egy
+# elozmeny meg valtozatossag, ketto mar sorozat.
+_MOVE_EXEMPT_GRACE = 1
+
 
 def content_move(comment: str) -> str:
     """A komment tartalmi mozdulata, vagy "" ha egyik ismert csaladba sem esik."""
@@ -1742,14 +1762,26 @@ def remember_content_move(comment: str) -> None:
 
 
 def move_ring_for(strategy: str, extra: list[str] | None = None) -> list[str]:
-    """A kapunak atadott mozdulat-gyűrű: a strategia sajat mozdulata kimarad.
+    """A kapunak atadott mozdulat-gyűrű: a strategia sajat mozdulatabol EGY esik ki.
+
+    A `_MOVE_EXEMPT_GRACE` (1) az egyszeri kegyelem — a strategia sajat direktivaja
+    szerinti mozdulat elso elofordulasa nem szamit visszhangnak, a tobbi igen. Ld.
+    a konstans melletti indoklast: a kivetel MERTEKE volt hibas, nem a letezese.
 
     `extra`: tovabbi bejegyzesek (pl. a szerzonkenti gyűrű), amiket a globalis
     gyűrűvel egyutt kell nezni — ld. `_author_content_moves`.
     """
     own = next((m for m, s in _MOVE_EXEMPT_STRATEGY.items() if s == strategy), "")
     combined = list(_recent_content_moves) + list(extra or ())
-    return [m for m in combined if m != own]
+    if not own:
+        return combined
+    out, grace = [], _MOVE_EXEMPT_GRACE
+    for move in combined:
+        if move == own and grace > 0:
+            grace -= 1
+            continue
+        out.append(move)
+    return out
 
 
 # --- Szerzonkenti emlekezet (2026-08-11, engine v21) -------------------------

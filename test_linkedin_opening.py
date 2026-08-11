@@ -543,6 +543,59 @@ check("L11 reset_opening_state MINDHAROM gyűrűt nullazza",
       (eng.reset_opening_state(), not eng._recent_content_moves
        and not _recent_openings and not _recent_opening_texts)[1])
 
+
+# --- N) EGYSZERI KEGYELEM, NEM OROK MENTESSEG (2026-08-11, v22) --------------
+# A MERT HIBA: a kivetel a mozdulat MINDEN elofordulasat kivette a gyűrűből, tehat
+# a `business_impact` sosem bukhatott kereskedelmi visszhangon — merve: harom
+# `move:commercial_frame` mellett is URES gyűrűt kapott. Amig ez a strategia nyer,
+# a monokultura korlatlanul futhatott, es a kapu visszakapcsolasa sem segitett volna.
+# A kivetel INDOKA helyes (a direktiva eppen ezt keri), a MERTEKE volt hibas.
+C_FRAME = "move:commercial_frame"
+
+
+def _ring_with(n, extra=()):
+    eng.reset_opening_state()
+    for _ in range(n):
+        eng._recent_content_moves.append(C_FRAME)
+    for m in extra:
+        eng._recent_content_moves.append(m)
+
+
+_ring_with(1)
+check("N1 EGY sajat mozdulat meg kegyelmet kap (utasitas-kovetes, nem visszhang)",
+      C_FRAME not in eng.move_ring_for("business_impact"),
+      str(eng.move_ring_for("business_impact")))
+_ring_with(2)
+check("N2 KETTO mar sorozat -> a `business_impact` is bukik",
+      C_FRAME in eng.move_ring_for("business_impact"),
+      str(eng.move_ring_for("business_impact")))
+_ring_with(3)
+check("N3 a kegyelem PONTOSAN egy (harombol ketto marad, nem nulla)",
+      eng.move_ring_for("business_impact").count(C_FRAME) == 2,
+      str(eng.move_ring_for("business_impact")))
+check("N4 a kegyelem merteke egyetlen konstansbol jon (nincs beegetett szam)",
+      eng._MOVE_EXEMPT_GRACE == 1, str(eng._MOVE_EXEMPT_GRACE))
+
+# A kegyelem CSAK a sajat mozdulatra jar: egy masik csalad elso elofordulasa is szamit.
+_ring_with(0, extra=["move:tool_interop_frame"])
+check("N5 a kegyelem NEM terjed ki mas csaladra",
+      eng.move_ring_for("business_impact") == ["move:tool_interop_frame"],
+      str(eng.move_ring_for("business_impact")))
+
+# A NEM kivetelezett strategiakat ez nem erinti: ott mar az elso elofordulas sertes.
+_ring_with(1)
+check("N6 nem kivetelezett strategianal valtozatlan (mar 1 elofordulas is sertes)",
+      eng.move_ring_for("field_experience") == [C_FRAME],
+      str(eng.move_ring_for("field_experience")))
+
+# A szerzonkenti gyűrű (v21) ugyanabba a szamolasba megy: a kegyelem a KETTO
+# egyuttesere jar egyszer, kulonben szerzot valtva ujraindulna a mentesseg.
+_ring_with(1)
+check("N7 a szerzonkenti gyűrű ugyanabba a szamolasba szamit bele",
+      C_FRAME in eng.move_ring_for("business_impact", extra=[C_FRAME]),
+      str(eng.move_ring_for("business_impact", extra=[C_FRAME])))
+eng.reset_opening_state()
+
 check("L12 config default: bekapcsolva", eng.content_echo_gate_enabled({}) is True)
 check("L13 'off' -> kikapcsolva",
       eng.content_echo_gate_enabled({"linkedin": {"content_echo_gate": "off"}}) is False)
