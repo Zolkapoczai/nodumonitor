@@ -704,6 +704,880 @@
 > `quality_issues_first`. A `skipped: true` válaszban `reply_text` üres — a UI a
 > `skipped` flaget vizsgálja először. DB-séma nem változott.
 
+---
+
+> ## ⚙️ KIEGÉSZÍTVE (2026-08-11) — Nyitás-visszhang kapu (engine v9)
+>
+> ### A mérés, ami ezt kikényszerítette
+> Az első **valódi köteg** (5 poszt, `bench_posts/01..05`, 146–278 szó, mind
+> más szerzőtől) — ez volt az első alkalom, hogy a motor egy futásban öt
+> **különböző** posztot látott, nem ugyanazt háromszor. Amit azonnal megmutatott:
+>
+> | # | kijelölt forma | a komment valódi kezdete |
+> |---|---|---|
+> | 01 | `own_practice` | „**What strikes me** about this is…" |
+> | 04 | `strikes` | „**What strikes me** about the discussion…" |
+> | 05 | `pattern` | „**What strikes me** is how often…" |
+>
+> **Három különböző kijelölés, ugyanaz a mondat.** A 2026-08-09-i rotáció tehát a
+> *formát* rotálja, de a formakijelölés **utasítás, nem kikényszerített eredmény** —
+> és amit a modell valójában ír, azt eddig semmi nem mérte. Ugyanaz a hibaosztály,
+> ami ellen a rotáció készült („a hiba a kommentek KÖZÖTT keletkezik"), csak egy
+> szinttel beljebb: most a saját mechanizmusunk **kimenetén** jelent meg.
+>
+> Mellékesen ugyanez a köteg egy második, szintén kapu nélküli tellt is mutatott:
+> „the real power / the real advantage / the real difference" záró mondat 4/5-ben.
+> Ez **nem** kapott javítást — egy köteg egy mechanizmust, különben nem tudjuk,
+> melyik változás mit tett.
+>
+> ### Miért NEM a tiltólista bővítése
+> A kézenfekvő lépés — `_STOCK_OPENING_PATTERNS` + „What strikes me" — **hibás
+> lett volna:** a „What strikes me" a *saját katalógusunk* ajánlott formája
+> (`OPENING_SHAPES['strikes']`). Tiltólistára tenni annyi, mint a saját whitelistünk
+> ellen kapuzni; a G1 teszt épp ezt az önellentmondást őrzi. **A hiba nem a
+> kifejezésben van, hanem az ismétlésben** — tehát nem szótárhoz kell mérni, hanem a
+> saját előző kimeneteinkhez.
+>
+> ### A mechanizmus
+> `opening_fingerprint(comment)` — az **első mondat első három szava**,
+> normalizálva. Gyűrű (`_recent_opening_texts`), és egyezés esetén a determinisztikus
+> kapu sértést ad, ami az újraíró körbe megnevezve átmegy.
+>
+> - **Miért három szó:** a mért eset pontosan ennyiben egyezett; a negyediknél már a
+>   tartalom kezdődik (annál hosszabb ujjlenyomat két azonos mozdulatot különbözőnek
+>   látna). Kettő viszont összemosná az `own_practice` („I've found") és az
+>   `encountered` („I've run into") formát — az két *különböző* ajánlott mozdulat.
+> - **Miért csak az első mondat:** a szabály a retorikai mozdulatot méri, azt az első
+>   mondat hordozza. A második már tartalom, ott két komment joggal indulhat hasonlóan.
+> - **Miért ugyanolyan mély a két gyűrű** (`_OPENING_ECHO_RING_SIZE =
+>   _OPENING_RING_SIZE = 4`): különben egymás ellen dolgoznának. A forma-gyűrű 4
+>   híváson át kizárja a használt formát; egy **mélyebb** visszhang-gyűrű olyan
+>   formát is büntetne, amit a rotáció joggal ad ki újra. Egyetlen számmal a két
+>   szabály definíció szerint konzisztens.
+> - **Ismert korlát:** a feloldott alak más ujjlenyomat („i have found" ≠ „i ve
+>   found"). Fail-open — legfeljebb átengedi az ismétlést, hibás sértést nem ad.
+>
+> ### ÉLES A/B — ugyanaz az 5 poszt, közvetlenül utána
+> | | v8 (előtte) | v9 (most) |
+> |---|---|---|
+> | különböző nyitás | **3/5** (három komment azonos) | **5/5** |
+> | sáv-betartás | 5/5 BENT | 5/5 BENT |
+> | `rewrites` | 1/5 | 2/5 (egyet a **visszhang-kapu** váltott ki) |
+>
+> A kapu élesben is pontosan úgy működött, ahogy kell: az 05-ös poszt első köre
+> „I've found…"-dal indult, ami az 01-es komment nyitásával egyezett → újraírás →
+> a második kör „One pattern I've noticed…" lett, vagyis **a neki kiosztott
+> forma** (`pattern`). Nem elnyomott, hanem visszatérített.
+>
+> **A költség egy újraíró hívás/ütközés** — ugyanaz a nagyságrend, mint a többi
+> kapunál (5/22 sor a teljes naplóban). Kapcsolóval jött be
+> (`linkedin.opening_echo_gate`), és mérhető: `opening_fingerprint` +
+> `opening_echo_recent` a naplóban, `bench_report.py` §4 mutatja.
+>
+> ### Amit ez a köteg MÉG mutatott (nyitva marad)
+> - **`constructive_challenge`: 0/22.** A 02-es poszt volt rá az ideális eset
+>   (vitatható tézis + záró kérdés) — `field_experience` nyert. Ez már nem „nem volt
+>   alkalom": vagy explicit trigger kell neki, vagy a stratégia halott.
+> - **Nyers max = végső győztes v9-ben 4/5** (v8: 4/7, v5: 0/5). A horgonyzás tartja
+>   magát; a bias nudge, nem teherhordó.
+> - **`anchors_added` 0 tizenkilencből tizenkétszer** — de a v9 köteg hozta az első
+>   **4-es** horgony-számot (03, `business_impact`, `business` sík). Az `abstract_count`
+>   lecsökkent (átlag 2.8), a **hedges viszont felment** (átlag 2.1, egy esetben 5) —
+>   a hígító átvándorolt, nem eltűnt. Ez a következő gyanúsított.
+>
+> ### Második köteg (5 poszt) — amit a kapu hozott, és amit kijátszott
+> - **`future_outlook` először nyert** (CADENA-poszt, `industry_news`/`technical`,
+>   69 szó → 52 szó, abstract 0, hedges 0). Már csak a `constructive_challenge` és a
+>   `systems_thinking` nem nyert soha (a `missing_perspective` tervezetten nem).
+> - **A visszhang-kapu kétszer elsült** ugyanabban a kötegben: két komment is „What
+>   strikes me"-vel indult volna egy harmadik után. Futáson belüli szórás:
+>   1. köteg **5/5**, 2. köteg **4/4** különböző nyitás.
+> - **MÉRT KIJÁTSZÁS (n=1):** az egyik posztnál az első kör blokkolva → a második
+>   kör „We often see"-vel indult → **az is** sértés → a ciklus `range(2)`, tehát a
+>   komment **sértéssel jött vissza** (`quality_issues` nem üres — a napló mutatja).
+>   A végleges nyitás „What's **compelling** about…" lett: retorikailag ugyanaz a
+>   mozdulat, más ujjlenyomat. **Az ujjlenyomat lexikai, a mozdulat szemantikai** —
+>   ugyanaz a hibaosztály, amit a `post_overlap`-nál már kimondtunk.
+>   Kész, hívásba nem kerülő javítás lenne: a blokkolt ujjlenyomatot a compose-
+>   promptba adni tiltásként (prevenció retry helyett). **Szándékosan NEM most:**
+>   n=1, és a saját szabályunk szerint háromszor kell visszatérnie.
+>
+> ### A magyar ág — az első mérés (`--force`, vendor-hirdetés alatt)
+> A poszt magyar és vendor-hirdetés volt (igazolt CTA-idézet), tehát a motor
+> kihagyta; user-döntésre `--force`-szal lefutott. **Amit jól tett:** a komment
+> magyarul jött (a nyelvillesztés kód nélkül is áll), a kiosztott `pattern` forma
+> érvényesült, a sáv 65-110 → 76 szó.
+>
+> **Három mért hiányosság, mind a magyar oldalon:**
+> 1. **EKEZET-HIBA az ujjlenyomatban (javítva).** Az első változat `[^a-z0-9]`-t
+>    használt, ami az ékezetes betűt szóhatárnak vette: „Egy visszatérő mintát
+>    látok" → `'egy visszat r'`, vagyis három szó helyett másfél, és a fragmentumok
+>    között sokkal könnyebb a hamis egyezés. Javítás: NFKD-hajtogatás
+>    (`_fold_accents`) → `'egy visszatero mintat'`. Melléknyereség: az ékezet nélkül
+>    írt változat ugyanazt az ujjlenyomatot adja. Tesztek: I6.1, I6.2.
+>    **A naplóban egy sor** (a magyar futás) hordozza a régi, töredékes értéket —
+>    azonosítható, ezért `TELEMETRY_SCHEMA` nem emelkedik miatta.
+> 2. **A magyar szótár vékonyabb, mint az angol.** A komment második mondata „A
+>    gyakorlatban azt tapasztaljuk…" — ez pontosan az `in practice` sablon, ami
+>    ANGOLUL sértés (`_STOCK_OPENING_PATTERNS`), magyarul nincs a listán. A HU-oldal
+>    két bejegyzést tartalmaz, az EN-oldal tizenhármat: ugyanaz a tanácsadói reflex
+>    magyarul átmegy.
+> 3. **A komment megdicsérte a hirdetőt:** „a Vantasec által képviselt … valóban
+>    sokkal árnyaltabb képet ad". Épp az az ingyen-engagement, ami ellen a
+>    vendor-skip készült; a `_FORBIDDEN_PATTERNS` magyar dicséret-mintái ezt a
+>    szerkezetet nem fogják. (A komment ezután tett érdemi ellenvetést — az auditor-
+>    felkészültség szűk keresztmetszetét —, tehát nem üres egyetértés volt.)
+>
+> **A `concreteness` a magyar/nem-AEC sorokra NEM informatív:** a horgony- és
+> absztrakció-lexikon angol és BIM-specifikus, ezért ott az `anchors_added: 0` nem
+> jelez semmit. A későbbi korrelációból ezeket a sorokat ki kell zárni.
+>
+> **Válasz-szerződés:** a 8 legacy mező változatlan; új additív mezők:
+> `opening_fingerprint`, `opening_echo_recent`. `TELEMETRY_SCHEMA` **nem** emelkedik
+> (tisztán additív). Új teszt-szekció: `test_linkedin_opening.py` I1–I20 + I6.1-I6.2.
+> A `reset_opening_state()` a két gyűrűt egyben nullázza — ez nem kényelmi függvény:
+> a visszhang-gyűrű bejövetelekor három meglévő teszt azonnal elbukott, mert csak a
+> forma-gyűrűt nullázták.
+
+---
+
+> ## ⚙️ KIEGÉSZÍTVE (2026-08-11) — Tanácsadó-hang kapu (engine v10)
+>
+> ### A mérés: a frázis kihátrált az ablakból
+> A harmadik köteg után a teljes napló átvizsgálása egyetlen szerkezetet emelt ki
+> minden más fölé:
+>
+> | alak | találat |
+> |---|---|
+> | „We've often found" | 5 |
+> | „We often see" | 4 (ebből **2 a 3. mondatban**) |
+> | „We often rebuild" | 1 |
+> | **összesen** | **10 / 32 kiadott komment (31%)** |
+>
+> **Miért nem fogta semmi:** a `_STOCK_OPENING_PATTERNS` szándékosan csak az első
+> **két** mondatot méri (2026-08-10-i döntés: „egy sablonos fordulat a 8. mondatban
+> nem *nyitási* hiba"), és a v9 két kommentjében a frázis pontosan a **3.** mondatban
+> állt. Közben sem az `_AI_FINGERPRINT_PATTERNS`-ben (szerzőhöz relativizált, ≥2
+> találat kell), sem a `_MARKETING_CLICHE_PATTERNS`-ben nem volt.
+> **Nem az ablak volt szűk — a szótár volt hiányos.**
+>
+> ### A döntés: külön lista, egész kommentre, feltétel nélkül
+> `_CONSULTANT_VOICE_PATTERNS`. Ugyanaz az érv, mint a marketing-kliséé: a tanácsadói
+> általánosítás („mi gyakran azt látjuk…") nem szint-függő hiba — semmilyen síkon nem
+> jó írás, mert **megnevezetlen tapasztalatra hivatkozik konkrétum helyett.** A
+> szerzőhöz relativizálás itt nem kell: ez retorikai állás, nem szakszó, amit a szerző
+> „engedélyezhetne".
+>
+> **Ami SZÁNDÉKOSAN kimaradt** — ez a lista fele:
+> - **„One pattern I've noticed" (4 találat):** ez a *saját katalógusunk* `pattern`
+>   formája. Tiltani ugyanaz az önellentmondás, amit a G1 teszt őriz; az ismétlést a
+>   v9-es visszhang-kapu kezeli. A G1 mostantól az új listát is átvizsgálja.
+> - **„the real work / challenge / hit / advantage" (8 találat):** a számok alapján
+>   indokolt *lehetne* — de a v7-es A/B-ben éppen egy ilyen mondat volt a sorozat első
+>   vágás nélkül kiposztolható kommentjének magja („the real hit is often downstream").
+>   Ez **tartalmi szerkezet, nem tic.** A záró mondat ismétlődése cross-komment
+>   jelenség, tehát ha kell, a visszhang-kapuhoz hasonló mechanizmus a helyes válasz,
+>   nem szótár. Teszt rögzíti, hogy nem sértés (F13).
+> - **„in our experience": nulla találat** — mérés nélkül nem veszünk fel semmit.
+>
+> **Egy dolog mérés NÉLKÜL került be:** az első személyű változat („I've often
+> found"). Indok a 2026-08-10-i szótár-ragozás javításának érve: a pronomén-csere a
+> legkézenfekvőbb kijátszás **ugyanarra a szerkezetre**, és a `standardizing` ≠
+> `standardi[sz]ation` tanulság épp az volt, hogy a hiányos alaklista alulszámol.
+> **Nem ütközik** az `own_practice` formával („I've found…"): a minta megköveteli az
+> általánosító határozót a két szó között — a tic az „often", nem a tapasztalat-ige.
+> Tesztek: F9, F10.
+>
+> **Magyar:** a `--force`-os magyar futás 2. mondata szó szerint „A gyakorlatban azt
+> tapasztaljuk…" volt — ugyanaz a mozdulat. A minta megköveteli a tapasztalat-igét,
+> mert a „gyakorlatban" önmagában legitim („a gyakorlatban ez 10 mm"). Teszt: F11, F12.
+>
+> ### ÉLES — az első futás a kapuval (Conduit-poszt, `--force`)
+> Az első kör **hármas sértést** kapott:
+> `tanacsadoi hang (We often see/found)` + `ismetlodo nyitas (We often see)` +
+> `AI-ujjlenyomat (governance, standardisation, consistency)`. Az újraírás után:
+> 112 szó (sáv 90-150), `abstract_count: 1`, `hedges: 1`, `quality_issues: []`.
+> A végső kommentben megmaradt a `robust` — **egyetlen** fingerprint-találatként,
+> tehát a ≥2 küszöb tervezetten átengedte.
+>
+> ### A harmadik köteg további mérései
+> - **`systems_thinking` először nyert** (magyar LPM-poszt, `engineering_problem` /
+>   `technical`). Innentől **csak a `constructive_challenge`** nem nyert soha —
+>   33 generálásból egyszer sem, pedig két ideális poszt is volt rá.
+> - **ELSŐ SÁV-VÉTÉS: 24/25.** A magyar poszt 277 szó → sáv 90-150 → **85 szó**.
+>   Nem modell-hiba: a magyar agglutinál, ugyanaz a tartalom kevesebb szó. **A sáv
+>   nyelv-vak** — a tükrözés angol szószámra kalibrált. NYITOTT, n=1, de a mechanizmus
+>   egyértelmű; a javítás iránya nyelv-érzékeny szorzó vagy karakter-alapú mérés.
+> - **A szemantikai kijátszás másodszor (n=2):** a 12-es komment „What strikes me
+>   about this…"-szal indult, a 13-as első mondata pedig „…and **what strikes me** is
+>   how much inertia…" — más ujjlenyomat, tehát átment. A mozdulat ismétlődik, a
+>   lexikai ujjlenyomat nem fogja. Egy híján a 3× küszöb.
+> - A regiszter-kapu dolgozott: egy kommentnél `consistency, robust` → újraírás →
+>   `abstract_count: 0`.
+>
+> **Válasz-szerződés:** változatlan (a lista a meglévő `quality_issues`-ba ír).
+> `TELEMETRY_SCHEMA` nem emelkedik. Új tesztek: `test_linkedin_concreteness.py`
+> F6–F13; a G1 önvédelem kiterjesztve az új listára.
+
+---
+
+> ## ⚙️ KIEGÉSZÍTVE (2026-08-11) — Nyitó-keretek és a nyelv-mérés (engine v11)
+>
+> ### 1. A szemantikai kijátszás: kanonizálás, nem tiltás
+> **A mért eset (n=2):** a v9-es kapu blokkolta a „What strikes me"-t, a modell
+> második köre pedig „What's **compelling** about Frank's approach…"-szal indult.
+> Három szó szerint más ujjlenyomat, retorikailag **ugyanaz a mozdulat**.
+>
+> `_OPENING_FRAMES` → `frame:notable`. **A megoldás nem tiltás, hanem kanonizálás,**
+> és ez a különbség dönti el, miért nem esik a szótár-csapdába: a kifejezés továbbra
+> is **használható** (a `strikes` a saját katalógusunk formája), csak az **ismétlése**
+> látható. Egy keret-családba eső két egymás utáni nyitás ugyanazt az ujjlenyomatot
+> adja, akárhogy variálja a szavakat.
+>
+> **A két mechanizmus szerződése** (`shape_frame` / `echo_ring_for`): a keret
+> megbontotta a gyűrűk szimmetriáját. A forma-gyűrű 4 híváson át kizárja a `strikes`
+> formát, de egy **más** formát kapott komment is elhasználhatja a keretet — mérve: a
+> 12-es komment `stood_out` kiosztással indult „What strikes me"-vel. Ha ezután a
+> rotáció kiadja a `strikes`-ot, a modell a **saját utasítása** miatt kapna sértést.
+> Ezért a kiosztott forma saját kerete kimarad a kapunak átadott gyűrűből: **az
+> utasítás erősebb, mint a visszhang-tilalom.** Tesztek: J6–J9.
+>
+> **Szándékos korlát:** csak az első mondat **elején** kanonizálunk. A 13-as komment
+> („I've run into similar challenges…, and what strikes me is…") megtartja a saját
+> `i ve run` ujjlenyomatát — a *nyitása* valóban más mozdulat volt (J3).
+>
+> ### 2. A nyelv-mérés — és amit SZÁNDÉKOSAN NEM csináltam
+> A nyelv szerinti bontás után a „sáv-vétés" képe megfordult:
+>
+> | | sávon belül |
+> |---|---|
+> | angol sorok | **23/23** |
+> | nem-angol | 1/2 (a magyar LPM-komment: 85 szó, padló 90) |
+>
+> **Angol oldalon nincs mit javítani** — a hiba kizárólag a nem-angol kalibrációnál
+> jelent meg. **Nyelv-érzékeny szorzót mégsem tettem be**, és ez tudatos döntés: két
+> magyar sorunk van (egy BENT, egy 5 szóval a padló alatt), a szorzó száma tehát
+> **találgatás lenne** — pontosan az, amit a v7 óta minden blokk tilt („igazolatlan
+> számokra ne építsünk"). Ráadásul **a sáv nem kapu**: a 85 szavas komment semmilyen
+> újraírást nem váltott ki, a `MIN_WORDS` 35 — vagyis a „vétés" eddig csak a *riport*
+> oszlopában létezett, a kimenetben nem.
+>
+> **Amit helyette csináltam — a mérés hiányzott, nem a mechanizmus:** a napló eddig
+> egyáltalán nem tudta, milyen nyelven ment ki a komment, pedig a mérőszámaink fele
+> angolra kalibrált. Új additív mezők: `post_language`, `reply_language`
+> (a meglévő `looks_english`-ből — determinisztikus, és a kérdés binárisan az, hogy
+> „állnak-e erre a sorra az angol kalibrációk"). A `bench_report.py` §2 nyelv szerint
+> bont, §3 pedig a **nem-angol sorokat kihagyja**: a horgony-lexikon angol és
+> BIM-specifikus, ott az `anchors_added: 0` nem jelez semmit. A v11 előtti sorokra a
+> riport a `reply_text`-ből **visszamenőleg** számol nyelvet, tehát a mostani 33 sor
+> is azonnal szegmentálható.
+>
+> **Ez a döntés visszavehető:** ha összejön 8-10 magyar sor és a padló alatti minta
+> megismétlődik, a szorzó **mért** számmal jön be, nem becsléssel.
+>
+> **Válasz-szerződés:** új additív mezők `post_language`, `reply_language`;
+> `TELEMETRY_SCHEMA` nem emelkedik. Az `opening_fingerprint` értékkészlete
+> **bővült** (`frame:*` alakok) — a jelentése („a nyitás ujjlenyomata") változatlan,
+> ezért ez sem séma-emelés. Új tesztek: `test_linkedin_opening.py` J1–J9, K1–K2; az
+> I1/I3/I7/I8/I12/I13 várt értéke a v9-es szó szerinti alakról a keretre frissült
+> (az állítás ugyanaz maradt).
+
+---
+
+> ## ⚙️ KIEGÉSZÍTVE (2026-08-11) — A `constructive_challenge` (engine v12)
+>
+> ### A diagnózis megfordította a feltevést
+> **Két állítás dőlt meg egyszerre.**
+>
+> **(a) A „bias-terv" nem létezett.** A `config.yaml` és a korábbi blokkok arra
+> hivatkoztak, hogy a CC „vélemény- és debate-poszton nyerhetne a bias-terv szerint".
+> A kódban ez **nincs így**: a `professional_opinion` és az `industry_debate` intent
+> bias-a a CC-re **nulla**, miközben **nyolc** másik intent MÍNUSZT ad neki
+> (`reflection` −2, `announcement` −3, `portfolio_showcase` −2 …), és pozitívat
+> egyedül a `product_demonstration` (+1). A dokumentáció egy soha meg nem írt tervre
+> hivatkozott. Javítva.
+>
+> **(b) A bias nem is javíthatta volna.** 33 sor aritmetikája:
+>
+> | | |
+> |---|---|
+> | CC nyers pontja | min 3, max **7**, átlag 5.45 — **egyszer sem** ment 7 fölé |
+> | a győztes pontja | **9 a 33 sorból 32-ben** |
+> | szükséges bias-emelés | +2.0 … +9.5 (átlag 4.4) |
+> | sor, ahol 1 pont elég lenne | **0** |
+>
+> Egy ilyen bias már nem nudge, hanem **teherhordó** — amit a v8 döntés kizár. A
+> javítás ezért a skálán van, nem a súlyokon.
+>
+> ### A valódi ok: a `wins_when`-ek nem egyenlő szélességűek
+> A győztes-eloszlás **nem a posztokat követte, hanem a győzelmi feltétel
+> teljesíthetőségét.** A három legszélesebb vitte a 33 döntésből 31-et:
+> `field_experience` („a poszt elméleti, a gyakorlat más" — LinkedIn-en majdnem
+> mindig igaz), `practical_lesson` („diagnosztizál, de nem ad teendőt"),
+> `business_impact` („technikai marad, az üzleti következmény kimondatlan").
+> A CC feltétele volt a legszűkebb: **kimondatlan feltételt** kellett találni, míg a
+> többieknek egy felismerhető **állapotot**.
+>
+> **Két prompt-oldali javítás** (a v8-as horgonyzás mintájára, ami 0/5 → 9/15-öt hozott):
+> 1. A CC `wins_when`-je ugyanarra a szintre: „a poszt a központi állítását általánosan
+>    mondja ki, és van gyakori eset, amikor nem áll". Ugyanaz a szakmai tartalom,
+>    felismerhető állapotként.
+> 2. Új horgony a REASON-promptban: *„DISAGREEMENT IS NOT A RISK YOU ARE MANAGING…
+>    scoring it 6-7 to stay safe is the known failure of this step."*
+>
+> ### ÉLES A/B — négy poszt, ugyanaz a szöveg
+> | poszt | CC előtte | CC most |
+> |---|---|---|
+> | Archicad/Forma | 7 | 7 |
+> | BIM = building's brain | 7 | **8** ← az első 7 fölötti érték a korpuszban |
+> | ISO 19650 | 4 | **6** |
+> | BIM-tanácsadó tudás | 7 | 6 |
+>
+> **A plafon megtört, a döntés nem.** A CC továbbra sem nyert egyszer sem: a győztes
+> minden sorban 9, vagyis a modell a 9-est **rangsor-címkeként** használja, nem
+> absztolút értékként. Egy stratégia nem tud „felkapaszkodni" 9-re; csak az lehet 9,
+> amit a modell elsőnek választ.
+>
+> ### A döntő mérés: KÉNYSZERÍTETT CC (`bench_linkedin.py --strategy`)
+> Ha sosem nyer, jobb lenne-e a komment, ha mégis ő írná? Ezért kapott a **mérési
+> script** (nem a motor) egy stratégia-override-ot.
+>
+> | | természetes győztes | kényszerített CC |
+> |---|---|---|
+> | Archicad/Forma | `field_experience`, hedges 4 | 118 szó, abstract 3, hedges 3 |
+> | BIM brain | `future_outlook`, 91 szó, abstract 4, `rewrites: 2` | **109 szó, anchors 1 (IFC), hedges 0, `rewrites: 0`** |
+>
+> **Archicad:** a két komment **ugyanazt** az érvet hozza (a fee/incentive-struktúra
+> nem jutalmazza a strukturált adatot) — a CC-változat csak becsomagolja egy
+> engedmény-majd-ellenvetés keretbe („The post rightly points out…"), ami filler.
+> Itt a CC **nem adott többet.**
+>
+> **BIM brain:** a CC-változat **jobb** — megnevezi a konkrét standardot (IFC), nulla
+> hedge, nulla újraírás, és pont azt a kimondatlan feltételt találja meg, amin a
+> poszt tézise áll (kétirányú, valós idejű adatcsere). A természetes `future_outlook`
+> ezzel szemben a poszt saját vízióját mondta újra + generikus komplexitást.
+>
+> **Következtetés: a CC NEM redundáns — a probléma a KIVÁLASZTÁS.** A stratégia a
+> megfelelő poszton a korpusz legjobb regiszter-értékeit adja, de a pontozó lépés
+> nem rangsorolja elsőnek. Törölni tehát hiba lenne (a forced-CC bizonyíték ellene),
+> és bias-szal sem fixálható (az aritmetika ellene).
+>
+> ### NYITOTT — a javaslat: szenzor a pontszám helyett
+> A projekt saját mintája (`explicit_tool_request` + igazolt idézet → márkaemlítés):
+> **a modell szenzor, a kód bíró.** A CC-hez ugyanez kellene: a REASON adjon vissza
+> egy `thesis_quote`-ot (SZÓ SZERINT a posztból, tehát kódból ellenőrizhető) és egy
+> `thesis_condition`-t (a gyakori eset, ahol az állítás nem áll). Ha mindkettő megvan
+> és az idézet tényleg szerepel a posztban, a **kód** dönt CC mellett — nem a
+> pontszám. Ez nem új súly, hanem új tény.
+>
+> **Két másik nyitott, ami itt jött elő:**
+> 1. A compose-ciklus `range(2)`, tehát két elutasítás után a komment **sértéssel megy
+>    ki**. Két ilyen sor van (`ismetlodo nyitas (We often see)`, illetve
+>    `tanacsadoi hang (We often see/found)` a végső `quality_issues`-ban). Külön döntés
+>    kell: harmadik kör, vagy tudatosan vállalt hiba.
+> 2. **A v10-es lista első kijátszása (n=1):** az egyik v12-es komment „**We also
+>    see** that consistent onboarding…"-gal írta ugyanazt a mozdulatot. Az `also`
+>    SZÁNDÉKOSAN nincs a listán: az „often/frequently/…" általánosító határozó, az
+>    `also` viszont legitim hozzátétel is lehet („we also see this in the schedules").
+>    A 3×-szabály szerint várunk — de a következő ilyen már minta.
+
+---
+
+> ## ⚙️ KIEGÉSZÍTVE (2026-08-11) — Kihívás-szenzor (engine v13)
+>
+> ### A megoldás alakja: nem új súly, hanem új tény
+> A v12 diagnózisa kizárta a bias-utat (a CC-nek +2..+9,5 kellett volna, ami már
+> teherhordó súly) és a törlést is (kényszerített CC-vel a korpusz legjobb
+> regiszter-értékét adta). A hiba a **kiválasztásban** volt.
+>
+> A projekt saját mintája (`explicit_tool_request` + igazolt idézet → márkaemlítés):
+> **a modell szenzor, a kód bíró.** Két új REASON-mező:
+> - `thesis_condition` — EGY gyakori eset, ahol a poszt tézise nem áll. A prompt
+>   kimondja, hogy az **üres válasz érvényes és gyakori** („do not invent a condition
+>   to fill this field") — különben a mező kitöltési kényszert teremtene, és a CC
+>   az egyik degenerált eloszlásból (soha) a másikba esne (mindig).
+> - `thesis_quote` — az állítás **szó szerint** a posztból. A kód megkeresi
+>   (`_quote_in_post`), és ha nincs ott, a feltétel érvénytelen.
+>
+> `challenge_override()` — öt ellenőrizhető feltétel, mindegyik saját indokkal a
+> naplóba: vélemény-jellegű intent (`professional_opinion` | `industry_debate`),
+> nem üres `thesis_condition`, **igazolt** idézet, a modell maga is
+> ≥ `CHALLENGE_FIT_FLOOR` (=7) pontot adott a CC-nek, és a szint nem vetózza.
+>
+> **Miért 7 a padló:** ez a CC **történelmi maximuma** 33 soron. Így a kód a
+> rangsor-artefaktumot javítja, nem a modell ítéletét írja felül — ha a modell maga
+> is alacsonyra tette, a szenzor hallgat.
+>
+> **Az idézet-padló szigorúbb, mint a tool-requestnél** (`THESIS_QUOTE_MIN_WORDS`=6
+> a 3 helyett): egy tézis ÁLLÍTÁS, alany és állítmány kell hozzá. Ezt a teszt találta
+> meg — a „the concept model" három szóval átment, holott az főnévi szerkezet (K5.1).
+>
+> ### ÉLES — négy poszt, és a hatás nagyobb, mint a szenzor
+> | poszt | `pick_strategy` | végső | CC_fit (előtte → most) |
+> |---|---|---|---|
+> | Archicad/Forma | `constructive_challenge` | CC | 7 → **9** |
+> | BIM brain | `business_impact` | **CC (override)** | 7 → **9** |
+> | BIM-tanácsadó | `field_experience` | **CC (override)** | 7 → **8** |
+> | MEP-koordináció | `missing_perspective` | változatlan | 6 → 9 |
+>
+> **A CC plafonja teljesen eltűnt: 9, 9, 8, 9 — a korábbi 33 soros maximum 7 volt.**
+> És ez nem a szenzor műve: azért történt, mert a `thesis_condition` kérdés a
+> pontozás **ELŐTT** van. Mire a modell pontoz, már megtalálta a kimondatlan
+> feltételt — vagyis a tényt, ami a CC-t indokolja. A szenzor csak kettőt fordított
+> meg a négyből; a harmadikat a modell magától választotta.
+>
+> **Ahol NEM sült el, jól nem sült el:** a MEP-poszt `case_study` intentet kapott
+> (nem vélemény), a napló indoka szó szerint ezt mondja. A CC ott is 9-es fitet
+> kapott, de a `missing_perspective` 10-esből 9,5-öt vitt (a `case_study` intent
+> **+1,0**-t ad a fallbacknek, ami a globális −1,5-öt részben ellensúlyozza) — ez a
+> fallback első győzelme a korpuszban, és a számítás helyes.
+>
+> ### ÚJ, MÉRT HIBA — a tartalmi mozdulat összeomlott
+> Mindhárom CC-komment **ugyanoda** futott ki: szerződés / incentíva-struktúra.
+> „if there isn't a clear contractual ask for structured data" · „the inherent shift
+> in contractual frameworks it implies" · „the contractual structure itself plays a
+> role here". A stratégia diverzifikálódott, a **tartalmi mozdulat viszont nem** — és
+> ez ugyanaz a hibaosztály, mint a nyitás-visszhang: cross-komment ismétlés, amit
+> egyetlen kapu sem mér. Egy negyedik, korábbi kötegben is felbukkant („payment
+> milestones"), tehát ez már **4 találat**. Ez a következő javítás jelöltje, és a
+> nyitás-keret precedens szerint a válasz nem szótár, hanem kanonizált
+> **tartalom-ujjlenyomat** a gyűrűben.
+>
+> **Amit figyelni kell:** a `professional_opinion` a korpusz 27%-a. Ha a szenzor ott
+> szinte mindig elsül, a CC 0%-ból ~27%-ba ugrik. A négyes mintában 3/4 lett — ez
+> kevés a következtetéshez, de sok ahhoz, hogy ne figyeljük. A fék a hármas kapu
+> (intent + igazolt idézet + 7-es padló), és mind a három mérhető a naplóból.
+>
+> **Válasz-szerződés:** új additív mezők `thesis_condition`, `thesis_quote`,
+> `challenge_override`, `challenge_reason`, `strategy_before_override`;
+> `TELEMETRY_SCHEMA` nem emelkedik. A REASON-séma két új KÖTELEZŐ mezőt kapott (a
+> prompt-tételek 1–24-re számozódtak át, folytonosan — A13 őrzi). Új tesztek:
+> `test_linkedin_intent.py` K1–K13.
+
+---
+
+> ## ⚙️ KIEGÉSZÍTVE (2026-08-11) — Harmadik kör és a tartalmi visszhang (engine v14)
+> **Az egyik javítás bevált, a másiknak NEGATÍV eredménye van. Mindkettő itt marad,
+> mert a negatív mérés is mérés — ez az authenticity-rubrika tanulsága.**
+>
+> ### 1. A `range(2)` plafon → harmadik kör, de csak ismétlés-osztályra
+> **A mért hiba:** négy komment sértéssel ment ki (28., 38., 49., 50. sor), és a
+> mintázat mindig ugyanaz: az 1. kör „We often see"-re bukott, a 2. kör pedig
+> **ugyanannak a mozdulatnak más alakját** hozta („I often find"). A modell változatot
+> cserélt, nem viselkedést.
+>
+> Két javítás egyszerre, mert külön nem hat:
+> - `MAX_COMPOSE_ATTEMPTS = 3`, de a harmadik kör **csak** akkor jár, ha a maradék
+>   sértés kizárólag `_REPHRASABLE_PREFIXES`-be esik (nyitás-ismétlés, tanácsadói
+>   nyitás, tanácsadó-hang). Ezek a HOGYAN, nem a MIT — a javítás biztosan lehetséges.
+>   A négy mért eset mindegyike ebbe az osztályba esett (teszt: L15).
+> - **Akkumulált sértés-lista:** a modell mostantól MINDEN korábbi kör sértését látja,
+>   nem csak az utolsóét. Enélkül nem tudja, hogy az előző alak is tilos.
+>
+> **Élesben működik:** egy komment három kört futott, és a tanácsadó-hang eltűnt a
+> végleges szövegből. (Ugyanaz a futás viszont a 3. körben új ismétlésre esett, tehát
+> a plafon feljebb került, nem tűnt el.)
+>
+> ### 2. Tartalmi visszhang-kapu — DETEKTÁL, DE NEM GYÓGYÍT (`content_echo_gate: 'off'`)
+> **A mért hiba:** hét CC-kommentből hat ugyanoda futott ki (szerződés/incentíva).
+> A nyitás-keret precedensét követve: kanonizált `move:*` ujjlenyomat + gyűrű,
+> a `business_impact` stratégia kivételével (ott a kereskedelmi keret az utasítás).
+>
+> **Öt éles futás ugyanazon a poszt-készleten — a verdikt:**
+>
+> | | |
+> |---|---|
+> | a kapu elsült | 3 kommentnél |
+> | ebből sértéssel kiment | **2** (tartalmi hibára nem jár harmadik kör) |
+> | elhagyta a kereskedelmi keretet | **0** |
+> | lexikailag kicsúszott | **2** („design fees aren't always structured" — ugyanaz a mozdulat, más szavakkal, `content_move` üres) |
+>
+> **A VALÓDI OK FELJEBB VAN, és a napló bizonyítja.** Az öt `thesis_condition`-ből
+> **öt** szerződési/incentíva-jellegű:
+> - „when project contracts do not explicitly reward or penalize data quality…"
+> - „when the contractual frameworks and operational incentives align…"
+> - „when the client's procurement process does not explicitly define and compensate…"
+> - „when the contractual and liability frameworks for AI-generated design…"
+> - „when project contracts and team incentives are aligned to reward early…"
+>
+> A v13-as kihívás-szenzor kérdésének („nevezz meg egy esetet, ahol az állítás nem
+> áll") **hatalmas attraktora van**, és a compose-kapu egy olyan döntés ellen küzd,
+> ami a REASON lépésben már megszületett. **Kimeneti kapu nem javít bemeneti
+> monokultúrát** — ez a mérés fő tanulsága, és ugyanaz a hibaosztály, mint amikor a
+> `post_overlap` a betűt mérte a mondanivaló helyett.
+>
+> **Ezért a kapu KI van kapcsolva, a MÉRÉS marad.** A `content_move` és a
+> `content_echo_recent` kapcsoló nélkül is a naplóba kerül — épp ez mutatta ki a
+> monokultúrát. Ami leáll, az a kapuzás: egy extra LLM-hívást fizet, és a sértés
+> ugyanúgy kimegy. Ez a projekt saját „removal-friendly" elve: egy kapu, ami nem
+> gyógyít, ne kapuzzon.
+>
+> **A NYITOTT JAVÍTÁS ezért a REASON szintjén van:** a `thesis_condition`-t kell
+> elterelni a kereskedelmi alapértelmezésről (a feltétel legyen technikai, helyzeti
+> vagy szervezeti, kivéve ha a poszt maga a kereskedelmi feltételekről szól), vagy a
+> legutóbbi feltételeket kizárásként átadni a REASON-promptnak.
+>
+> **Egy harmadik sáv-vétés is jött** (angol, CC-komment: 77 szó a 80-as padló alatt).
+> Immár három: magyar (nyelv-kalibráció), listás poszt (szó ≠ tartalom), és ez.
+> A sáv továbbra sem kapu — a `MIN_WORDS` 35.
+>
+> **Válasz-szerződés:** új additív mezők `content_move`, `content_echo_recent`;
+> `TELEMETRY_SCHEMA` nem emelkedik. Új tesztek: `test_linkedin_opening.py` L1–L17.
+> `reset_opening_state()` mostantól MINDHÁROM gyűrűt nullázza.
+
+---
+
+> ## ⚙️ KIEGÉSZÍTVE (2026-08-11) — A feltétel-monokultúra (engine v15)
+>
+> ### A v14 tanulsága volt a kiindulás
+> „Kimeneti kapu nem javít bemeneti monokultúrát." A `thesis_condition` öt éles
+> futásból ötször szerződési/incentíva-jellegű volt, ezért a javítás oda került,
+> ahol a döntés születik. **Két rész, mert külön egyik sem elég:**
+>
+> **1. PROMPT — a mért attraktor megnevezése.** *„AVOID THE MOST AVAILABLE ANSWER.
+> 'When the contracts or the incentives are not aligned' is a real condition, but it
+> fits almost every claim in this industry, which is exactly what makes it worth
+> little to the author."* Plusz a kívánt irány kimondása: technikai állapot (export-út,
+> séma, verzió, koordináta-rendszer), projekt-helyzet (felújítás, később belépő
+> szakág, fázishatár) vagy szervezeti tény (kinél van a modell, ki van a helyszínen).
+> Ugyanaz a technika, ami a v8-as kalibrációs ellenőrzésnél és a v12-es
+> „disagreement is not a risk" horgonynál bevált.
+>
+> **2. BÍRÓ — a kód nem hisz a jóindulatnak.** Ha a feltétel **családja** megegyezik a
+> legutóbbi **elfogadott** feltételekével, a feltétel nem számít ténynek → a szenzor
+> nem sül el (`challenge_override` 6. feltétele). Ez a **következő** attraktort is
+> kezeli, bármi legyen az. A gyűrű csak elfogadott feltétellel bővül: egy el nem sült
+> szenzor feltétele nem befolyásolt kommentet.
+>
+> **Küszöb-különbség, dokumentálva:** a feltételnél **1** találat elég
+> (`_CONDITION_FAMILY_MIN_HITS`), a kommentnél **2** kell — a feltétel egy tagmondat,
+> ott az első kereskedelmi terminus már a lényeg; egy 100+ szavas kommentben egy futó
+> említés még nem a mozdulat.
+>
+> **A teszt megint hiányt talált a lexikonban:** a mért feltételek egyike
+> „the client's **procurement** process does not explicitly define and **compensate**"
+> volt, és a lista egyiket sem tartalmazta; a v14-es lexikai kicsúszás pedig a puszta
+> „design **fees**" volt. Mindhárom bekerült — ugyanaz a szótár-hiányosság, mint a
+> 2026-08-10-i ragozás-javításnál: a hiány **alulszámol**.
+>
+> ### ÉLES — ugyanaz az öt poszt, ahol öt/öt szerződési volt
+> | | v13/v14 | most (v15) |
+> |---|---|---|
+> | kereskedelmi `thesis_condition` | **5/5** | **2/5** |
+> | kereskedelmi `content_move` a kommentben | 5/5 | **1/5** |
+> | a bíró-szabály elsült | – | **2×**, mindkettő ismétlődő feltételre |
+>
+> **Amit a két új feltétel hozott** (ezek a prompt eredményei, nem a bírói szabályé):
+> - BIM-brain: *„semantic interoperability … it's one thing to link a COBie
+>   spreadsheet to a maintenance platform, but another to have the model inherently
+>   understand the real-time operational state"* — `anchors: 1`, `hedges: 0`.
+> - Agentic BIM: *„the real challenge isn't the solver's ability to generate viable
+>   geometry, but the formalisation of 'intent' itself … a complex web of conflicting,
+>   ambiguous and evolving requirements when you break it down into computable
+>   constraints"* — a korpusz legjobb kihívása erre a posztra.
+>
+> **A bíró kétszer dolgozott, mindkétszer helyesen:** a BIM-tanácsadó posztnál a
+> feltétel ismét szerződési volt → a szenzor nem sült el → a stratégia
+> `field_experience` maradt, pedig a nyers maximum a CC volt.
+>
+> ### AMIT EZ NEM OLDOTT MEG (nyitott)
+> - **A monokultúra csökkent, nem szűnt meg:** 2/5 feltétel és 1/5 komment továbbra is
+>   kereskedelmi. Egy komment (Archicad) a lexikonon átment, de érdemben még mindig
+>   költség-érv („general overhead", „project contingency", „internal cost driver") —
+>   a mérő itt is a szót fogja, nem a mozdulatot.
+> - **A CC aránya magas marad (4/5 vélemény-poszton), és már NEM a szenzor miatt:**
+>   ebből a négyből hármat a `pick_strategy` maga választott. A v13-as
+>   `thesis_condition`-kérdés melléktermékként megnövelte a CC nyers pontját, és az
+>   maradt. Ha ez túl sok, a padló (`CHALLENGE_FIT_FLOOR`) nem segít — a nyers
+>   pontozás kalibrációját kell megnézni.
+> - **Intent-instabilitás:** ugyanaz a poszt egyik futáson `professional_opinion`,
+>   máskor `reflection` (`reason_temperature` 0.2, nem 0). Ez az osztályozás ismert
+>   szórása, de a szenzor MŰKÖDÉSÉT eldönti — érdemes mérni, milyen gyakori.
+>
+> **Válasz-szerződés:** új additív mezők `condition_family`, `condition_echo_recent`;
+> `TELEMETRY_SCHEMA` nem emelkedik. Új tesztek: `test_linkedin_intent.py` K14–K23.
+> `reset_opening_state()` mostantól NÉGY gyűrűt nulláz.
+
+---
+
+> ## 🔎 DIAGNÓZIS (2026-08-11) — a nyers `strategy_fit` kalibrációja
+> **Ez még nem javítás, hanem mérés. A döntés nyitott.**
+>
+> ### A v8-as horgonyzás két kimondott szabályát a modell nem tartja be
+> A v8 blokk két ellenőrzést írt a promptba: *„ha négy vagy több stratégiának adtál
+> 7-est vagy többet, pontozz újra"* és *„a szórás legalább 5 legyen"*. 50 soron:
+>
+> | verzió | n | átlag ≥7 db | (1) sértés | átlag szórás | (2) sértés | max=9 |
+> |---|---|---|---|---|---|---|
+> | v8 | 7 | 4.3 | 86% | 4.7 | 43% | 100% |
+> | v9 | 15 | 4.0 | 73% | 4.9 | 27% | 87% |
+> | v12 | 6 | 4.8 | 100% | 4.0 | 83% | 100% |
+> | v13 | 11 | 4.9 | 100% | 4.9 | 36% | 82% |
+> | v15 | 5 | **5.0** | **100%** | 4.8 | 20% | 60% |
+>
+> **A hét stratégiából 4-5 mindig 7 fölött van, a szórás soha nem éri el az 5-öt, és
+> a nyers maximum 21 v13+ sorból 13-ban HOLTVERSENY** (2-3 stratégia ugyanazon a
+> maximumon). Vagyis a pontozás nem rangsor, hanem **egy lapos „elfogadható" sáv** —
+> a tényleges döntést a bias-tábla és a szenzor hozza, nem a pontszám. Pontosan az,
+> amit a v8 blokk el akart kerülni („a bias nudge legyen, ne teherhordó").
+>
+> ### A CC-infláció mértéke és oka
+> v8-v12 → v13-v15 nyers átlagok: `constructive_challenge` **5.7 → 8.6 (+2.9)**,
+> minden más −0.8 … +0.8 között, az összes átlaga +0.4. Az inflació tehát **egyetlen
+> stratégiára** vonatkozik, nem általános.
+>
+> **KONTROLLÁLT KÍSÉRLET** (nem változtatás; a promptot memóriában átrendezve, a
+> telemetria kikapcsolva): a `thesis_condition`/`thesis_quote` a `strategy_fit` UTÁN.
+>
+> | poszt | CC_fit primelve | CC_fit átrendezve |
+> |---|---|---|
+> | Archicad/Forma | 9 | **7** |
+> | BIM brain | 9 | **7** |
+> | Agentic BIM | 9 | 9 |
+>
+> **A priming valós, de csak a felét magyarázza:** átrendezve a CC 7.7 átlagra esik,
+> nem az eredeti 5.7-re. A maradék a v12-es horgony és a szélesített `wins_when`.
+>
+> **És ami NEM változott az átrendezéstől: a laposság.** ≥7 darabszám 5-6, szórás
+> 3-5, a maximum továbbra is holtversenyben. **A kalibrációs hiba tehát nem a v13
+> következménye — szerkezeti.**
+>
+> ### Egy mellékes, de konkrét következmény
+> A `CHALLENGE_FIT_FLOOR = 7` **már nem szűr semmit**: a CC nyers pontja mostantól
+> mindig ≥7. A szenzort valójában három feltétel gátolja (intent, igazolt idézet,
+> feltétel-család), a negyedik no-op lett.
+>
+> ### A DÖNTÉSI FORK (nyitott)
+> A prompt-oldali önellenőrzés **háromszor** nem működött (v8-as kalibráció, v12-es
+> horgony, és most az átrendezés sem hozta vissza a szórást). Ez ugyanaz a hibaosztály,
+> mint az authenticity-rubrika: **a modell önpolicingja nem mérőszám.** A projekt saját
+> szabálya erre az volt, hogy törölni kell, nem erősíteni.
+>
+> Három út, kód-oldali:
+> - **(a) Normalizálás:** a nyers pontokat rang-transzformálni a bias előtt, hogy a
+>   bias újra nudge legyen egy szétterített skálán. Kicsi változás, de a holtversenyt
+>   önkényesen oldja fel.
+> - **(b) A fit mint SZŰRŐ, nem rangsor:** jelöltek = akik ≥7 (ezt a modell
+>   megbízhatóan mondja meg), és a jelöltek közül a **kód** dönt — intent-bias, vétó,
+>   plusz rotációs gyűrű a változatosságért. Ez ugyanaz az elv, ami a nyitásnál és a
+>   hossznál már bevált: a varianciát kódban állítjuk elő, nem a mintavételre bízzuk.
+>   Ez a `pick_strategy` átírása, tehát a döntési út közepe.
+> - **(c) Nem nyúlunk hozzá,** de akkor tudomásul veszjük, hogy a döntést a bias-tábla
+>   hozza — és akkor a bias-táblát kell auditálni, nem a pontozást.
+>
+> **DÖNTÉS: (b).** Megvalósítva alább, v16.
+
+---
+
+> ## ⚙️ KIEGÉSZÍTVE (2026-08-11) — A fit mint szűrő (engine v16)
+>
+> ### A mechanizmus
+> A `pick_strategy` **változatlan** (a B-blokk regressziós tesztje arra épül, és
+> továbbra is ő a kikapcsolt ág meg a fallback). Fölé került egy réteg:
+> `strategy_candidates` + `decide_strategy`, három lépésben, mindegyik indokkal a
+> naplóba (`strategy_decision_reason`):
+> 1. **Jelöltek** — akik elérik a `STRATEGY_CANDIDATE_FLOOR`-t (7) és nincsenek vetózva.
+> 2. **Frissesség** — a legutóbbi kettő kiesik. Védőszabály: ha ezzel kiürülne a
+>    halmaz, a teljes jelöltlista marad (a rotáció nem kényszeríthet ki nem illeszkedő
+>    stratégiát).
+> 3. **Választás** — a súlyozott max dönt, és **csak holtversenyben** a poszt-hash.
+>    Így a bias ott hat, ahol dolga van (közel-egyenlők között), és nem egy lapos
+>    sávon ő a teherhordó.
+>
+> **A gyűrű sekélyebb (2), mint a nyitás-gyűrű (4):** ott nyolc formából választunk,
+> itt a jelölt-halmaz mérve 4-5 elemű — négy kizárása kiürítené, és a mechanizmus
+> látszólag működne, valójában folyton a védőszabályra esne vissza.
+>
+> ### A TESZT EGY SÚLYOS TERVEZÉSI HIBÁT FOGOTT
+> Az első változat a **nyers** pontra szűrt. A J6 teszt (a v2 óta dokumentált
+> alaphiba őre) azonnal elbukott, és jogosan: a mesterség-poszton a modell a
+> `business_impact`-nek ad 10-et, a `field_experience`-nek 6-ot. Nyers padlóra az
+> előbbi vetózott, az utóbbi **kiesik** — és az egyetlen jelölt a `systems_thinking`
+> (nyers 7) lett volna, **súlyozottan 5.0-tal**, holott a bias a `field_experience`-t
+> 9.0-ra emeli. **Egy szűrő, ami a bias ELŐTT vág, kidobja azt a korrekciót, amiért az
+> intent layer létezik.** A padló ezért a **súlyozott** pontszámra megy (L18, L18.1,
+> L18.2 rögzíti).
+>
+> ### ÉLES — nyolc poszt egy futásban
+> | | |
+> |---|---|
+> | jelölt-szám | 6, 5, 5, 2, 2, 3, 2, 4 (átlag **3.6**) |
+> | a frissesség kizárt | **3×** (2× `constructive_challenge`, 1× `field_experience`) |
+> | győztes-eloszlás | CC 3, `field_experience` 3, `practical_lesson` 2 |
+> | közvetlen ismétlés | 2 (mindkettő magyarázható, lásd lent) |
+>
+> A rotáció látható munkát végez: az IFC-poszton a CC volt a nyers maximum, de a gyűrű
+> kizárta → `practical_lesson` nyert 11.0-val, ami azon a technikai poszton
+> védhetőbb is.
+>
+> ### KÉT MÉRT LYUK (nyitott, egyik sem javítva — egy változás egyszerre)
+> 1. **A kihívás-szenzor legyőzi a rotációt.** A szenzor a `decide_strategy` UTÁN fut,
+>    tehát visszahozhatja a CC-t akkor is, ha a gyűrű épp kizárta — mérve: az egyik
+>    poszton a döntés `business_impact` volt (a CC kizárva), a szenzor mégis CC-re
+>    írta. Ez a „utasítás erősebb a visszhang-tilalomnál" elv következménye, de így két
+>    egymás utáni CC lett. Javítás iránya: a szenzor is nézze a gyűrűt.
+> 2. **Kis jelölt-halmaznál a rotáció nem tud hatni.** Két posztnál mindössze 2 jelölt
+>    volt, mindkettő a gyűrűben → a védőszabály visszaadta a teljes listát → ismétlés.
+>    Javítás iránya: adaptív gyűrű-mélység (≤2 jelöltnél 1).
+>
+> **Amit ez a változás NEM tesz:** nem javítja a modell pontozását. A nyers sáv
+> továbbra is lapos (4-5 stratégia ≥7). A változás annyi, hogy a döntés **nem
+> támaszkodik többé a rangsorra** — csak arra, amit a modell megbízhatóan tud
+> („ez elfogadható lenne"), és a többit a kód dönti el.
+>
+> **Válasz-szerződés:** új additív mezők `strategy_candidates`, `strategy_recent`,
+> `strategy_decision_reason`; `TELEMETRY_SCHEMA` nem emelkedik. Új tesztek:
+> `test_linkedin_intent.py` L1–L18.2. `reset_opening_state()` mostantól ÖT gyűrűt nulláz.
+
+---
+
+> ## ⚙️ KIEGÉSZÍTVE (2026-08-11) — A két mért lyuk befoltozva (engine v17)
+>
+> ### 1. Adaptív gyűrű-mélység
+> **A mért hiba:** nyolc éles posztból kettőnél mindössze **két** jelölt volt, mindkettő
+> a kétmélységű gyűrűben → a védőszabály visszaadta a teljes listát → ismétlés.
+> A rotáció ott, ahol a legjobban kellett volna, nem tett semmit.
+>
+> `depth = max(0, min(_STRATEGY_RING_SIZE, len(cands) - 1))`. Legfeljebb annyit zárunk
+> ki, hogy **mindig maradjon választható**: 2 jelölt → mélység 1, 1 jelölt → 0.
+>
+> **Ezzel a védőszabály-ág ELÉRHETETLEN lett** (|used ∩ cands| ≤ len−1), és ezt nem
+> érvelés őrzi, hanem teszt: az L19.2 minden jelölt-számra (1..7) és hatféle
+> gyűrű-tartalomra végigmegy, és megbukik, ha a védőszabály-üzenet valaha megjelenik,
+> vagy ha a győztes nem jelölt. A mélység a naplóba is kiíródik („gyűrű-mélység 2").
+>
+> ### 2. A kihívás-szenzor tiszteli a rotációt
+> **A mért hiba:** a szenzor a `decide_strategy` UTÁN fut, tehát visszahozta a CC-t
+> akkor is, amikor a gyűrű épp kizárta — így két egymás utáni CC-komment lett.
+>
+> Hetedik feltétel: ha a CC a strategia-gyűrűben van, a szenzor nem sül el.
+>
+> **Miért nem áll itt az „utasítás erősebb a visszhang-tilalomnál" elv** (ami a
+> `shape_frame`-nél igen): ott a modell **kapott** egy utasítást, és azt büntetni
+> ellentmondás lett volna. A szenzor viszont nem utasítás, hanem **előléptetés** — a
+> dolga az, hogy a CC *lehetséges* legyen, nem az, hogy elkerülhetetlen.
+>
+> **A feltétel-sorrend szándékos:** a rotáció-ellenőrzés az UTOLSÓ, így az indok-string
+> megkülönbözteti a „jó volt a tény, csak a rotáció zárta" és a „nem volt tény" esetet —
+> a telemetriában ez két különböző jelenség (K24.1, K27).
+>
+> ### ÉLES — ugyanaz a nyolc poszt
+> | | v16 | v17 |
+> |---|---|---|
+> | közvetlen ismétlés | 2 | **0** |
+> | védőszabály-ág | 2× | **0×** |
+> | a szenzor felülírta a rotációt | 2× | **0×** |
+> | különböző stratégia 7 kommentben | 3 | **5** |
+>
+> A 17-es poszton a CC volt a nyers maximum, a gyűrű kizárta → `business_impact`
+> nyert, és a szenzor **nem** írta vissza. A 19-esnél két jelölt volt, mélység 1 →
+> a rotáció mégis hatott.
+>
+> **Egy átmeneti hiba a kötegben:** az IFC-poszt `503 UNAVAILABLE`-t kapott a compose
+> hívásban. A telemetria hiba-ága ezt szabályosan naplózta (`error` mező, `engine`
+> nélkül), és az újrafuttatás rendben lefutott (`practical_lesson`, 105 szó, sávon
+> belül). Nem regresszió — de jó emlékeztető, hogy a hiba-sorokat a riportok
+> `engine`-szűrése kihagyja.
+>
+> **Válasz-szerződés:** változatlan. Új tesztek: K24–K27, L19–L19.3; az L7 állítása a
+> védőszabályról az elérhetetlenségre fordult.
+
+---
+
+> ## ⚙️ KIEGÉSZÍTVE (2026-08-11) — A v8-as kalibrációs ellenőrzés TÖRÖLVE (engine v18)
+>
+> ### Amit töröltünk, és mire hivatkozva
+> A v8 blokk két szabályt írt a `strategy_fit` tételbe: *„ha négy vagy több
+> stratégiának adtál 7-est vagy többet, pontozz újra"* és *„a szórás legyen legalább
+> 5"*. A fenti diagnózis-blokk 50 sorral megmérte: a modell **soha nem tartotta be**
+> (sértés v8 86%, v9 73%, v13–v15 **100%**), és a v16 óta a döntés amúgy sem
+> támaszkodik a rangsorra — a nyers pont **szűrő**, a választást a kód hozza.
+>
+> Ez tehát **halott szöveg** volt: minden hívásban kimegy, semmit nem kényszerít ki, és
+> azt a látszatot adja, hogy a pontozás szórása garantált. Ugyanaz a bánásmód, mint az
+> authenticity-rubrikánál: **törlés + visszaszivárgás-teszt**, nem erősítés.
+> Az L3–L5 checkek megfordítva őrzik (eddig a jelenlétét állították).
+>
+> **Ami szándékosan maradt:** a négy horgony (0-2 / 3-5 / 6-8 / 9-10) — a v16-os
+> jelölt-padló éppen erre a sáv-szemantikára épül —, és a *„Score on professional value
+> ALONE … weighted separately"* mondat, ami most fontosabb, mint valaha: a padló a
+> **súlyozott** pontra megy, tehát ha a modell a nyers pontban is beszámítaná az
+> intentet, a bias kétszer számolna (L5.1 rögzíti).
+>
+> ### A/B, nyolc poszt mindkét karban — az abort-kritérium NEM sült el
+> | | v17 | v18 |
+> |---|---|---|
+> | **jelölt-szám átlag** (a döntő metrika) | 3.6 | **3.9** |
+> | ≥7 db átlag | 4.1 | 4.6 |
+> | szórás átlag | 5.4 | 4.5 |
+> | közvetlen ismétlés | 0 | 1 |
+>
+> Az előre kimondott abort-kritérium a **jelölt-szám ≥5** volt: 3.9-nél nem sült el, a
+> döntés bemenete gyakorlatilag változatlan.
+>
+> **A szórás és a ≥7 mozgása nem a törlés hatása, hanem visszatérés a korpusz
+> átlagához.** A több-verziós sor: szórás v8 4.7, v9 4.9, v12 4.0, v13 4.9, v14 4.6,
+> v15 4.8 — vagyis **a v17-es 5.4 volt a kiugró érték**, a v18-as 4.5 a sávon belül van.
+> Ugyanez a ≥7-re (v13–v15: 4.9–5.0). **Amit ez NEM zár ki:** n=8 karonként, ezen a
+> mintán egy gyenge szórás-hatás nem cáfolható. Ha a következő kötegekben a szórás
+> tartósan 4 alá menne, ez a törlés újranyitandó.
+>
+> ### Egy új, mért megfigyelés a rotáció határáról
+> Az egyetlen közvetlen ismétlés (`field_experience` → `field_experience`) magyarázott:
+> a második posztnál **egyetlen** jelölt volt (`gyűrű-mélység 0`), tehát nem volt mit
+> rotálni. A v17-es adaptív mélység így viselkedik szándékosan — de rögzítendő tény:
+> **egy-jelöltes soron a rotáció definíció szerint nem tud hatni.**
+>
+> **Válasz-szerződés:** változatlan, `TELEMETRY_SCHEMA` nem emelkedik. Mellékhaszon:
+> ~6 sor ≈ 90 kimeneti token megszűnt hívásonként — de az indok nem ez volt, hanem
+> hogy a prompt ne állítson olyat, amit a mérés megcáfolt.
+
+---
+
+> ## ⚙️ KIEGÉSZÍTVE (2026-08-11) — A szenzor padlója: kettő helyett egy (engine v19)
+>
+> ### A probléma két része
+> A v13-as kihívás-szenzornak volt egy „a modell maga is jónak jelölte" feltétele, saját
+> konstanssal: `CHALLENGE_FIT_FLOOR = 7`, a **nyers** ponton. Azóta:
+>
+> 1. **NO-OP lett.** A v13-as `thesis_condition`-kérdés (ami a pontozás ELŐTT áll) a CC
+>    nyers pontját 5.7-ről 8.6-ra emelte (v15: 9.0) — a 7-es padló a mért eloszláson
+>    **sosem kötött**. Egy feltétel, ami mindig teljesül, úgy olvasódik, mintha védelem
+>    lenne, pedig nem az.
+> 2. **KETTŐS DEFINÍCIÓ.** A v16 bevezette a `STRATEGY_CANDIDATE_FLOOR`-t ugyanarra a
+>    fogalomra, csak a **súlyozott** ponton — és a J6 teszt megmutatta, miért az a
+>    helyes (nyers ponton szűrve a bias-korrekció kiesik). Két konstans ugyanarra a
+>    fogalomra **drift-hazard**: az egyiket átírja valaki, a másikat elfelejti.
+>
+> ### A döntés: delegálás, nem törlés
+> A szenzor mostantól a `strategy_candidates`-re kérdez rá — **egy** definíció, súlyozott
+> ponton, a vétóval együtt. A `CHALLENGE_FIT_FLOOR` konstans megszűnt (a kódban már csak
+> kommentben szerepel, történelmi hivatkozásként).
+>
+> **Miért NEM töröltük magát a feltételt** (szemben a v18-as halott prompt-szöveggel):
+> ez **regresszió-védelem**. Ha a CC pontozása valaha visszaesik — például a v12-es
+> DISAGREEMENT-horgony kivezetésekor, ami a listán van —, a szenzor ne léptessen elő egy
+> rosszul illeszkedő stratégiát. A v18-as prompt-szöveg *félrevezetett*; ez *tartalék*.
+> Hogy elsül-e, az a `challenge_reason`-ből megszámolható.
+>
+> **A vétó-ellenőrzés előbbre került**, mint a padló: a `strategy_candidates` a vetózott
+> stratégiákat is kiszűri, tehát utána már nem lehetne megkülönböztetni a „kemény kapu"
+> és a „padló alatt" esetet — a telemetriában ez két különböző jelenség.
+>
+> ### Miért volt szükség verzió-bumpra egy no-op → no-op változáshoz
+> A mért eloszláson a viselkedés nem változik. De a feltétel **elérhető**: ha valaha
+> bekerül egy CC-re szóló bias (intent- vagy szint-szinten), a súlyozott és a nyers ág
+> **eltérő** döntést hoz. A verzió pontosan az ilyen látens ág-váltás miatt kell —
+> különben egy későbbi elemzés két különböző döntési utat átlagolna egy címke alatt.
+>
+> A súlyozott szemantikát teszt bizonyítja, nem érvelés: a K7.2–K7.4 ideiglenesen betesz
+> egy `-3.0` CC-biast a `management` szintre (ugyanaz a minta, mint a K9-es vétó-teszt),
+> és ellenőrzi, hogy a nyers 8-as pont súlyozva 5-re esik, a szenzor hallgat, az indok a
+> **súlyozott** értéket mondja — majd visszaállítás után ugyanaz a bemenet ismét elsül.
+>
+> **Válasz-szerződés:** változatlan. Tesztek: K6/K6.1 a közös padlóra hivatkozik,
+> K7 visszaszivárgás-őr (nincs második padló-konstans), K7.1–K7.4 új.
+
 ## Cél
 Egy dashboard-fül, ahova egy LinkedIn-poszt szövege bemásolható, és a rendszer egyetlen Gemini-hívással eldönti, melyik válasz-mód illik rá, majd megírja a választ.
 

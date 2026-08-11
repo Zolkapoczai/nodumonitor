@@ -38,6 +38,11 @@ from responder.linkedin_engine import (  # noqa: E402
     _human_temperature_key, _intent_layer_enabled, _compose_user_msg,
     effective_bias, score_strategies, pick_strategy, check_quality,
     ai_fingerprint_terms,
+    # K) kihivas-szenzor (v13; a padlo v19-ben a jelolt-halmazra delegalva)
+    _CHALLENGE_INTENTS, challenge_override, challenge_sensor_enabled,
+    # L) a fit mint SZURO (v16)
+    STRATEGY_CANDIDATE_FLOOR, _STRATEGY_RING_SIZE, strategy_candidates,
+    decide_strategy, remember_strategy, strategy_candidates_enabled,
 )
 
 STRAT_KEYS = set(STRATEGIES)
@@ -74,7 +79,7 @@ check("A7 a sema enum == a taxonomia kulcsai",
       and props["expected_responder_role"]["enum"] == list(RESPONDER_ROLES)
       and props["response_mode"]["enum"] == list(RESPONSE_MODES)
       and props["human_temperature"]["enum"] == HUMAN_TEMPERATURES)
-check("A8 az engine-verzio bumpolva", ENGINE_VERSION.endswith("v8"), ENGINE_VERSION)
+check("A8 az engine-verzio bumpolva", ENGINE_VERSION.endswith("v21"), ENGINE_VERSION)
 check("A9 a legacy post_type mezo MEGMARADT (dashboard-szerzodes)",
       "post_type" in props and "post_type" in req)
 check("A10 personal_experience intent letezik (human temperature vedelme)",
@@ -521,11 +526,381 @@ check("J9 a DASHBOARD-SZERZODES all: mind a 8 legacy mezo megvan",
 check("J10 a kapu atengedte a kommentet (nincs uzleti absztrakcio benne)",
       res_on.get("quality_issues") == [] and res_on.get("rewrites") == 0,
       str(res_on.get("quality_issues")))
-check("J11 az engine-verzio a valaszban v8", res_on.get("engine") == "linkedin-tle-v8")
+check("J11 az engine-verzio a valaszban v21", res_on.get("engine") == "linkedin-tle-v21")
 check("J12 KIKAPCSOLVA: ugyanezen a bemeneten a v1-es dontes (business_impact)",
       res_off.get("strategy") == "business_impact" and res_off.get("intent_layer") is False,
       str(res_off.get("strategy")))
 check("J13 KIKAPCSOLVA: a veto-lista ures", res_off.get("strategy_vetoed") == [])
+
+# --- K) kihivas-szenzor (2026-08-11, v13) ------------------------------------
+# A MERT PROBLEMA: a `constructive_challenge` 33 generalasbol EGYSZER SEM nyert, es
+# a diagnozis KIZARTA a bias-javitast (a CC nyers pontja sosem ment 7 fole, a gyoztes
+# 32 sorban 9 volt -> +2..+9,5 kellett volna, ami mar teherhordo suly).
+# A megoldas nem uj suly, hanem uj TENY: a modell szenzor, a kod biro.
+CHALLENGE_POST = ("Archicad is getting a connection to an Autodesk tool. The advantage "
+                  "sits with whoever already treats the concept model as structured "
+                  "data instead of a picture. That habit costs nothing.")
+CH_REASONING = {
+    "strategy_fit": {"constructive_challenge": 7, "systems_thinking": 5,
+                     "field_experience": 9, "business_impact": 6,
+                     "future_outlook": 4, "practical_lesson": 8,
+                     "missing_perspective": 9},
+    "thesis_condition": "when the receiving office runs an older Archicad version",
+    "thesis_quote": "The advantage sits with whoever already treats the concept model "
+                    "as structured data",
+}
+
+
+def ch(**over):
+    """Egy reasoning-dict a fenti alapbol, felulirt mezokkel."""
+    return {**CH_REASONING, **over}
+
+
+ok, why = challenge_override(ch(), CHALLENGE_POST, "professional_opinion", "management")
+check("K1 minden feltetel teljesul -> a szenzor elsul", ok, why)
+check("K1.1 az indok megnevezi a feltetelt (naplozhato dontes)",
+      "older Archicad" in why, why)
+
+ok, why = challenge_override(ch(), CHALLENGE_POST, "reflection", "management")
+check("K2 NEM velemeny-jellegű intent -> nem sul el", not ok, why)
+check("K2.1 az indok az intentre hivatkozik", "intent" in why, why)
+
+ok, why = challenge_override(ch(thesis_condition=""), CHALLENGE_POST,
+                             "professional_opinion", "management")
+check("K3 ures thesis_condition -> nem sul el (ez ERVENYES es gyakori valasz)",
+      not ok, why)
+
+ok, why = challenge_override(ch(thesis_condition="   "), CHALLENGE_POST,
+                             "professional_opinion", "management")
+check("K3.1 csak szokoz sem szamit feltetelnek", not ok, why)
+
+# A ZERO-HALLUCINATION ELV: az idezetet a kod MEGKERESI a posztban. Ez a felteteles
+# allitas egyetlen kodbol ellenorizheto fele — ugyanaz a mechanizmus, mint a
+# `tool_request_quote`-nal es a `promotion_evidence`-nel (`_quote_in_post`).
+ok, why = challenge_override(ch(thesis_quote="the advantage belongs to the vendor "
+                                             "with the bigger licence stack"),
+                             CHALLENGE_POST, "professional_opinion", "management")
+check("K4 KITALALT idezet -> nem sul el", not ok, why)
+check("K4.1 az indok mutatja a nem talalt idezetet", "nem talalhato" in why, why)
+
+ok, why = challenge_override(ch(thesis_quote=""), CHALLENGE_POST,
+                             "professional_opinion", "management")
+check("K5 ures idezet -> nem sul el (feltetel idezet nelkul nem tény)", not ok, why)
+
+# A tezis ALLITAS, nem fonevi szerkezet: a `_quote_in_post` 3 szavas alapertelmezese
+# a rovid tool-request-kerdesekre van kalibralva, ide keves. Ezt a teszt talalta meg.
+ok, why = challenge_override(ch(thesis_quote="the concept model"), CHALLENGE_POST,
+                             "professional_opinion", "management")
+check("K5.1 tul rovid idezet nem bizonyitek (THESIS_QUOTE_MIN_WORDS)", not ok, why)
+check("K5.2 a tezis-idezet padloja szigorubb a tool-request-nel",
+      _eng_mod.THESIS_QUOTE_MIN_WORDS > 3, str(_eng_mod.THESIS_QUOTE_MIN_WORDS))
+
+# A PADLO: a kod a rangsor-artefaktumot javitja, NEM a modell iteletet irja felul.
+# Ha a modell maga is alacsonyra tette a CC-t, a szenzor hallgat.
+for fit in (0, 3, 6):
+    ok, why = challenge_override(
+        ch(strategy_fit={**CH_REASONING["strategy_fit"], "constructive_challenge": fit}),
+        CHALLENGE_POST, "professional_opinion", "management")
+    check(f"K6 CC fit={fit} (< {STRATEGY_CANDIDATE_FLOOR}) -> nem sul el", not ok, why)
+for fit in (7, 8, 10):
+    ok, why = challenge_override(
+        ch(strategy_fit={**CH_REASONING["strategy_fit"], "constructive_challenge": fit}),
+        CHALLENGE_POST, "professional_opinion", "management")
+    check(f"K6.1 CC fit={fit} (>= {STRATEGY_CANDIDATE_FLOOR}) -> elsul", ok, why)
+
+# K7 ATIRVA (2026-08-11, v19). A `CHALLENGE_FIT_FLOOR` KULON konstans volt a NYERS
+# ponton, es ket dolog tortent vele: (a) NO-OP lett, mert a v13-as
+# `thesis_condition`-kerdes a CC nyers pontjat 5.7-rol 8.6-ra emelte, tehat a 7-es
+# padlo a mert eloszlason sosem kotott; (b) a v16-os `STRATEGY_CANDIDATE_FLOOR`
+# ugyanarra a fogalomra jott be, csak a SULYOZOTT ponton — ket konstans egy fogalomra
+# drift-hazard. A szenzor mostantol a `strategy_candidates`-re delegal.
+check("K7 NINCS masodik padlo-konstans a modulban (egy definicio)",
+      not hasattr(_eng_mod, "CHALLENGE_FIT_FLOOR"),
+      "a `CHALLENGE_FIT_FLOOR` visszakerult — ket konstans ugyanarra a fogalomra")
+check("K7.1 a szenzor a JELOLT-halmazra delegal (sulyozott pont, egy padlo)",
+      STRATEGY_CANDIDATE_FLOOR == 7, str(STRATEGY_CANDIDATE_FLOOR))
+
+# A SULYOZOTT szemantika bizonyitasa. A `_CHALLENGE_INTENTS` ket intentje ma NULLA
+# CC-biast ad, tehat ott sulyozott == nyers — a kulonbseg csak akkor lathato, ha van
+# CC-bias. Ideiglenesen beteszunk egyet (ugyanaz a minta, mint a K9-es veto-teszt).
+_saved_bias = dict(_LEVEL_STRATEGY_BIAS["management"])
+_LEVEL_STRATEGY_BIAS["management"]["constructive_challenge"] = -3.0
+ok, why = challenge_override(
+    ch(strategy_fit={**CH_REASONING["strategy_fit"], "constructive_challenge": 8}),
+    CHALLENGE_POST, "professional_opinion", "management")
+check("K7.2 nyers 8, de a bias -3 -> sulyozva 5, a szenzor NEM sul el", not ok, why)
+check("K7.3 az indok a SULYOZOTT erteket mondja (nem a nyerset)",
+      "sulyozva 5" in why, why)
+_LEVEL_STRATEGY_BIAS["management"].clear()
+_LEVEL_STRATEGY_BIAS["management"].update(_saved_bias)
+ok, why = challenge_override(
+    ch(strategy_fit={**CH_REASONING["strategy_fit"], "constructive_challenge": 8}),
+    CHALLENGE_POST, "professional_opinion", "management")
+check("K7.4 a bias visszaallitasa utan ugyanaz a bemenet ismet elsul", ok, why)
+check("K8 a szenzor-intentek leteznek a taxonomiaban",
+      all(i in CONVERSATION_INTENTS for i in _CHALLENGE_INTENTS),
+      str(sorted(_CHALLENGE_INTENTS)))
+
+# A VETO-MECHANIZMUS tiszteletben tartasa: ma egyetlen szint sem vetozza a CC-t, de
+# ha valaha bekerul, a szenzor NEM irhatja felul a kemeny kaput.
+_saved_veto = set(_LEVEL_VETO["business"])
+_LEVEL_VETO["business"].add("constructive_challenge")
+ok, why = challenge_override(ch(), CHALLENGE_POST, "professional_opinion", "business")
+check("K9 a szint-veto erosebb a szenzornal", not ok, why)
+_LEVEL_VETO["business"].clear()
+_LEVEL_VETO["business"].update(_saved_veto)
+
+check("K10 config default: bekapcsolva", challenge_sensor_enabled({}) is True)
+check("K10.1 'off' -> kikapcsolva",
+      challenge_sensor_enabled({"linkedin": {"challenge_sensor": "off"}}) is False)
+check("K10.2 YAML-boolean False -> kikapcsolva",
+      challenge_sensor_enabled({"linkedin": {"challenge_sensor": False}}) is False)
+
+# A SEMA es a PROMPT egyutt: egy kotelezo mezo, amirol a prompt nem beszel, olyan
+# mezo, amit a modell talalgat (A13.1 ugyanezt orzi az osszes mezore).
+check("K11 mindket uj mezo a semaban ES kotelezo",
+      all(f in _REASON_SCHEMA["properties"] and f in _REASON_SCHEMA["required"]
+          for f in ("thesis_condition", "thesis_quote")))
+check("K12 a prompt kimondja, hogy az URES valasz ervenyes (nincs kitalalasra nyomas)",
+      "an empty answer here is a valid and frequent answer" in _REASON_PROMPT)
+check("K13 a prompt kimondja, hogy az idezetet ellenorizzuk",
+      "voids the condition" in _REASON_PROMPT)
+
+# --- K') FELTETEL-MONOKULTURA (2026-08-11, v15) ------------------------------
+# A MERT HIBA: a v13-as szenzor utan OT eles futasbol OT `thesis_condition`
+# szerzodesi/incentiva-jellegű volt, es a v14-es KIMENETI kapu ezt nem gyogyitotta —
+# kimeneti kapu nem javit bemeneti monokulturat. SZO SZERINTI naplo-reszletek:
+COND_COMMERCIAL = [
+    "when project contracts do not explicitly reward or penalize data quality",
+    "when the contractual frameworks and operational incentives align for continuous",
+    "when the client's procurement process does not explicitly define and compensate",
+    "when the contractual and liability frameworks for AI-generated design are clear",
+    "when project contracts and team incentives are aligned to reward early",
+]
+COND_OTHER = [
+    "when the model is federated late in the phase",
+    "on refurbishment work where the as-built survey is unreliable",
+    "when the receiving office runs an older Archicad version",
+    "when the family was authored by a different discipline",
+]
+check("K14 mind az OT mert feltetel ugyanabba a csaladba esik",
+      all(_eng_mod.condition_family(c) == "move:commercial_frame" for c in COND_COMMERCIAL),
+      str([_eng_mod.condition_family(c) for c in COND_COMMERCIAL]))
+check("K15 a technikai/helyzeti feltetelek NEM esnek csaladba (nincs hamis pozitiv)",
+      all(_eng_mod.condition_family(c) == "" for c in COND_OTHER),
+      str([_eng_mod.condition_family(c) for c in COND_OTHER]))
+# A feltetel EGY tagmondat: ott az elso kereskedelmi terminus mar a lenyeg. A
+# kommentnel (100+ szo) ezert szigorubb a kuszob — ket kulonbozo szo kell.
+check("K16 a feltetel-kuszob 1, a komment-kuszob 2 (dokumentalt kulonbseg)",
+      _eng_mod._CONDITION_FAMILY_MIN_HITS == 1 and _eng_mod._CONTENT_MOVE_MIN_HITS == 2)
+
+ok, why = challenge_override(ch(), CHALLENGE_POST, "professional_opinion", "management",
+                             recent_conditions=["move:commercial_frame"])
+check("K17 NEM kereskedelmi feltetel atmegy a kereskedelmi gyűrűn is",
+      ok, why)   # a CH_REASONING feltetele: "older Archicad version"
+ok, why = challenge_override(ch(thesis_condition=COND_COMMERCIAL[0],
+                                thesis_quote=CH_REASONING["thesis_quote"]),
+                             CHALLENGE_POST, "professional_opinion", "management",
+                             recent_conditions=["move:commercial_frame"])
+check("K18 ISMETLODO csaladu feltetel -> a szenzor NEM sul el", not ok, why)
+check("K18.1 az indok megnevezi a csaladot es azt, hogy nem uj teny",
+      "move:commercial_frame" in why and "nem uj teny" in why, why)
+ok, why = challenge_override(ch(thesis_condition=COND_COMMERCIAL[0],
+                                thesis_quote=CH_REASONING["thesis_quote"]),
+                             CHALLENGE_POST, "professional_opinion", "management")
+check("K19 gyűrű nelkul (regi hivas) a kereskedelmi feltetel is elfogadott", ok, why)
+
+_eng_mod.reset_opening_state()
+_eng_mod.remember_condition_family(COND_COMMERCIAL[0])
+check("K20 a gyűrű CSAK csaladba eso feltetellel bővul",
+      list(_eng_mod._recent_condition_families) == ["move:commercial_frame"],
+      str(list(_eng_mod._recent_condition_families)))
+_eng_mod.remember_condition_family(COND_OTHER[0])
+check("K20.1 csalad nelkuli feltetel nem eget el helyet",
+      list(_eng_mod._recent_condition_families) == ["move:commercial_frame"],
+      str(list(_eng_mod._recent_condition_families)))
+check("K21 a feltetel-gyűrű ugyanolyan mely, mint a tobbi",
+      _eng_mod._recent_condition_families.maxlen == _eng_mod._OPENING_RING_SIZE)
+check("K22 reset_opening_state a feltetel-gyűrűt is nullazza",
+      (_eng_mod.reset_opening_state(), not _eng_mod._recent_condition_families)[1])
+
+check("K23 a prompt elteriti a legkonnyebben elerheto valasztol",
+      "AVOID THE MOST AVAILABLE ANSWER" in _REASON_PROMPT
+      and "fits almost every claim in this industry" in _REASON_PROMPT)
+
+# --- L) a fit mint SZURO, nem rangsor (2026-08-11, v16) ----------------------
+# A MERT DIAGNOZIS: 4-5 strategia MINDIG >= 7, a v8-as prompt-szabalyok a sorok
+# 73-100%-aban serulnek, es a nyers maximum 21 v13+ sorbol 13-ban holtverseny. A
+# pontozas tehat egy lapos "elfogadhato" sav, nem rangsor.
+#
+# A LAPOS eset, ami a diagnozisbol jon (ot strategia 7 fölött, holtverseny 9-en):
+FLAT = {"constructive_challenge": 9, "systems_thinking": 7, "field_experience": 9,
+        "business_impact": 8, "future_outlook": 5, "practical_lesson": 7,
+        "missing_perspective": 9}
+P1, P2 = "Egy poszt szovege.", "Egy MASIK poszt szovege."
+
+check("L1 a jelolt = akit a MODELL is jonak jelolt (>= padlo), veto nelkul",
+      strategy_candidates(FLAT, "professional_opinion", "management")
+      == ["constructive_challenge", "systems_thinking", "field_experience",
+          "business_impact", "practical_lesson", "missing_perspective"],
+      str(strategy_candidates(FLAT, "professional_opinion", "management")))
+check("L2 a padlo alatti kimarad (future_outlook=5)",
+      "future_outlook" not in strategy_candidates(FLAT, "professional_opinion", "management"))
+check("L3 a VETO is szur (technical szint -> business_impact)",
+      "business_impact" not in strategy_candidates(FLAT, "engineering_problem", "technical"),
+      str(strategy_candidates(FLAT, "engineering_problem", "technical")))
+check("L4 a padlo dokumentalt es 7", STRATEGY_CANDIDATE_FLOOR == 7)
+
+# 1. A FRISSESSEG: a legutobbi ket strategia kiesik.
+s1, why1 = decide_strategy(FLAT, P1, "professional_opinion", "management", recent=[])
+s2, why2 = decide_strategy(FLAT, P1, "professional_opinion", "management", recent=[s1])
+check("L5 ugyanaz a poszt, ures gyűrű -> REPRODUKALHATO",
+      decide_strategy(FLAT, P1, "professional_opinion", "management", recent=[])[0] == s1)
+check("L6 a gyűrűben levo strategia NEM nyer ujra", s2 != s1, f"{s1} -> {s2}")
+check("L6.1 az indok megnevezi a kizarast", "kizarva ismetles miatt" in why2, why2)
+
+# 2. A ROTACIO NEM URITHETI KI A DONTEST. A v16-ban ezt egy vedoszabaly biztositotta
+# (ha minden jelolt a gyűrűben volt, a teljes lista maradt) — a v17-es ADAPTIV
+# melyseg ota ez az ag elerhetetlen: legfeljebb annyit zarunk ki, hogy maradjon
+# valaszthato. A hosszu `recent` lista igy sem uritheti ki a halmazt.
+cands = strategy_candidates(FLAT, "professional_opinion", "management")
+s3, why3 = decide_strategy(FLAT, P1, "professional_opinion", "management", recent=cands)
+check("L7 a TELJES jelolt-lista a gyűrűben sem urit ki (melyseg-vagas)",
+      s3 in cands and "mind a" not in why3, f"{s3} | {why3}")
+
+# 3. A SULYOZOTT MAX dont a maradekbol, es CSAK holtversenyben a poszt-hash.
+scores, _ = score_strategies(FLAT, "professional_opinion", "management")
+top = max(scores[s] for s in cands)
+check("L8 a gyoztes a sulyozott maximumon van", scores[s1] == top,
+      f"{s1}={scores[s1]} vs top={top}")
+check("L9 holtversenynel a poszt-hash dont (ket kulonbozo poszt szorhat)",
+      "holtverseny" in why1 or "sulyozott max" in why1, why1)
+
+# Egyetlen jelolt: nincs mit valasztani, es nem is szabad hash-elni.
+ONE = {**FLAT, "constructive_challenge": 2, "systems_thinking": 2, "field_experience": 9,
+       "business_impact": 2, "future_outlook": 2, "practical_lesson": 2,
+       "missing_perspective": 2}
+s, why = decide_strategy(ONE, P1, "professional_opinion", "management", recent=[])
+check("L10 egyetlen jelolt -> az nyer", s == "field_experience", f"{s} | {why}")
+
+# 4. FALLBACK: ha egy strategia sem eri el a padlot, a valtozatlan `pick_strategy`.
+LOW = {k: 4 for k in STRATEGIES}
+LOW["systems_thinking"] = 6
+s, why = decide_strategy(LOW, P1, "professional_opinion", "management", recent=[])
+check("L11 nincs jelolt -> a VALTOZATLAN sulyozott argmax dont",
+      s == pick_strategy(LOW, "professional_opinion", "management")
+      and "nincs jelolt" in why, f"{s} | {why}")
+check("L11.1 a padlo nem urithet ki dontest (mindig van strategia)",
+      all(decide_strategy({k: v for k in STRATEGIES}, P1, "general", "management",
+                          recent=[])[0] in STRATEGIES for v in (0, 3, 6, 7, 10)))
+
+# 5. A gyűrű
+_eng_mod.reset_opening_state()
+remember_strategy("field_experience")
+remember_strategy("practical_lesson")
+check("L12 a gyűrű a legutobbi strategiakat orzi",
+      list(_eng_mod._recent_strategies) == ["field_experience", "practical_lesson"],
+      str(list(_eng_mod._recent_strategies)))
+remember_strategy("")
+check("L12.1 ures kulcs nem kerul be",
+      list(_eng_mod._recent_strategies) == ["field_experience", "practical_lesson"])
+remember_strategy("business_impact")
+check("L13 a gyűrű _STRATEGY_RING_SIZE-ra van vagva",
+      len(_eng_mod._recent_strategies) == _STRATEGY_RING_SIZE
+      and "field_experience" not in _eng_mod._recent_strategies,
+      str(list(_eng_mod._recent_strategies)))
+check("L14 a strategia-gyűrű SEKELYEBB a nyitas-gyűrűnel (mert kisebb a halmaz)",
+      _STRATEGY_RING_SIZE < _eng_mod._OPENING_RING_SIZE,
+      f"{_STRATEGY_RING_SIZE} vs {_eng_mod._OPENING_RING_SIZE}")
+check("L15 reset_opening_state a strategia-gyűrűt is nullazza",
+      (_eng_mod.reset_opening_state(), not _eng_mod._recent_strategies)[1])
+
+# 6. Config + a `pick_strategy` VALTOZATLANSAGA (a B-blokk erre epul)
+check("L16 config default: bekapcsolva", strategy_candidates_enabled({}) is True)
+check("L16.1 'off' -> kikapcsolva",
+      strategy_candidates_enabled({"linkedin": {"strategy_candidates": "off"}}) is False)
+check("L17 a `pick_strategy` VALTOZATLAN: a v1-es dontest adja (a B-blokk erre epul)",
+      all(pick_strategy(f, *_LAYER_OFF) == v1_pick(f) for f in FITS),
+      str([(pick_strategy(f, *_LAYER_OFF), v1_pick(f)) for f in FITS]))
+
+# A J6 TALALATA, kod-szintu zarral. A nyers pontra szűrve a v2 ota dokumentalt
+# alaphiba visszajonne: a mesterseg-poszton a modell a `business_impact`-nek ad 10-et,
+# a `field_experience`-nek 6-ot. A bias az utobbit 9.0-ra emeli — egy szűro, ami a
+# bias ELOTT vag, pont ezt a korrekciót dobja ki.
+CRAFT_FIT = {"constructive_challenge": 4, "systems_thinking": 7, "field_experience": 6,
+             "business_impact": 10, "future_outlook": 5, "practical_lesson": 6,
+             "missing_perspective": 5}
+craft_cands = strategy_candidates(CRAFT_FIT, "craftsmanship", "technical")
+check("L18 a padlo a SULYOZOTT pontra megy (a bias-korrekcio nem eshet ki)",
+      set(craft_cands) == {"field_experience", "practical_lesson"}, str(craft_cands))
+check("L18.1 a nyers 7-es systems_thinking NEM jelolt (sulyozva 5.0)",
+      "systems_thinking" not in craft_cands)
+check("L18.2 a mesterseg-poszton mesterseg-strategia nyer (a v2-es alaphiba zarva)",
+      decide_strategy(CRAFT_FIT, P1, "craftsmanship", "technical", recent=[])[0]
+      in ("field_experience", "practical_lesson"),
+      str(decide_strategy(CRAFT_FIT, P1, "craftsmanship", "technical", recent=[])))
+
+# --- L') ADAPTIV GYŰRŰ-MELYSEG (2026-08-11, v17) -----------------------------
+# A MERT HIBA: nyolc eles posztbol KETTONEL mindossze ket jelolt volt, mindketto a
+# ketmelysegű gyűrűben — a vedoszabaly visszaadta a teljes listat, es a rotacio nem
+# tett semmit (ismetles). A melyseg ezert a jelolt-szamhoz igazodik.
+TWO = {"constructive_challenge": 3, "systems_thinking": 3, "field_experience": 9,
+       "business_impact": 3, "future_outlook": 3, "practical_lesson": 9,
+       "missing_perspective": 3}
+two_cands = strategy_candidates(TWO, "professional_opinion", "management")
+check("L19 ket jelolt eseten a melyseg 1 -> a rotacio MEGIS hat",
+      len(two_cands) == 2 and
+      decide_strategy(TWO, P1, "professional_opinion", "management",
+                      recent=["field_experience", "practical_lesson"])[0]
+      == "field_experience",
+      f"{two_cands} | {decide_strategy(TWO, P1, 'professional_opinion', 'management', recent=['field_experience', 'practical_lesson'])}")
+check("L19.1 az indok kiirja a melyseget (auditalhato)",
+      "gyűrű-melyseg 1" in decide_strategy(
+          TWO, P1, "professional_opinion", "management",
+          recent=["field_experience", "practical_lesson"])[1],
+      decide_strategy(TWO, P1, "professional_opinion", "management",
+                      recent=["field_experience", "practical_lesson"])[1])
+
+# AZ INVARIANS: a vedoszabaly-ag ("mind a N jelolt szerepelt") mostantol ELERHETETLEN.
+# Ha valaha megjelenik az indokban, a melyseg-szamitas elromlott.
+_guard_hits = []
+for n in range(1, 8):
+    fit = {s: (9 if i < n else 3) for i, s in enumerate(STRATEGIES)}
+    cands = strategy_candidates(fit, "professional_opinion", "management")
+    for ring in ([], list(STRATEGIES), list(reversed(list(STRATEGIES))),
+                 cands, cands[:1], cands[-2:]):
+        s, why = decide_strategy(fit, P1, "professional_opinion", "management", recent=ring)
+        if "mind a" in why:
+            _guard_hits.append((n, ring, why))
+        if s not in cands and cands:
+            _guard_hits.append((n, ring, f"a gyoztes NEM jelolt: {s}"))
+check("L19.2 a vedoszabaly-ag elerhetetlen, es a gyoztes MINDIG jelolt",
+      not _guard_hits, str(_guard_hits[:2]))
+check("L19.3 egyetlen jelolt: nincs kizaras, o nyer (melyseg 0)",
+      decide_strategy(ONE, P1, "professional_opinion", "management",
+                      recent=["field_experience"])[0] == "field_experience")
+
+# --- K'') A SZENZOR TISZTELI A ROTACIOT (2026-08-11, v17) --------------------
+# A MERT HIBA: a szenzor a `decide_strategy` UTAN fut, tehat visszahozta a CC-t akkor
+# is, amikor a strategia-gyűrű epp kizarta -> ket egymas utani CC-komment.
+ok, why = challenge_override(ch(), CHALLENGE_POST, "professional_opinion", "management",
+                             recent_strategies=["constructive_challenge"])
+check("K24 a CC a strategia-gyűrűben -> a szenzor NEM sul el", not ok, why)
+check("K24.1 az indok kimondja, hogy a TENY jo volt, csak a rotacio zarta",
+      "igazolt feltetel" in why and "rotacio" in why, why)
+ok, why = challenge_override(ch(), CHALLENGE_POST, "professional_opinion", "management",
+                             recent_strategies=["field_experience", "practical_lesson"])
+check("K25 MAS strategiak a gyűrűben -> a szenzor elsul", ok, why)
+ok, why = challenge_override(ch(), CHALLENGE_POST, "professional_opinion", "management")
+check("K26 gyűrű nelkul (regi hivas) valtozatlan", ok, why)
+# A sorrend SZANDEKOS: a rotacio-feltetel az UTOLSO, hogy az indok megkulonboztesse a
+# "nem volt teny" es a "volt teny, de rotacio" esetet — a telemetriaban ket kulonbozo
+# jelenseg, es kulon kell tudni szamolni oket.
+ok, why = challenge_override(ch(thesis_condition=""), CHALLENGE_POST,
+                             "professional_opinion", "management",
+                             recent_strategies=["constructive_challenge"])
+check("K27 ha NINCS teny, az indok a tenyre hivatkozik, nem a rotaciora",
+      not ok and "nem talalt kimondatlan feltetelt" in why, why)
 
 print()
 bad = 0

@@ -3,6 +3,9 @@
 # generalt kommenteket tartalmaz, es folyamatosan no — nem valo a repoba.
 storage/linkedin_telemetry.jsonl
 storage/*.jsonl
+# Meresi bemenet: masok LinkedIn-posztjainak szo szerinti szovege. Ugyanaz az
+# indok, mint a telemetriaal — futasi adat, nem forras.
+bench_posts/*.txt
 backups/
 nodu_monitor.db
 nodu_monitor.db-wal

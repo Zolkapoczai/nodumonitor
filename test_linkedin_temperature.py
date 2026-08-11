@@ -174,18 +174,18 @@ class _FakeClient:
 _real = eng._client
 eng._client = lambda config: (_FakeClient(), "gemini-2.5-flash", None)
 try:
-    eng._recent_openings.clear()
+    eng.reset_opening_state()
     res_split = eng.generate_comment(
         {"linkedin": {"reason_temperature": 0.2, "compose_temperature": "default"}}, POST)
     calls_split = list(calls)
     calls.clear()
 
-    eng._recent_openings.clear()
+    eng.reset_opening_state()
     res_legacy = eng.generate_comment({"linkedin": {"temperature": 0.3}}, POST)
     calls_legacy = list(calls)
 finally:
     eng._client = _real
-    eng._recent_openings.clear()
+    eng.reset_opening_state()
 
 by_stage = {c["stage"]: c["temperature"] for c in calls_split}
 check("D1 nincs hiba", "error" not in res_split, str(res_split.get("error", "")))
