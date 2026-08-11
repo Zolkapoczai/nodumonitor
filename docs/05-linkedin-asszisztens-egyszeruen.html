@@ -47,6 +47,21 @@
     hyphens: auto;
   }
 
+  /* Sorkizarás csak a hosszu, folyofolyamu bekezdeseknek jo (lepesek, intro,
+     zaro megjegyzes). Szuk oszlopu/UI-szeru szoveg-darabokban (kartyak,
+     cimke-ertek sorok, lista-cellak, feliratok) kevés szó fér egy sorba, es a
+     bongo emiatt nagy, ronda szokozoket nyujtana — ezek balra zartak marad­nak. */
+  .tone-card .desc,
+  .tone-card .example,
+  .ui-shot .caption,
+  ul.checks li .rule,
+  ul.checks li .why,
+  .monitor-flow .stage,
+  .monitor-note p,
+  .example-box .post {
+    text-align: left;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
   }
@@ -252,22 +267,29 @@
   }
 
   .example-box .row {
-    display: flex;
-    gap: 10px;
+    display: grid;
+    grid-template-columns: 160px 1fr;
+    column-gap: 24px;
     font-size: 14.5px;
-    padding: 8px 0;
+    padding: 10px 0;
     border-bottom: 1px solid var(--rule);
   }
 
   .example-box .row:last-child { border-bottom: none; }
 
+  /* Sorkizart szoveg szuk oszlopban nagy, ronda szokozoket hoz letre (kevés szó
+     per sor -> a bongo szetnyujtja). A cimke- es ertek-oszlop ezert balra
+     zart marad, fuggetlenul a globalis `body { text-align: justify }`-tol. */
   .example-box .row .k {
-    flex: 0 0 130px;
     color: var(--muted);
     font-weight: 600;
+    text-align: left;
+    line-height: 1.4;
   }
 
-  .example-box .row .v { flex: 1; }
+  .example-box .row .v {
+    text-align: left;
+  }
 
   /* ---------- checklist ---------- */
 
