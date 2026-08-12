@@ -147,7 +147,7 @@ from google.genai import types
 
 from env_secrets import get_secret
 
-ENGINE_VERSION = "linkedin-tle-v25"
+ENGINE_VERSION = "linkedin-tle-v26"
 
 # --- Stage 4: strategiak -----------------------------------------------------
 # Pontosan EGY strategia valasztodik kommentenkent. A `directive` a compose-
@@ -1653,17 +1653,49 @@ def shape_frame(opening_key: str) -> str:
     return opening_frame(shape["example"].strip('"'))
 
 
+# Az a forma, aminek NINCS kanonikus ujjlenyomata: a `straight` "peldaja" nem egy
+# mondat, hanem egy LEIRAS ("no framing at all — begin with the claim itself"),
+# tehat az `opening_fingerprint` egy ertelmetlen 'no framing at' toredeket adna ra.
+# Ez a gyűrűben artalmatlan (eles kommentben sosem all elo), a MERESBEN viszont
+# felrevezet: a forma-betartas szamolasa emiatt mutatott ra 0/6-ot, holott a
+# `straight` betartasa eppen az, hogy NINCS keretezes. Ezert nevesitve van.
+_SHAPES_WITHOUT_CANONICAL_FP = frozenset({"straight"})
+
+
+def shape_fingerprint(opening_key: str) -> str:
+    """A KIOSZTOTT forma sajat ELVART ujjlenyomata (csalad VAGY lexikai), vagy "".
+
+    MIERT KELL A `shape_frame` MELLETT (2026-08-11, engine v26 — MERT hiba): a
+    `shape_frame` csak a CSALAD-ujjlenyomatot adja vissza (`_OPENING_FRAMES`), ami a
+    nyolc formabol EGYETLENEGYNEL (`strikes`) nem ures. A tobbi hetnek lexikai
+    ujjlenyomata van ('i ve found', 'one pattern i', ...), es azok EDDIG NEM
+    estek ki a kapunak atadott gyűrűből.
+    A KOVETKEZMENY, ami a 2026-08-11-i kotegben elsult: a rotacio kiosztotta a
+    `pattern` formát, a modell BETARTOTTA ("One pattern I've noticed..."), es a kapu
+    EPPEN EZERT utasitotta el — mert a 'one pattern i' mar a gyűrűben volt egy
+    korabbi, MAS formát kapott kommentbol. A kod a sajat utasitasa kovetesert
+    buntetett. Ugyanaz a hibaosztaly, mint a v25-os prompt/kapu ellentmondas.
+    Ez a fuggveny a `shape_frame` docstringjeben mar KIMONDOTT szerzodest terjeszti
+    ki a lexikai ujjlenyomatokra: „az utasitas mindig erosebb, mint a
+    visszhang-tilalom". Nem uj szabaly, hanem a meglevo befejezese.
+    """
+    shape = OPENING_SHAPES.get(opening_key or "")
+    if not shape or opening_key in _SHAPES_WITHOUT_CANONICAL_FP:
+        return ""
+    return opening_fingerprint(shape["example"].strip('"'))
+
+
 def echo_ring_for(opening_key: str, extra: list[str] | None = None) -> list[str]:
-    """A KAPUNAK atadott gyűrű: a kiosztott forma sajat kerete kimarad belole.
+    """A KAPUNAK atadott gyűrű: a kiosztott forma sajat ujjlenyomata kimarad belole.
 
     Kulon fuggveny es nem egy sor a hivo oldalon, mert ez a szabaly a ket
-    mechanizmus kozotti szerzodes (`shape_frame` docstring), es igy tesztelheto
-    onmagaban. Ures `own` eseten semmi nem esik ki: ures ujjlenyomat sosem kerul
-    a gyűrűbe.
+    mechanizmus kozotti szerzodes (`shape_fingerprint` docstring), es igy
+    tesztelheto onmagaban. Ures `own` eseten semmi nem esik ki: ures ujjlenyomat
+    sosem kerul a gyűrűbe.
 
     `extra`: tovabbi bejegyzesek (pl. a szerzonkenti gyűrű) — ld. `move_ring_for`.
     """
-    own = shape_frame(opening_key)
+    own = shape_fingerprint(opening_key)
     combined = list(_recent_opening_texts) + list(extra or ())
     return [fp for fp in combined if fp != own]
 

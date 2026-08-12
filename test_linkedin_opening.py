@@ -596,6 +596,80 @@ check("N7 a szerzonkenti gyűrű ugyanabba a szamolasba szamit bele",
       str(eng.move_ring_for("business_impact", extra=[C_FRAME])))
 eng.reset_opening_state()
 
+
+# --- P) A KIOSZTOTT FORMA SAJAT UJJLENYOMATA IS VEDETT (v26) ------------------
+# A MERT ESET (2026-08-11-i koteg): a rotacio kiosztotta a `pattern` formát, a
+# modell BETARTOTTA ("One pattern I've noticed..."), es a kapu EPPEN EZERT
+# utasitotta el — mert a 'one pattern i' mar a gyűrűben volt egy korabbi, MAS
+# formát kapott kommentbol. A kod a sajat utasitasa kovetesert buntetett.
+# A `shape_frame` csak a CSALAD-ujjlenyomatot vedte (8 formabol 1-et); a lexikai
+# ujjlenyomatokra a mar KIMONDOTT szerzodes („az utasitas erosebb, mint a
+# visszhang-tilalom") nem volt kiterjesztve.
+P_EXPECTED = {
+    "own_practice": "i ve found", "encountered": "i ve run",
+    "stood_out": "one thing that", "strikes": "frame:notable",
+    "learned": "we ve learned", "pattern": "one pattern i",
+    "condition": "once the model",
+}
+check("P1 minden formanak van elvart ujjlenyomata (a `straight` kivetelevel)",
+      all(eng.shape_fingerprint(k) == v for k, v in P_EXPECTED.items()),
+      str({k: eng.shape_fingerprint(k) for k in OPENING_SHAPES}))
+# A `straight` "peldaja" LEIRAS, nem mondat — nincs kanonikus ujjlenyomata. Ez a
+# gyűrűben artalmatlan volt, a MERESBEN viszont felrevezetett (0/6 "betartas",
+# holott a betartas eppen a keretezes HIANYA).
+check("P2 a `straight`-nek NINCS kanonikus ujjlenyomata (a peldaja leiras)",
+      eng.shape_fingerprint("straight") == ""
+      and "straight" in eng._SHAPES_WITHOUT_CANONICAL_FP)
+check("P3 minden forma le van fedve (uj forma ne csusszon be csendben)",
+      set(P_EXPECTED) | eng._SHAPES_WITHOUT_CANONICAL_FP == set(OPENING_SHAPES),
+      str(set(OPENING_SHAPES) - set(P_EXPECTED) - eng._SHAPES_WITHOUT_CANONICAL_FP))
+
+# A MERT FORGATOKONYV ujrajatszva.
+eng.reset_opening_state()
+eng._recent_opening_texts.append("one pattern i")
+eng._recent_opening_texts.append("frame:notable")
+check("P4 a MERT eset: kiosztott `pattern` -> a sajat ujjlenyomata KIESIK",
+      "one pattern i" not in eng.echo_ring_for("pattern"),
+      str(eng.echo_ring_for("pattern")))
+check("P5 IDEGEN ujjlenyomat viszont BENN marad (a visszhang tovabbra is sertes)",
+      eng.echo_ring_for("pattern") == ["frame:notable"],
+      str(eng.echo_ring_for("pattern")))
+check("P6 mas forma eseten a 'one pattern i' BENN marad",
+      "one pattern i" in eng.echo_ring_for("own_practice"),
+      str(eng.echo_ring_for("own_practice")))
+check("P7 a `strikes` csalad-vedelme VALTOZATLAN (nincs regresszio)",
+      "frame:notable" not in eng.echo_ring_for("strikes")
+      and "one pattern i" in eng.echo_ring_for("strikes"),
+      str(eng.echo_ring_for("strikes")))
+check("P8 ures kiosztas -> a gyűrű valtozatlan",
+      eng.echo_ring_for("") == ["one pattern i", "frame:notable"],
+      str(eng.echo_ring_for("")))
+check("P9 a szerzonkenti gyűrűben levo sajat ujjlenyomat is kiesik",
+      "i ve found" not in eng.echo_ring_for("own_practice", extra=["i ve found"]),
+      str(eng.echo_ring_for("own_practice", extra=["i ve found"])))
+
+# VEGPONTTOL VEGPONTIG: a kapu ne adjon serteest arra, amit maga kert.
+_P_POST = "How do you keep shared parameters aligned across linked Revit models?"
+_P_OBEYED = ("One pattern I've noticed is that the shared parameter GUID travels with "
+             "the definition file rather than the model, so once someone rebuilds that "
+             "file the schedule mapping quietly detaches and nothing warns anyone until "
+             "a schedule stops matching weeks later on site. What did that look like "
+             "when it first bit you?")
+check("P10 a kapu NEM ad serteest a KIOSZTOTT forma betartasara",
+      not [i for i in check_quality(_P_OBEYED, _P_POST, intent="engineering_problem",
+                                    discourse_level="technical",
+                                    recent_openings=eng.echo_ring_for("pattern"))
+           if "ismetlodo nyitas" in i],
+      str(check_quality(_P_OBEYED, _P_POST, intent="engineering_problem",
+                        discourse_level="technical",
+                        recent_openings=eng.echo_ring_for("pattern"))))
+check("P11 ugyanaz a komment MAS kiosztas mellett VISZONT sertes (a kapu el)",
+      [i for i in check_quality(_P_OBEYED, _P_POST, intent="engineering_problem",
+                                discourse_level="technical",
+                                recent_openings=eng.echo_ring_for("own_practice"))
+       if "ismetlodo nyitas" in i])
+eng.reset_opening_state()
+
 check("L12 config default: bekapcsolva", eng.content_echo_gate_enabled({}) is True)
 check("L13 'off' -> kikapcsolva",
       eng.content_echo_gate_enabled({"linkedin": {"content_echo_gate": "off"}}) is False)
