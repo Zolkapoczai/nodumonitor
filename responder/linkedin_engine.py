@@ -147,7 +147,7 @@ from google.genai import types
 
 from env_secrets import get_secret
 
-ENGINE_VERSION = "linkedin-tle-v22"
+ENGINE_VERSION = "linkedin-tle-v23"
 
 # --- Stage 4: strategiak -----------------------------------------------------
 # Pontosan EGY strategia valasztodik kommentenkent. A `directive` a compose-
@@ -1653,6 +1653,7 @@ def reset_opening_state() -> None:
     _recent_opening_texts.clear()
     _recent_content_moves.clear()
     _recent_condition_families.clear()
+    _recent_insight_families.clear()
     _recent_strategies.clear()
     # Szerzonkenti gyűrűk (v21) — ugyanaz a "mindent nullaz" elv.
     _author_strategies.clear()
@@ -1849,6 +1850,102 @@ def remember_author_content_move(key: str, comment: str) -> None:
     move = content_move(comment)
     if move:
         _author_content_moves[key].append(move)
+
+
+# --- A GONDOLAT MONOKULTURAJA A FORRASNAL (2026-08-11, engine v23) -----------
+#
+# A MERES, ami ezt kikenyszeritette: a naploban 13 kereskedelmi keretű kommentbol
+# TIZENKETTONEL mar az `insight` tartalmazta a keret szavait (contracts,
+# incentive, liability, compensated) — vagyis a dontes a REASON lepesben mar
+# megszuletett, es a COMPOSE csak prozába ontotte. Ez megmagyarazza, miert
+# talalta a v14-es meres, hogy a kimeneti kapu „detektal, de nem gyogyit": minden
+# ujrairo kor UGYANABBOL a kereskedelmi insightbol vezet le kereskedelmi prozat.
+# Egy kimeneti kapu itt elvileg sem tud gyogyitani.
+#
+# MIERT AZ `insight` ES NEM A `thesis_condition`: a `condition_family` gyűrű mar
+# orzi a feltetelt, de ket okbol nem eleg. (a) A mert keret az `insight`-ba szall
+# be, amire EDDIG SEMMILYEN vedelem nem volt. (b) A feltetel-gyűrű csak akkor
+# bővul, ha a kihivas-szenzor ELSULT — merve: 13 kommentbol HATNAL nem a szenzor,
+# hanem a pontszam valasztotta a strategiat, tehat ott a feltetel-ellenorzes le
+# sem futott. Az `insight` viszont MINDEN uton keletkezik.
+#
+# MIERT NEM ONERTEKELES: a modell nem a sajat munkajat osztalyozza (azt a projekt
+# joggal vezette ki az Authenticity-rubrikaval). TENYALLAPOTOT kap, amit magatol
+# nem tudhat: hogy a legutobbi kommentek melyik keretben zartak. Ugyanaz a
+# szerzodes, mint a kiosztott nyitas-formanal es a hossz-savnal — a kod dont, a
+# modell azt kapja meg, amit tudnia kell.
+#
+# MIERT A USER-UZENETBEN es nem a system-promptban: a system-prompt hivasok kozott
+# AZONOS (gyorsitotarazhato), a gyűrű-allapot pedig hivasonkent valtozik. Ures
+# gyűrű eseten a blokk el sem kerul bele, tehat a REASON-hivas bajtra a v22-es.
+#
+# SZANDEKOS SZUKITES: itt egyelore CSAK globalis gyűrű van, szerzonkenti par nincs
+# (szemben a v21-es strategia/nyitas/mozdulat harmassal). A projekt normaja szerint
+# eloszor MERNI kell: ha 10-15 sor utan a globalis steer nem nyitja szet a
+# keret-eloszlast, akkor a szerzonkenti par sem fog — ha viszont igen, akkor az a
+# kovetkezo lepes, nem elore beepitett komplexitas.
+_MOVE_LABELS = {
+    "move:commercial_frame": "the commercial/contractual angle (contracts, "
+                             "incentives, fees, liability, procurement)",
+    "move:tool_interop_frame": "the tool-interoperability angle (a shared CDE, "
+                               "BIM execution plan, coordinate systems, "
+                               "multiple authoring platforms)",
+}
+
+_recent_insight_families: deque = deque(maxlen=_OPENING_RING_SIZE)
+
+
+def insight_family(insight: str) -> str:
+    """Az `insight` keretenek csaladja, vagy "" ha egyik ismert csaladba sem esik.
+
+    A `condition_family`-t hasznalja, mert a BEMENET ALAKJA ugyanaz: egy-ket
+    tagmondat, ahol mar az ELSO keret-terminus a lenyeg (ezert 1 talalat a kuszob,
+    nem 2, mint a 100+ szavas kommentnel). Egy kulon, azonos torzsű fuggveny csak
+    drift-hazard lenne.
+    """
+    return condition_family(insight)
+
+
+def remember_insight_family(insight: str) -> None:
+    """A MEGVALOSULT insight csaladja a gyűrűbe — csak sikeres komment utan."""
+    family = insight_family(insight)
+    if family:
+        _recent_insight_families.append(family)
+
+
+def insight_steer_block(recent: list[str] | None) -> str:
+    """A REASON user-uzenethez fűzott elterito blokk, vagy "" ha nincs mit kerulni.
+
+    Ures/None gyűrű eseten SZANDEKOSAN ures stringet ad: igy a hivas bajtra a
+    korabbi, es a mechanizmus tiszta A/B-kent merheto.
+    """
+    seen = [f for f in dict.fromkeys(recent or ()) if f in _MOVE_LABELS]
+    if not seen:
+        return ""
+    lines = "\n".join(f"  - {_MOVE_LABELS[f]}" for f in seen)
+    return (
+        "\n\nFRAMES ALREADY USED BY THE LAST FEW COMMENTS IN THIS STREAM:\n"
+        f"{lines}\n"
+        "These are not wrong, and this post may genuinely invite one of them — but "
+        "they have just been used, and a reader who sees several of your comments "
+        "in a row would hear one voice. For `insight` and `thesis_condition`, build "
+        "on a DIFFERENT kind of fact this time: the artefact, the model element, the "
+        "project phase, the discipline handover, the software behaviour, the person "
+        "who ends up doing the work. Only fall back on a frame listed above if the "
+        "post leaves you no honest alternative."
+    )
+
+
+def insight_frame_steer_enabled(config: dict) -> bool:
+    """`linkedin.insight_frame_steer`: on (kod-default) | off. YAML-boolean (§4/17).
+
+    Kikapcsolva a REASON-hivas BAJTRA a v22-es, tehat a steer A/B-zheto ugyanezen
+    a kodon — mint az `intent_layer`-nel es a `length_scaling`-nal.
+    """
+    raw = (config.get("linkedin", {}) or {}).get("insight_frame_steer", "on")
+    if isinstance(raw, bool):
+        return raw
+    return str(raw).strip().lower() not in ("off", "false", "0", "no", "none")
 
 
 def content_echo_gate_enabled(config: dict) -> bool:
@@ -3403,10 +3500,19 @@ def _generate_comment(config: dict, post_text: str, author_name: str = "",
         print(f"[linkedin-tle] a kep NEM megy el ({why})")
 
     # --- Stage 1-5: reasoning (a kep CSAK ide) ---
+    # v23: a GONDOLAT keretenek eltentese MAR ITT, nem a kimeneten. A merés (13-bol
+    # 12) szerint a kereskedelmi keret mar az `insight`-ban benne volt, tehat a
+    # compose-oldali kapu elvileg sem tud gyogyitani. Ures gyűrű eseten a blokk
+    # ures string, tehat a hivas bajtra a v22-es.
+    steer = (insight_steer_block(list(_recent_insight_families))
+             if insight_frame_steer_enabled(config) else "")
+    if steer:
+        print(f"[linkedin-tle] insight-elterites: kerulendo keretek="
+              f"{sorted(set(_recent_insight_families))}")
     try:
         reasoning = _call_json(
             client, model, reason_prompt_for(use_image),
-            f"{author_line}POST:\n{post_text[:2000]}",
+            f"{author_line}POST:\n{post_text[:2000]}{steer}",
             # 900 -> 1200: a semaba a Conversation Intent es Conversation Response
             # Layer mezojei kerultek (intent, response strategy, szint, gravity,
             # szerep, valaszforma, human temperature). Az enumok nehany token, a
@@ -3679,6 +3785,10 @@ def _generate_comment(config: dict, post_text: str, author_name: str = "",
     # menni, tehat a kovetkezonek tudnia kell rola.
     remember_opening_text(comment)
     remember_content_move(comment)
+    # A MEGVALOSULT insight kerete (v23). A gondolat akkor is elhasznalta a keretet,
+    # ha a kesz komment szoveges mozdulata vegul nem erte el a ket talalatot — a
+    # kovetkezo REASON-hivasnak errol tudnia kell, kulonben ugyanoda fut.
+    remember_insight_family(reasoning.get("insight", ""))
     # A VEGSO strategia (a kihivas-szenzor felulirasa utan) — az ment ki, tehat azt
     # kell a kovetkezo dontesbol kizarni.
     remember_strategy(reasoning["strategy"])
@@ -3796,6 +3906,13 @@ def _generate_comment(config: dict, post_text: str, author_name: str = "",
         # latnank, es a monokulturat ujra kezzel kellene eszrevenni.
         "condition_family": condition_family(reasoning.get("thesis_condition", "")),
         "condition_echo_recent": list(_recent_condition_families),
+        # A GONDOLAT kerete a FORRASNAL (v23). A mert diagnozis: 13 kereskedelmi
+        # kommentbol 12-nel mar az `insight` tartalmazta a keretet, tehat ez az a
+        # mezo, amin a monokultura eldol. `insight_steered`: kapott-e a hivas
+        # elterito blokkot — enelkul nem lehetne A/B-t szamolni a naplobol.
+        "insight_family": insight_family(reasoning.get("insight", "")),
+        "insight_echo_recent": list(_recent_insight_families),
+        "insight_steered": bool(steer),
         "strategy_before_override": strategy_before_override,
         "strategy_fit": reasoning.get("strategy_fit", {}),   # auditalhato dontes
         "explicit_tool_request": bool(reasoning.get("explicit_tool_request")),

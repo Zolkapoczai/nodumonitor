@@ -79,7 +79,7 @@ check("A7 a sema enum == a taxonomia kulcsai",
       and props["expected_responder_role"]["enum"] == list(RESPONDER_ROLES)
       and props["response_mode"]["enum"] == list(RESPONSE_MODES)
       and props["human_temperature"]["enum"] == HUMAN_TEMPERATURES)
-check("A8 az engine-verzio bumpolva", ENGINE_VERSION.endswith("v22"), ENGINE_VERSION)
+check("A8 az engine-verzio bumpolva", ENGINE_VERSION.endswith("v23"), ENGINE_VERSION)
 check("A9 a legacy post_type mezo MEGMARADT (dashboard-szerzodes)",
       "post_type" in props and "post_type" in req)
 check("A10 personal_experience intent letezik (human temperature vedelme)",
@@ -526,7 +526,7 @@ check("J9 a DASHBOARD-SZERZODES all: mind a 8 legacy mezo megvan",
 check("J10 a kapu atengedte a kommentet (nincs uzleti absztrakcio benne)",
       res_on.get("quality_issues") == [] and res_on.get("rewrites") == 0,
       str(res_on.get("quality_issues")))
-check("J11 az engine-verzio a valaszban v22", res_on.get("engine") == "linkedin-tle-v22")
+check("J11 az engine-verzio a valaszban v23", res_on.get("engine") == "linkedin-tle-v23")
 check("J12 KIKAPCSOLVA: ugyanezen a bemeneten a v1-es dontes (business_impact)",
       res_off.get("strategy") == "business_impact" and res_off.get("intent_layer") is False,
       str(res_off.get("strategy")))
@@ -901,6 +901,78 @@ ok, why = challenge_override(ch(thesis_condition=""), CHALLENGE_POST,
                              recent_strategies=["constructive_challenge"])
 check("K27 ha NINCS teny, az indok a tenyre hivatkozik, nem a rotaciora",
       not ok and "nem talalt kimondatlan feltetelt" in why, why)
+
+
+# --- O) A GONDOLAT KERETE A FORRASNAL (2026-08-11, engine v23) ---------------
+# A MERES, ami ezt kikenyszeritette: a naploban 13 kereskedelmi keretű kommentbol
+# TIZENKETTONEL mar az `insight` tartalmazta a keret szavait, tehat a dontes a
+# REASON lepesben megszuletett, es a compose-oldali kapu elvileg sem gyogyithatta.
+# 13-bol HATNAL nem is a szenzor valasztotta a strategiat, tehat a meglevo
+# feltetel-gyűrű ott le sem futott.
+from responder.linkedin_engine import (  # noqa: E402
+    _MOVE_LABELS, _recent_insight_families, insight_family,
+    insight_steer_block, insight_frame_steer_enabled, remember_insight_family,
+    reason_prompt_for, reset_opening_state,
+)
+
+# VALODI insight a naplobol (2026-08-11), nem kitalalt fixture.
+O_COMMERCIAL = ("The 'tax' of rebuilding models by hand is often a direct "
+                "consequence of project contracts that specify deliverables as "
+                "drawings or PDFs, rather than models with embedded data.")
+O_NEUTRAL = ("The underlying issue with Revit stairs is the rigid separation "
+             "between sketch-based geometry and system family intelligence.")
+
+check("O1 a MERT kereskedelmi insight csaladba esik",
+      insight_family(O_COMMERCIAL) == "move:commercial_frame",
+      insight_family(O_COMMERCIAL))
+check("O2 a MERT technikai insight NEM esik csaladba (nincs hamis pozitiv)",
+      insight_family(O_NEUTRAL) == "", insight_family(O_NEUTRAL))
+
+# A LEGFONTOSABB GARANCIA: ures gyűrű -> ures blokk -> a REASON-hivas BAJTRA a
+# korabbi. Enelkul a mechanizmus nem lenne tiszta A/B-kent merheto.
+check("O3 ures gyűrű -> URES blokk (a hivas bajtra a v22-es)",
+      insight_steer_block([]) == "" and insight_steer_block(None) == "")
+
+_blk = insight_steer_block(["move:commercial_frame"])
+check("O4 a blokk EMBERI leirast ad, nem a belso slugot",
+      "contracts" in _blk and "move:commercial_frame" not in _blk, _blk[:70])
+check("O5 a blokk NEM tilt, csak elterit (a poszt joga eldontheti)",
+      "not wrong" in _blk and "no honest alternative" in _blk)
+check("O6 ket ugyanolyan csalad -> EGY felsorolas-pont (dedup)",
+      insight_steer_block(["move:commercial_frame"] * 3).count("\n  - ") == 1)
+check("O7 ismeretlen csalad-kulcs csendben kimarad (nincs ures pont, nincs hiba)",
+      insight_steer_block(["move:nincs_ilyen"]) == ""
+      and insight_steer_block(["move:nincs_ilyen", "move:commercial_frame"]).count("\n  - ") == 1)
+check("O8 mindket ismert csalad kap emberi cimket",
+      set(_MOVE_LABELS) == {"move:commercial_frame", "move:tool_interop_frame"},
+      str(sorted(_MOVE_LABELS)))
+
+# A steer a USER-uzenetbe megy, NEM a system-promptba: kulonben minden hivas mas
+# system-promptot kapna, es a prompt-gyorsitotarazas elveszne.
+check("O9 a system-prompt valtozatlan (a steer nem oda kerul)",
+      "FRAMES ALREADY USED" not in reason_prompt_for(False)
+      and "FRAMES ALREADY USED" not in reason_prompt_for(True))
+
+reset_opening_state()
+check("O10 a gyűrű ures indulaskor", not list(_recent_insight_families))
+remember_insight_family(O_COMMERCIAL)
+check("O11 a MEGVALOSULT keret bekerul a gyűrűbe",
+      list(_recent_insight_families) == ["move:commercial_frame"],
+      str(list(_recent_insight_families)))
+remember_insight_family(O_NEUTRAL)
+check("O12 a csaladba nem eso insight NEM szennyezi a gyűrűt",
+      list(_recent_insight_families) == ["move:commercial_frame"],
+      str(list(_recent_insight_families)))
+check("O13 a gyűrűbol felepul a kovetkezo hivas eltentese",
+      "contracts" in insight_steer_block(list(_recent_insight_families)))
+reset_opening_state()
+check("O14 reset_opening_state az insight-gyűrűt is nullazza",
+      not list(_recent_insight_families))
+
+check("O15 kill switch: on a kod-default, 'off' es False is kikapcsol",
+      insight_frame_steer_enabled({}) is True
+      and insight_frame_steer_enabled({"linkedin": {"insight_frame_steer": "off"}}) is False
+      and insight_frame_steer_enabled({"linkedin": {"insight_frame_steer": False}}) is False)
 
 print()
 bad = 0

@@ -94,6 +94,10 @@ _COPIED_FIELDS = (
     "strategy_candidates", "strategy_recent", "strategy_decision_reason",
     # Szerzonkenti emlekezet (engine v21) — ld. linkedin_engine.author_key.
     "author_key", "author_strategy_recent",
+    # A gondolat kerete a FORRASNAL (engine v23). A monokultura merve 13-bol
+    # 12 esetben mar az `insight`-ban eldolt, a compose elott — ez a harom mezo
+    # teszi merhetove, hogy az elterites hatott-e (`insight_steered` az A/B-kulcs).
+    "insight_family", "insight_echo_recent", "insight_steered",
     "conversation_intent", "discourse_level",
     "expected_responder_role", "response_mode", "human_temperature",
     "topic", "post_type", "technical_depth", "topic_gravity", "intent_layer",

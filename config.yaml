@@ -795,6 +795,37 @@ linkedin:
   # a mérés proxy, ezért inkább menjen ki megjelölve, mint hogy ne legyen komment.
   # IDÉZŐJEL KELL: a YAML az on/off szavakat booleanná alakítja (HANDOFF §4/17).
   concreteness_gate: 'on'
+  # insight_frame_steer — A GONDOLAT KERETE A FORRÁSNÁL (2026-08-11, engine v23).
+  #   'on'  — (ALAPÉRTELMEZÉS) a REASON-hívás user-üzenete megkapja, mely kereteket
+  #           használták a legutóbbi kommentek, és hogy más tényre építsen.
+  #   'off' — bájtra a v22-es viselkedés: a hívás nem kap eltérítő blokkot.
+  # A MÉRÉS, ami ezt kikényszerítette (13 kereskedelmi keretű komment a naplóban):
+  #   • TIZENKETTŐNÉL már az `insight` tartalmazta a keret szavait (contracts,
+  #     incentive, liability, compensated) — vagyis a döntés a REASON lépésben
+  #     megszületett, a COMPOSE csak prózába öntötte;
+  #   • a 13 négy KÜLÖNBÖZŐ stratégián át futott (8 constructive_challenge,
+  #     2 field_experience, 2 business_impact, 1 missing_perspective), tehát a
+  #     stratégia-rotáció definíció szerint nem tudja megfogni;
+  #   • HATNÁL nem a kihívás-szenzor, hanem a pontszám választotta a stratégiát,
+  #     tehát a `condition_family` gyűrű ott le sem futott.
+  # EZ MAGYARÁZZA a v14-es verdiktet („a kapu detektál, de nem gyógyít"): minden
+  # újraíró kör UGYANABBÓL a kereskedelmi insightból vezet le kereskedelmi prózát.
+  # Kimeneti kapu itt elvileg sem tud gyógyítani — ezért marad a `content_echo_gate`
+  # 'off', és ezért a forrásnál avatkozunk be.
+  # NEM ÖNÉRTÉKELÉS (amit a projekt az Authenticity-rubrikával joggal vezetett ki):
+  # a modell nem a saját munkáját osztályozza, hanem TÉNYÁLLAPOTOT kap, amit magától
+  # nem tudhat — ugyanaz a szerződés, mint a kiosztott nyitás-formánál és a
+  # hossz-sávnál. Nulla extra LLM-hívás, csak prompt-szöveg.
+  # NEM TILALOM: a blokk kimondja, hogy a keret nem hibás, és ha a poszt nem hagy
+  # becsületes alternatívát, a modell visszatérhet rá. Egy tiltás azt kényszerítené
+  # ki, hogy a modell elhallgassa a poszt valódi lényegét.
+  # MÉRHETŐ: `insight_family`, `insight_echo_recent`, `insight_steered` a naplóban —
+  # az utolsó az A/B-kulcs. ÚJRAMÉRÉS KELL: 10-15 sor után ellenőrizni, hogy a
+  # keret-eloszlás valóban szétnyílt-e, és nem egy HARMADIK attraktor jött-e a
+  # helyére (ez a v20-as tanulság: a detektor csak annyi családot lát, amennyit
+  # a `_CONTENT_MOVES` nevesít).
+  # IDÉZŐJEL KELL: a YAML az on/off szavakat booleanná alakítja (HANDOFF §4/17).
+  insight_frame_steer: 'on'
   # strategy_candidates — a nyers pontszám SZŰRŐ, nem rangsor (2026-08-11, v16).
   #   'on'  — (ALAPÉRTELMEZÉS) jelöltek = akik elérik a `STRATEGY_CANDIDATE_FLOOR`-t
   #           (7) és nincsenek vetózva; a legutóbbi kettő kiesik (frissesség); a
