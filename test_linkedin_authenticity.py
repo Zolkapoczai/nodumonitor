@@ -426,6 +426,96 @@ check("H8 az AI-jelek es a hamis kep-hivatkozas BLOKKOL",
           "a komment a kepre hivatkozik (kep-hivatkozas)",
           "markaemlites, holott nincs engedelyezve"])) == 6)
 
+
+# --- I) DICSERO NYITAS, SZERKEZETI MINTA (2026-08-11, engine v24) -------------
+# A MERT ESET (naplo, v23-as koteg): „Your sketch beautifully illustrates how
+# facade alternatives balance aesthetics…" — `rewrites: 0`, `quality_issues: []`,
+# vagyis MINDEN kapun atment, holott a compose-prompt kimondja: „Never open with
+# praise". A `_FORBIDDEN_PATTERNS` csak nevesitett frazisokat ismert.
+from responder.linkedin_engine import (  # noqa: E402
+    _PRAISE_OPENING_PATTERNS, _PRAISE_ISSUE_PREFIX, _REPHRASABLE_PREFIXES,
+    only_rephrasable,
+)
+
+I_POST = ("The facade influences daylight, ventilation, thermal comfort and energy "
+          "performance, and each alternative suits a different climate and function.")
+_TAIL = (" One aspect that becomes clear later is the maintenance and end-of-life "
+         "implication, where the fixing detail decides whether a single panel can be "
+         "swapped without disturbing the ones beside it on a live facade.")
+
+# A MERT komment nyitasa, szo szerint a naplobol.
+I_MEASURED = ("Your sketch beautifully illustrates how facade alternatives balance "
+              "aesthetics with daylighting and thermal performance." + _TAIL)
+_i_iss = check_quality(I_MEASURED, I_POST, False, "professional_opinion", "technical")
+_i_hit = [i for i in _i_iss if i.startswith(_PRAISE_ISSUE_PREFIX)]
+check("I1 a MERT dicsero nyitas elsul (eddig MINDEN kapun atment)",
+      bool(_i_hit), str(_i_iss))
+
+# SZERKEZETI, nem szotari: mas targy + mas hatarozo + mas ige is elesik, anelkul
+# hogy fel kellene sorolni oket.
+for _n, _txt in (("I2 mas targy/hatarozo/ige is elesik (a minta ALAK, nem szotar)",
+                  "This diagram elegantly captures the trade-off." + _TAIL),
+                 ("I3 a „the ... nicely summarises” alak is elesik",
+                  "The post nicely summarises the whole debate." + _TAIL)):
+    check(_n, any(i.startswith(_PRAISE_ISSUE_PREFIX) for i in
+                  check_quality(_txt, I_POST, False, "professional_opinion", "technical")))
+
+# A MERT HAMIS POZITIV, aminek at KELL mennie: nem a szerzot dicseri, hanem egy
+# Revit-funkciorol tesz szakmai engedmenyt. Egy puszta `excellent`-re epulo
+# szo-alapu szabaly ezt elbuktatta volna.
+I_CONCESSION = ("While Copy/Monitor is excellent for establishing the initial "
+                "coordination, a common challenge emerges when the linked model is "
+                "updated and the monitored elements silently drop their association."
+                + _TAIL)
+check("I4 a szakmai engedmeny („X is excellent for…”) ATMEGY (mert hamis pozitiv)",
+      not [i for i in check_quality(I_CONCESSION, I_POST, False,
+                                    "professional_opinion", "technical")
+           if i.startswith(_PRAISE_ISSUE_PREFIX)])
+
+# Kozepen allo azonos alak nem nyitasi hiba — a szabaly a NYITASRA szol.
+# A NYITAS-ABLAK KET MONDAT (`_opening_window`), szandekosan: a projekt azert
+# szelesitette ki, mert a modell a masodik mondatba tolta a kifogasolt fordulatot,
+# hogy kicsusszon. Ugyanez a kijatszas a dicseretre is all, ezert a proba csak a
+# HARMADIK mondattol tekintheto "kozepnek". (Ez a teszt elso valtozata maga esett
+# ebbe a csapdaba: a masodik mondatba tett dicseretet joggal fogta meg a kapu.)
+I_MIDDLE = ("The fixing detail decides whether a panel can be swapped alone, and that "
+            "shows up only once a unit fails on a live facade. Most schedules leave "
+            "that implicit, which is why nobody prices it. Your drawing nicely shows "
+            "the offset that makes the difference.")
+check("I5 a HARMADIK mondattol allo azonos alak nem sertes (a nyitas-ablak 2 mondat)",
+      not [i for i in check_quality(I_MIDDLE, I_POST, False,
+                                    "professional_opinion", "technical")
+           if i.startswith(_PRAISE_ISSUE_PREFIX)])
+
+check("I6 a rovid lelkesedes-nyitasok is elesnek",
+      all(any(i.startswith(_PRAISE_ISSUE_PREFIX) for i in
+              check_quality(o + _TAIL, I_POST, False, "professional_opinion", "technical"))
+          for o in ("Love this take on facades.", "Well put on the facade question.")))
+
+# OSZTALYBA SOROLAS: KIADHATATLAN, DE szocserevel javithato -> jar ra a 3. kor.
+# Ugyanaz a par, mint a `tanacsadoi nyitas`-nal. A ketto nelkul a motor egy
+# trivialisan javithato nyitason egyetlen ujrairas utan kemeny bukasra futna.
+check("I7 a dicsero nyitas KIADHATATLAN (blokkol)",
+      blocking_issues([f"{_PRAISE_ISSUE_PREFIX} (a szerzo munkajanak megdicserese)"]) != []
+      and _PRAISE_ISSUE_PREFIX in _BLOCKING_PREFIXES)
+check("I8 ES jar ra a harmadik kor (szocserevel javithato)",
+      only_rephrasable([f"{_PRAISE_ISSUE_PREFIX} (a szerzo munkajanak megdicserese)"])
+      and _PRAISE_ISSUE_PREFIX in _REPHRASABLE_PREFIXES)
+
+# SAJAT prefix: nem a `tiltott fordulat`-ot hasznaljuk ujra, kulonben a ket halmaz
+# MELLEKHATASKENT szelesedett volna ki (az „as an ai" is beesik ala).
+check("I9 sajat prefix (a `tiltott fordulat` halmazai nem szelesedtek ki)",
+      _PRAISE_ISSUE_PREFIX != "tiltott fordulat"
+      and "tiltott fordulat" not in _REPHRASABLE_PREFIXES)
+check("I10 a bővitett dicseret-fonevek is elesnek (breakdown/summary/reminder)",
+      all(any(i.startswith("tiltott fordulat") for i in
+              check_quality(f"Great {n} on the facade question." + _TAIL, I_POST,
+                            False, "professional_opinion", "technical"))
+          for n in ("breakdown", "summary", "reminder", "example")))
+check("I11 mindharom dicseret-minta van es cimkezve",
+      len(_PRAISE_OPENING_PATTERNS) == 3
+      and all(lbl for _, lbl in _PRAISE_OPENING_PATTERNS))
+
 print()
 bad = 0
 for name, ok, detail in results:

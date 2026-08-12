@@ -147,7 +147,7 @@ from google.genai import types
 
 from env_secrets import get_secret
 
-ENGINE_VERSION = "linkedin-tle-v23"
+ENGINE_VERSION = "linkedin-tle-v24"
 
 # --- Stage 4: strategiak -----------------------------------------------------
 # Pontosan EGY strategia valasztodik kommentenkent. A `directive` a compose-
@@ -1399,7 +1399,12 @@ _COMPOSE_SCHEMA = {
 _FORBIDDEN_PATTERNS: list[tuple[str, str]] = [
     (r"\bi (?:completely|totally|fully) agree\b", "egyetertes-nyitas"),
     (r"\bcould ?n['’]?t agree more\b", "egyetertes-nyitas"),
-    (r"\b(?:great|excellent|fantastic|brilliant|insightful) (?:post|point|article|read|write-?up)\b", "dicseret"),
+    # A fonev-lista 2026-08-11-en bővult (breakdown/summary/reminder/example/
+    # framing/insight): ugyanaz a frazis-csalad, csak mas targgyal — a hiany itt
+    # ALULSZAMOL, ugyanugy, mint a `_CONTENT_MOVES` szotar-hianyanal.
+    (r"\b(?:great|excellent|fantastic|brilliant|insightful) "
+     r"(?:post|point|article|read|write-?up|breakdown|summary|reminder|example|"
+     r"framing|insight)\b", "dicseret"),
     (r"\bthanks? (?:for|you for) sharing\b", "koszonet-frazis"),
     (r"\bwell said\b", "dicseret"),
     (r"\binteresting (?:perspective|point|take|read)\b", "ures elismeres"),
@@ -1416,6 +1421,52 @@ _FORBIDDEN_PATTERNS: list[tuple[str, str]] = [
     (r"\berdekes (?:felvetes|meglatas)\b|\bérdekes (?:felvetés|meglátás)\b", "ures elismeres (HU)"),
     (r"\bpontosan (?:igy|így) van\b", "ures egyetertes (HU)"),
 ]
+
+# --- DICSERO NYITAS, SZERKEZETI MINTA (2026-08-11, engine v24) ---------------
+#
+# A MERT ESET: „Your sketch beautifully illustrates how facade alternatives
+# balance aesthetics with daylighting…" — `rewrites: 0`, `quality_issues: []`,
+# vagyis MINDEN kapun atment. A compose-prompt kimondja: „Never open with praise
+# or agreement", a `_FORBIDDEN_PATTERNS` viszont csak NEVESITETT frazisokat ismer
+# („Great post", „Thanks for sharing"), es ez az alak egyiket sem tartalmazza.
+# Ugyanaz a hibaosztaly, mint a 2026-08-10-i ragozas-hiany: a szotari lista csak
+# azt tiltja, amit valaki mar felvett ra.
+#
+# EZERT SZERKEZETI ES NEM SZOTARI: a mintat nem egy kifejezes adja, hanem egy
+# ALAK — [birtokos/hatarozo] + [a szerzo munkaja] + [dicsero hatarozo] +
+# [abrazolast jelento ige]. Igy a „Your diagram elegantly captures…" es a „This
+# post nicely summarises…" is elesik anelkul, hogy fel kellene sorolni oket.
+#
+# HAMIS POZITIV, AMIT A MERES MEGFOGOTT: a korpuszban van egy „While Copy/Monitor
+# is EXCELLENT for establishing the initial coordination, a common challenge…"
+# nyitas. Ez NEM dicseret, hanem szakmai engedmeny egy Revit-funkciorol — egy
+# puszta `excellent`-re epulő szo-alapu szabaly ezt elbuktatta volna. Ezert nincs
+# benne altalanos dicsero MELLEKNEV, csak a fenti ALAK; es ezert kellenek a
+# dicsero HATAROZOK (nem `accurately`/`clearly`, amik tenymegallapitast is
+# jelolhetnek).
+#
+# ES EZERT CSAK A NYITASRA (`_opening_window`, elso ket mondat): a szabaly, amit
+# ervenyesit, kifejezetten a NYITASRA szol. Kozepen egy „the drawing nicely shows
+# the offset" mar tartalmi allitas lehet, nem hizelges.
+# FELTETEL NELKUL mer (nem `shaping_active`-hoz kotve), mert a dicsero nyitas
+# tilalma nem az intent-layer fuggvenye — az a motor alapszabalya.
+_PRAISE_OPENING_PATTERNS: list[tuple[str, str]] = [
+    (r"\b(?:your|this|the)\s+\w+(?:\s+\w+)?\s+"
+     r"(?:beautifully|perfectly|elegantly|brilliantly|nicely|wonderfully|"
+     r"superbly|masterfully|eloquently|powerfully|neatly)\s+"
+     r"(?:illustrat|captur|show|demonstrat|summari[sz]|convey|highlight|"
+     r"articulat|encapsulat|frame)\w*",
+     "a szerzo munkajanak megdicserese"),
+    (r"^\s*(?:i\s+)?(?:really\s+)?love (?:this|that|it)\b", "puszta lelkesedes"),
+    (r"^\s*(?:very\s+)?well (?:put|articulated|framed)\b", "ures elismeres"),
+]
+
+# SAJAT PREFIX, nem a `tiltott fordulat` — mert a ket halmazba valo tartozas
+# kulonbozik, es egy meglevo prefix ujrahasznalata MELLEKHATASKENT szelesitette
+# volna ki oket (a `tiltott fordulat` alá az „as an ai" is beesik).
+# A `tanacsadoi nyitas` a precedens: az is MINDKET halmazban van — kiadhatatlan,
+# de szocserevel javithato, tehat jar ra a harmadik kor.
+_PRAISE_ISSUE_PREFIX = "dicsero nyitas"
 
 # A benchmarkban ujra es ujra ezekkel a szerkezetekkel indult a komment. Nem
 # tartalmi hibak, de azonos nyitasok sorozata AI-ujjlenyomat. Csak mondat-eleji
@@ -2279,7 +2330,12 @@ MAX_COMPOSE_ATTEMPTS = 3
 # A cimke-prefixek, amiket egy ujrafogalmazas biztosan meg tud oldani: mind a HOGYAN
 # fogalmazunk, nem a MIT mondunk. A tobbi sertes (hossz, absztrakcio-szivargas,
 # kep-hivatkozas, poszt-atfedes) tartalmi valtozast kiván, arra nem jar plusz kor.
-_REPHRASABLE_PREFIXES = ("ismetlodo nyitas", "tanacsadoi nyitas", "tanacsadoi hang")
+# A `dicsero nyitas` (v24) ITT IS es a `_BLOCKING_PREFIXES`-ben IS szerepel —
+# ugyanaz a par, mint a `tanacsadoi nyitas`-nal: kiadhatatlan, DE puszta
+# szocserevel javithato, tehat jar ra a harmadik kor. A ketto nelkul a motor egy
+# trivialisan javithato nyitason egyetlen ujrairas utan kemeny bukasra futna.
+_REPHRASABLE_PREFIXES = ("ismetlodo nyitas", "tanacsadoi nyitas", "tanacsadoi hang",
+                         "dicsero nyitas")
 
 
 def only_rephrasable(issues: list[str]) -> bool:
@@ -2309,6 +2365,7 @@ def only_rephrasable(issues: list[str]) -> bool:
 # markaemlites viszont az.
 _BLOCKING_PREFIXES = (
     "tiltott fordulat",          # explicit tiltolista (egyetertes/dicseret)
+    "dicsero nyitas",            # v24: a szerkezeti dicseret-alak (`_PRAISE_OPENING_PATTERNS`)
     "tanacsadoi hang",           # a MERT eset: „We often see/found"
     "tanacsadoi nyitas",
     "marketing-klise",
@@ -2633,6 +2690,14 @@ def check_quality(comment: str, post_text: str, brand_allowed: bool = False,
     for pattern, label in _FORBIDDEN_PATTERNS:
         if re.search(pattern, low, re.IGNORECASE | re.MULTILINE):
             issues.append(f"tiltott fordulat ({label})")
+
+    # Dicsero nyitas: CSAK az elso ket mondatra, de FELTETEL NELKUL — ld.
+    # `_PRAISE_OPENING_PATTERNS`. A mert eset minden meglevo kapun atment.
+    praise_window = " ".join(_opening_window(text)).lower()
+    for pattern, label in _PRAISE_OPENING_PATTERNS:
+        if re.search(pattern, praise_window, re.IGNORECASE | re.MULTILINE):
+            issues.append(f"{_PRAISE_ISSUE_PREFIX} ({label})")
+            break
 
     # Marketing-klise: FELTETEL NELKUL mer, minden sikon es minden intenten —
     # ld. `_MARKETING_CLICHE_PATTERNS`. A mert eset (`management` sik) pont azt
