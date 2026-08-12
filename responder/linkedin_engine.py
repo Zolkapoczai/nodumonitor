@@ -147,7 +147,7 @@ from google.genai import types
 
 from env_secrets import get_secret
 
-ENGINE_VERSION = "linkedin-tle-v24"
+ENGINE_VERSION = "linkedin-tle-v25"
 
 # --- Stage 4: strategiak -----------------------------------------------------
 # Pontosan EGY strategia valasztodik kommentenkent. A `directive` a compose-
@@ -1314,12 +1314,23 @@ Only follow the discussion to commercial, organisational or strategic ground if
 the author has ALREADY taken it there.
 
 Experience layer: make the insight credible with observational framing — the
-equivalent of "In enterprise projects...", "One recurring pattern is...",
-"We often see...", "In multidisciplinary environments...".
+equivalent of "In enterprise projects...", "Once the model leaves the design
+team...", "On the projects where this held up...", "In multidisciplinary
+environments...".
 CRITICAL: those are English examples of the PATTERN. Write the framing in the
 post's own language, using natural native phrasing. Never drop an English phrase
 into a non-English comment — a half-translated sentence is the clearest sign of
 machine writing.
+
+THE ONE FRAMING THAT IS ALWAYS REJECTED, ANYWHERE IN THE COMMENT — not only in
+the opening: the consultant's plural-observer voice. "We often see", "We have
+frequently observed", "I often find", "We typically encounter" and every
+variant built from we/I + often/frequently/commonly/typically/usually/routinely
+/generally + see/find/observe/notice/encounter. This is not a style preference:
+a deterministic gate rejects it and the comment is thrown away. The move itself
+is fine — ground it in the SITUATION instead of in your own frequency of
+observation: "Once the schedule is rebuilt, the mapping detaches" rather than
+"We often see the mapping detach".
 Never invent personal stories, numbers, customer names or project details.
 
 YOU ARE A PEER, NOT A CONSULTANT.
@@ -1332,9 +1343,10 @@ explanation.
 OPENING. The gate rejects stock consultant openings, so open the way a
 practitioner actually would. Use one of these shapes, in the post's own language:
 {chr(10).join(f'  {OPENING_SHAPES[k]["example"]}' for k in _V4_OPENING_KEYS)}
-Never open with: "We often see", "We frequently observe", "One approach",
-"Best practice", "Organizations should", "Implementation requires",
-"Establishing...", "Ensuring...", "It is critical to".
+Never open with: "One approach", "Best practice", "Organizations should",
+"Implementation requires", "Establishing...", "Ensuring...", "It is critical to".
+(The we/I + often + see/find family is banned everywhere, not just here — see
+the experience-layer rule above.)
 
 ENDING (v21). Do not end with advice, a recommendation or a solution. Close in
 one of these two ways — pick whichever fits the strategy, do not force both:
@@ -3348,6 +3360,68 @@ def vendor_promotion_skip(config: dict, reasoning: dict,
     return True, f"vendor-hirdetes, igazolt idezet: {quote[:80]!r}"
 
 
+# --- JAVITO UTMUTATOK AZ UJRAIRO KORHOZ (2026-08-11, engine v25) -------------
+#
+# A MERT HIBA: az ujrairo kor a MAGYAR diagnosztikai cimket adta at nyersen
+# („- tanacsadoi hang (We often see/found)"). A modell ebbol csak a zarojeles
+# SZOKAPCSOLATOT erti, a szabalyt nem — ezert a naploban dokumentalt modon
+# „We often see" helyett „I often find"-ot irt: VALTOZATOT cserelt, nem
+# viselkedest. A cimke a TUNET egy peldanyat nevezi meg, nem a szabalyt.
+#
+# MIERT EZ A KETTO A LEGFONTOSABB: a korpuszon merve az elso kor elutasitasainak
+# 39%-a `ismetlodo nyitas`, 35%-a `tanacsadoi hang`, es a ket osztaly egyutt 53
+# extra LLM-hivast vitt el a ~75-bol. A tobbi bejegyzes ugyanezt a mintat
+# koveti, de kisebb tetel.
+#
+# A cimke VALTOZATLAN marad (arra tesztek es a telemetria illeszkedik) — az
+# utmutato utana fűzodik, a prompt nyelven (angol), mert utasitas, nem tartalom.
+_ISSUE_REPAIR_HINTS: tuple[tuple[str, str], ...] = (
+    ("tanacsadoi hang",
+     "Do NOT report how often you or your firm observe something — that whole "
+     "family (we/I + often/frequently/typically + see/find/observe/encounter) is "
+     "rejected wherever it appears, and swapping 'we' for 'I' changes nothing. "
+     "Ground the same point in the SITUATION: 'Once the schedule is rebuilt, the "
+     "mapping detaches' instead of 'We often see the mapping detach'."),
+    ("tanacsadoi nyitas",
+     "Open on the substance itself, not on a consultant framing."),
+    ("dicsero nyitas",
+     "Do not compliment the author or their work. Drop the praise clause entirely "
+     "and start from the substantive point."),
+    ("ismetlodo nyitas",
+     "Your own recent comments already began this way. Change the rhetorical MOVE, "
+     "not just the words — a different first move altogether, not a synonym of the "
+     "same one."),
+    ("ismetlodo gondolat",
+     "Your recent comments already made this kind of point. Build on a different "
+     "KIND of fact: the artefact, the project phase, the discipline handover, the "
+     "software behaviour, or the person who ends up doing the work."),
+    ("homalyos",
+     "Name something concrete: a specific artefact, model element, project phase, "
+     "discipline or software behaviour. Replace the abstract nouns and the hedges "
+     "with the instance they stand for."),
+    ("AI-ujjlenyomat",
+     "Replace the enterprise-register words with the concrete thing they stand for."),
+    ("marketing-klise",
+     "Remove the marketing phrasing; state the plain engineering fact instead."),
+    ("tiltott fordulat",
+     "Remove the agreement or praise entirely — begin with your own contribution."),
+    ("a komment a kepre hivatkozik",
+     "Remove every reference to an image; the comment must stand on the post's text."),
+    ("tul rovid",
+     "Add one more concrete observation — do not pad with generalities."),
+    ("tul hosszu",
+     "Cut the least concrete sentence; keep the named specifics."),
+)
+
+
+def _repair_hint(issue: str) -> str:
+    """A sertes melle fűzott, cselekvesre forditott utmutato, vagy "" ha nincs."""
+    for prefix, hint in _ISSUE_REPAIR_HINTS:
+        if (issue or "").startswith(prefix):
+            return f"  -> {hint}"
+    return ""
+
+
 def _compose_user_msg(post_text: str, author_line: str, reasoning: dict,
                       brand_allowed: bool, issues: list[str] | None = None,
                       intent_layer: bool = True, opening: str = "",
@@ -3482,7 +3556,7 @@ def _compose_user_msg(post_text: str, author_line: str, reasoning: dict,
             "",
             "The previous attempt was rejected. Fix exactly these problems, "
             "keeping the same insight and strategy:",
-            *(f"- {i}" for i in issues),
+            *(f"- {i}{_repair_hint(i)}" for i in issues),
         ]
     return "\n".join(parts)
 

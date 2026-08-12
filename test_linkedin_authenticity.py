@@ -516,6 +516,73 @@ check("I11 mindharom dicseret-minta van es cimkezve",
       len(_PRAISE_OPENING_PATTERNS) == 3
       and all(lbl for _, lbl in _PRAISE_OPENING_PATTERNS))
 
+
+# --- J) A PROMPT/KAPU ONELLENTMONDAS ES A JAVITO UTMUTATOK (v25) -------------
+# A MERT GYOKER-OK: a compose-prompt „Experience layer" blokkja PELDAKENT adta a
+# „We often see..."-t, amit a kapu FELTETEL NELKUL, az EGESZ kommentben tilt — a
+# tilalom pedig csak NYITASRA szolt („Never open with"). A modell tehat betartotta
+# a betűt (nem azzal nyitott), a 3. mondatba tette, es elbukott. Merve: az elso
+# kor elutasitasainak 35%-a ez az osztaly, es 33 extra LLM-hivast vitt el a ~75-bol
+# — a legdragabb hibaosztaly. A modell nem makacs volt, hanem azt tette, amit
+# kertunk tole.
+from responder.linkedin_engine import (  # noqa: E402
+    _CONSULTANT_VOICE_PATTERNS, _ISSUE_REPAIR_HINTS, _repair_hint,
+    _compose_user_msg,
+)
+
+# A prompt MAR NEM ajanlhatja peldakent azt, amit a kapu tilt.
+_j_bad = []
+for _p, _l in _CONSULTANT_VOICE_PATTERNS:
+    for _m in re.finditer(_p, _COMPOSE_PROMPT, re.IGNORECASE):
+        _ctx = _COMPOSE_PROMPT[max(0, _m.start() - 160):_m.start()]
+        if "equivalent of" in _ctx or "observational framing" in _ctx:
+            _j_bad.append(_m.group(0))
+check("J1 a prompt NEM adja peldakent a kapu altal tiltott keretezest",
+      not _j_bad, str(_j_bad))
+check("J2 a prompt kimondja, hogy a tilalom az EGESZ kommentre all",
+      "ANYWHERE IN THE COMMENT" in _COMPOSE_PROMPT)
+# SORTORES-FUGGETLEN kereses: a prompt tordelt szoveg, tehat a tobb szavas
+# kifejezesek szohatarai sorvegre eshetnek. A teszt elso valtozata pont ezen
+# bukott el („every\nvariant"), es egy jovobeli ujratordeles ugyanigy elbuktatna.
+_PROMPT_FLAT = " ".join(_COMPOSE_PROMPT.split()).lower()
+check("J3 a prompt megnevezi a valtozat-cserét is (we->I nem megoldas)",
+      "every variant built from" in _PROMPT_FLAT, _PROMPT_FLAT[:0])
+check("J4 a prompt ALTERNATIVAT ad, nem csak tilt (a mozdulat maga rendben van)",
+      "the move itself is fine" in _PROMPT_FLAT
+      and "ground it in the situation" in _PROMPT_FLAT)
+
+# A javito utmutatok: a cimke a TUNETET nevezi meg, az utmutato a SZABALYT.
+check("J5 a ket legdragabb osztalyhoz VAN utmutato",
+      _repair_hint("tanacsadoi hang (We often see/found)")
+      and _repair_hint("ismetlodo nyitas (...)"))
+check("J6 a tanacsadoi-hang utmutato kimondja, hogy a we->I csere nem segit",
+      "changes nothing" in _repair_hint("tanacsadoi hang (x)"))
+check("J7 az ismetlodo-nyitas utmutato MOZDULATOT ker, nem szinonimat",
+      "not just the words" in _repair_hint("ismetlodo nyitas (x)"))
+check("J8 ismeretlen sertes -> nincs utmutato (nem talalunk ki semmit)",
+      _repair_hint("valami egeszen mas serteš") == "")
+check("J9 a ket UJ kapunak (v22/v24) is van utmutatoja",
+      _repair_hint("homalyos, konkretum nelkul (...)")
+      and _repair_hint("dicsero nyitas (...)"))
+check("J10 minden utmutato-prefix letezo sertes-cimkere illeszkedik",
+      all(_repair_hint(p + " (x)") for p, _ in _ISSUE_REPAIR_HINTS),
+      str([p for p, _ in _ISSUE_REPAIR_HINTS if not _repair_hint(p + " (x)")]))
+
+# Az ELSO kor (issues=None) valtozatlan: az utmutatok CSAK ujrairaskor jelennek meg.
+_J_R = {"strategy": "field_experience", "insight": "x", "core_thesis": "y",
+        "missing_perspective": "incentives", "missing_perspective_reason": "z",
+        "conversation_intent": "professional_opinion", "discourse_level": "technical",
+        "expected_responder_role": "peer_practitioner",
+        "response_mode": "extend_one_insight", "human_temperature": "practical",
+        "topic_gravity": "BIM", "technical_depth": "practitioner"}
+check("J11 az ELSO kor uzenete valtozatlan (nincs benne utmutato)",
+      "->" not in _compose_user_msg("p", "", _J_R, False, None, opening="encountered")
+      .split("rejected")[0].split("Fix exactly")[0][-400:])
+_j_msg = _compose_user_msg("p", "", _J_R, False,
+                           ["tanacsadoi hang (We often see/found)"], opening="encountered")
+check("J12 az ujrairo kor uzenetebe bekerul a cimke ES az utmutato",
+      "tanacsadoi hang" in _j_msg and "changes nothing" in _j_msg)
+
 print()
 bad = 0
 for name, ok, detail in results:
